@@ -834,7 +834,6 @@ services:
     network_mode: host
     volumes:
       - /var/lib/marzban:/var/lib/marzban
-      - /opt/marzban/v2ray.py.live:/code/app/subscription/v2ray.py
       - /var/lib/marzban/logs:/var/lib/marzban-node
     depends_on:
       mysql:
