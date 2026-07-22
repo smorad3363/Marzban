@@ -834,13 +834,14 @@ services:
     network_mode: host
     volumes:
       - /var/lib/marzban:/var/lib/marzban
+      - /opt/marzban/v2ray.py.live:/code/app/subscription/v2ray.py
       - /var/lib/marzban/logs:/var/lib/marzban-node
     depends_on:
       mysql:
         condition: service_healthy
 
   mysql:
-    image: mysql:lts
+    image: mysql:8.0
     env_file: .env
     network_mode: host
     restart: always
@@ -860,12 +861,11 @@ services:
       - --host-cache-size=0                       # Disables host cache to prevent DNS issues
       - --innodb-open-files=1024                  # Sets the limit for InnoDB open files
       - --innodb-buffer-pool-size=256M            # Allocates buffer pool size for InnoDB
-      - --innodb-log-file-size=64M                # Sets InnoDB log file size to balance log retention and performance
-      - --innodb-log-files-in-group=2             # Uses two log files to balance recovery and disk I/O
       - --general_log=0                           # Disables general query log for lower disk usage
       - --slow_query_log=1                        # Enables slow query log for performance analysis
       - --slow_query_log_file=/var/lib/mysql/slow.log # Logs slow queries for troubleshooting
       - --long_query_time=2                       # Defines slow query threshold as 2 seconds
+      - --skip-log-bin                            # Disables binary logging entirely
     volumes:
       - /var/lib/marzban/mysql:/var/lib/mysql
     healthcheck:
@@ -874,6 +874,18 @@ services:
       interval: 5s
       timeout: 5s
       retries: 55
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin:latest
+    restart: always
+    env_file: .env
+    network_mode: host
+    environment:
+      PMA_HOST: 127.0.0.1
+      APACHE_PORT: 8010
+      UPLOAD_LIMIT: 1024M
+    depends_on:
+      - mysql
       
 EOF
         echo "----------------------------"
