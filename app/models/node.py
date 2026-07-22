@@ -22,6 +22,7 @@ class Node(BaseModel):
     port: int = 62050
     api_port: int = 62051
     usage_coefficient: float = Field(gt=0, default=1.0)
+    watchdog_enabled: bool = True
 
 
 class NodeCreate(Node):
@@ -45,6 +46,7 @@ class NodeModify(Node):
     api_port: Optional[int] = Field(None, nullable=True)
     status: Optional[NodeStatus] = Field(None, nullable=True)
     usage_coefficient: Optional[float] = Field(None, nullable=True)
+    watchdog_enabled: Optional[bool] = Field(None, nullable=True)
     model_config = ConfigDict(json_schema_extra={
         "example": {
             "name": "DE node",
@@ -74,3 +76,21 @@ class NodeUsageResponse(BaseModel):
 
 class NodesUsageResponse(BaseModel):
     usages: List[NodeUsageResponse]
+
+
+class NodeWatchdogSettingsUpdate(BaseModel):
+    enabled: bool = False
+    telegram_bot_token: Optional[str] = Field(None, min_length=1, max_length=256)
+    telegram_chat_id: Optional[str] = Field(None, max_length=64)
+    check_interval: int = Field(15, ge=5, le=3600)
+    backoff_cap: int = Field(600, ge=30, le=86400)
+    remind_every: int = Field(1800, ge=60, le=604800)
+
+
+class NodeWatchdogSettingsResponse(BaseModel):
+    enabled: bool
+    telegram_bot_token_configured: bool
+    telegram_chat_id: Optional[str] = None
+    check_interval: int
+    backoff_cap: int
+    remind_every: int

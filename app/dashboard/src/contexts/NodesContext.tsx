@@ -24,6 +24,7 @@ export const NodeSchema = z.object({
   message: z.string().nullable().optional(),
   add_as_new_host: z.boolean().optional(),
   usage_coefficient: z.number().or(z.string().transform((v) => parseFloat(v))),
+  watchdog_enabled: z.boolean().optional(),
 });
 
 export type NodeType = z.infer<typeof NodeSchema>;
@@ -35,7 +36,17 @@ export const getNodeDefaultValues = (): NodeType => ({
   api_port: 62051,
   xray_version: "",
   usage_coefficient: 1,
+  watchdog_enabled: true,
 });
+
+export type NodeWatchdogSettings = {
+  enabled: boolean;
+  telegram_bot_token_configured: boolean;
+  telegram_chat_id: string | null;
+  check_interval: number;
+  backoff_cap: number;
+  remind_every: number;
+};
 
 export const FetchNodesQueryKey = "fetch-nodes-query-key";
 

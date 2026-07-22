@@ -17,6 +17,7 @@ from app.db.models import (
     AdminUsageLogs,
     NextPlan,
     Node,
+    NodeWatchdogSettings,
     NodeUsage,
     NodeUserUsage,
     NotificationReminder,
@@ -30,7 +31,8 @@ from app.db.models import (
     UserUsageResetLogs,
 )
 from app.models.admin import AdminCreate, AdminModify, AdminPartialModify
-from app.models.node import NodeCreate, NodeModify, NodeStatus, NodeUsageResponse
+from app.models.node import (NodeCreate, NodeModify, NodeStatus,
+                             NodeUsageResponse, NodeWatchdogSettingsUpdate)
 from app.models.proxy import ProxyHost as ProxyHostModify
 from app.models.user import (
     ReminderType,
@@ -1307,7 +1309,9 @@ def create_node(db: Session, node: NodeCreate) -> Node:
     dbnode = Node(name=node.name,
                   address=node.address,
                   port=node.port,
-                  api_port=node.api_port)
+                  api_port=node.api_port,
+                  usage_coefficient=node.usage_coefficient,
+                  watchdog_enabled=node.watchdog_enabled)
 
     db.add(dbnode)
     db.commit()
@@ -1365,9 +1369,37 @@ def update_node(db: Session, dbnode: Node, modify: NodeModify) -> Node:
     if modify.usage_coefficient:
         dbnode.usage_coefficient = modify.usage_coefficient
 
+    if modify.watchdog_enabled is not None:
+        dbnode.watchdog_enabled = modify.watchdog_enabled
+
     db.commit()
     db.refresh(dbnode)
     return dbnode
+
+
+def get_node_watchdog_settings(db: Session) -> NodeWatchdogSettings:
+    settings = db.query(NodeWatchdogSettings).filter(NodeWatchdogSettings.id == 1).first()
+    if settings is None:
+        settings = NodeWatchdogSettings(id=1)
+        db.add(settings)
+        db.commit()
+        db.refresh(settings)
+    return settings
+
+
+def update_node_watchdog_settings(
+        db: Session, update: NodeWatchdogSettingsUpdate) -> NodeWatchdogSettings:
+    settings = get_node_watchdog_settings(db)
+    settings.enabled = update.enabled
+    settings.telegram_chat_id = update.telegram_chat_id or None
+    settings.check_interval = update.check_interval
+    settings.backoff_cap = update.backoff_cap
+    settings.remind_every = update.remind_every
+    if update.telegram_bot_token:
+        settings.telegram_bot_token = update.telegram_bot_token
+    db.commit()
+    db.refresh(settings)
+    return settings
 
 
 def update_node_status(db: Session, dbnode: Node, status: NodeStatus, message: str = None, version: str = None) -> Node:

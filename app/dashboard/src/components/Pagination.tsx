@@ -98,6 +98,7 @@ export const Pagination: FC = () => {
     onFilterChange({
       ...filters,
       limit: parseInt(e.target.value),
+      offset: 0,
     });
     setUsersPerPageLimitSize(e.target.value);
   };
@@ -124,8 +125,10 @@ export const Pagination: FC = () => {
             rounded="md"
           >
             <option>10</option>
-            <option>20</option>
-            <option>30</option>
+            <option>100</option>
+            <option>250</option>
+            <option>500</option>
+            <option>1000</option>
           </Select>
           <Text whiteSpace={"nowrap"} fontSize="sm">
             {t("itemsPerPage")}

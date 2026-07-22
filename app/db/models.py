@@ -309,6 +309,19 @@ class Node(Base):
     user_usages = relationship("NodeUserUsage", back_populates="node", cascade="all, delete-orphan")
     usages = relationship("NodeUsage", back_populates="node", cascade="all, delete-orphan")
     usage_coefficient = Column(Float, nullable=False, server_default=text("1.0"), default=1)
+    watchdog_enabled = Column(Boolean, nullable=False, server_default=text("1"), default=True)
+
+
+class NodeWatchdogSettings(Base):
+    __tablename__ = "node_watchdog_settings"
+
+    id = Column(Integer, primary_key=True, default=1)
+    enabled = Column(Boolean, nullable=False, default=False)
+    telegram_bot_token = Column(String(256), nullable=True)
+    telegram_chat_id = Column(String(64), nullable=True)
+    check_interval = Column(Integer, nullable=False, default=15)
+    backoff_cap = Column(Integer, nullable=False, default=600)
+    remind_every = Column(Integer, nullable=False, default=1800)
 
 
 class NodeUserUsage(Base):

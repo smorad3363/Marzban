@@ -17,7 +17,10 @@ from app.models.node import (
     NodeSettings,
     NodeStatus,
     NodesUsageResponse,
+    NodeWatchdogSettingsResponse,
+    NodeWatchdogSettingsUpdate,
 )
+from app.utils.node_watchdog import send_telegram_message
 from app.models.proxy import ProxyHost
 from app.utils import responses
 
@@ -45,6 +48,56 @@ def get_node_settings(
     """Retrieve the current node settings, including TLS certificate."""
     tls = crud.get_tls_certificate(db)
     return NodeSettings(certificate=tls.certificate)
+
+
+def _watchdog_response(settings) -> NodeWatchdogSettingsResponse:
+    return NodeWatchdogSettingsResponse(
+        enabled=settings.enabled,
+        telegram_bot_token_configured=bool(settings.telegram_bot_token),
+        telegram_chat_id=settings.telegram_chat_id,
+        check_interval=settings.check_interval,
+        backoff_cap=settings.backoff_cap,
+        remind_every=settings.remind_every,
+    )
+
+
+@router.get("/node/watchdog/settings", response_model=NodeWatchdogSettingsResponse)
+def get_watchdog_settings(
+    db: Session = Depends(get_db), _: Admin = Depends(Admin.check_sudo_admin)
+):
+    return _watchdog_response(crud.get_node_watchdog_settings(db))
+
+
+@router.put("/node/watchdog/settings", response_model=NodeWatchdogSettingsResponse)
+def set_watchdog_settings(
+    update: NodeWatchdogSettingsUpdate,
+    db: Session = Depends(get_db),
+    _: Admin = Depends(Admin.check_sudo_admin),
+):
+    current = crud.get_node_watchdog_settings(db)
+    if update.enabled and not (update.telegram_bot_token or current.telegram_bot_token):
+        raise HTTPException(status_code=422, detail={"telegram_bot_token": "Bot token is required"})
+    if update.enabled and not update.telegram_chat_id:
+        raise HTTPException(status_code=422, detail={"telegram_chat_id": "Chat ID is required"})
+    return _watchdog_response(crud.update_node_watchdog_settings(db, update))
+
+
+@router.post("/node/watchdog/test")
+def test_watchdog_notification(
+    db: Session = Depends(get_db), _: Admin = Depends(Admin.check_sudo_admin)
+):
+    settings = crud.get_node_watchdog_settings(db)
+    if not settings.telegram_bot_token or not settings.telegram_chat_id:
+        raise HTTPException(status_code=422, detail="Configure the Telegram bot token and Chat ID first")
+    try:
+        send_telegram_message(
+            settings.telegram_bot_token,
+            settings.telegram_chat_id,
+            "✅ <b>Marzban watchdog</b> is configured correctly.",
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    return {"detail": "Test notification sent"}
 
 
 @router.post("/node", response_model=NodeResponse, responses={409: responses._409})

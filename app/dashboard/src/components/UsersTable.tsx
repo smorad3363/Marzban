@@ -9,7 +9,6 @@ import {
   ExpandedIndex,
   HStack,
   IconButton,
-  Select,
   Slider,
   SliderFilledTrack,
   SliderProps,
@@ -229,12 +228,6 @@ export const UsersTable: FC<UsersTableProps> = (props) => {
       sort: newSort,
     });
   };
-  const handleStatusFilter = (e: any) => {
-    onFilterChange({
-      status: e.target.value.length > 0 ? e.target.value : undefined,
-    });
-  };
-
   const toggleAccordion = (index: number) => {
     setSelectedRow(index === selectedRow ? undefined : index);
   };
@@ -272,47 +265,7 @@ export const UsersTable: FC<UsersTableProps> = (props) => {
                 w="140px"
                 cursor={"pointer"}
               >
-                <HStack spacing={0} position="relative">
-                  <Text
-                    position="absolute"
-                    _dark={{
-                      bg: "gray.750",
-                    }}
-                    _light={{
-                      bg: "#F9FAFB",
-                    }}
-                    userSelect="none"
-                    pointerEvents="none"
-                    zIndex={1}
-                    w="100%"
-                  >
-                    {t("usersTable.status")}
-                    {filters.status ? ": " + filters.status : ""}
-                  </Text>
-                  <Select
-                    value={filters.sort}
-                    fontSize="xs"
-                    fontWeight="extrabold"
-                    textTransform="uppercase"
-                    cursor="pointer"
-                    p={0}
-                    border={0}
-                    h="auto"
-                    w="auto"
-                    icon={<></>}
-                    _focusVisible={{
-                      border: "0 !important",
-                    }}
-                    onChange={handleStatusFilter}
-                  >
-                    <option></option>
-                    <option>active</option>
-                    <option>on_hold</option>
-                    <option>disabled</option>
-                    <option>limited</option>
-                    <option>expired</option>
-                  </Select>
-                </HStack>
+                <Text>{t("usersTable.status")}</Text>
               </Th>
               <Th
                 position="sticky"
@@ -511,51 +464,13 @@ export const UsersTable: FC<UsersTableProps> = (props) => {
               minW="150px"
               cursor={"pointer"}
             >
-              <HStack position="relative" gap={"5px"}>
-                <Text
-                  _dark={{
-                    bg: "gray.750",
-                  }}
-                  _light={{
-                    bg: "#F9FAFB",
-                  }}
-                  userSelect="none"
-                  pointerEvents="none"
-                  zIndex={1}
-                >
-                  {t("usersTable.status")}
-                  {filters.status ? ": " + filters.status : ""}
-                </Text>
-                <Text>/</Text>
-                <Sort sort={filters.sort} column="expire" />
+              <HStack gap={2}>
+                <Text>{t("usersTable.status")}</Text>
+                <Text color="gray.400">/</Text>
                 <HStack onClick={handleSort.bind(null, "expire")}>
-                  <Text>Sort by expire</Text>
+                  <Text>{t("usersTable.expiration")}</Text>
+                  <Sort sort={filters.sort} column="expire" />
                 </HStack>
-                <Select
-                  fontSize="xs"
-                  fontWeight="extrabold"
-                  textTransform="uppercase"
-                  cursor="pointer"
-                  position={"absolute"}
-                  p={0}
-                  left={"-40px"}
-                  border={0}
-                  h="auto"
-                  w="auto"
-                  icon={<></>}
-                  _focusVisible={{
-                    border: "0 !important",
-                  }}
-                  value={filters.sort}
-                  onChange={handleStatusFilter}
-                >
-                  <option></option>
-                  <option>active</option>
-                  <option>on_hold</option>
-                  <option>disabled</option>
-                  <option>limited</option>
-                  <option>expired</option>
-                </Select>
               </HStack>
             </Th>
             <Th

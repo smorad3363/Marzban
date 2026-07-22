@@ -16,6 +16,7 @@ import {
   Collapse,
   FormControl,
   FormLabel,
+  Grid,
   HStack,
   IconButton,
   Modal,
@@ -42,10 +43,11 @@ import {
   getNodeDefaultValues,
   NodeSchema,
   NodeType,
+  NodeWatchdogSettings,
   useNodes,
   useNodesQuery,
 } from "contexts/NodesContext";
-import { FC, ReactNode, useState } from "react";
+import { FC, ReactNode, useEffect, useState } from "react";
 import { Controller, useForm, UseFormReturn } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import {
@@ -94,6 +96,173 @@ const PlusIcon = chakra(HeroIconPlusIcon, {
     strokeWidth: 2,
   },
 });
+
+const WatchdogSettings: FC<{ toggleAccordion: () => void }> = ({
+  toggleAccordion,
+}) => {
+  const { t } = useTranslation();
+  const toast = useToast();
+  const [settings, setSettings] = useState<NodeWatchdogSettings | null>(null);
+  const [token, setToken] = useState("");
+  const { data, isLoading } = useQuery<NodeWatchdogSettings>({
+    queryKey: "node-watchdog-settings",
+    queryFn: () => fetch("/node/watchdog/settings"),
+  });
+
+  useEffect(() => {
+    if (data) setSettings(data);
+  }, [data]);
+
+  const save = useMutation(
+    () =>
+      fetch<NodeWatchdogSettings>("/node/watchdog/settings", {
+        method: "PUT",
+        body: {
+          ...settings,
+          telegram_bot_token: token || undefined,
+        },
+      }),
+    {
+      onSuccess: (saved) => {
+        setSettings(saved);
+        setToken("");
+        generateSuccessMessage(t("nodes.watchdogSaved"), toast);
+      },
+      onError: (e) => {
+        generateErrorMessage(e, toast);
+      },
+    }
+  );
+  const test = useMutation(
+    () => fetch("/node/watchdog/test", { method: "POST" }),
+    {
+      onSuccess: () => {
+        generateSuccessMessage(t("nodes.watchdogTestSent"), toast);
+      },
+      onError: (e) => {
+        generateErrorMessage(e, toast);
+      },
+    }
+  );
+
+  const setNumber = (key: keyof NodeWatchdogSettings, value: string) => {
+    setSettings((current) =>
+      current ? { ...current, [key]: Number(value) } : current
+    );
+  };
+
+  return (
+    <AccordionItem
+      border="1px solid"
+      borderColor={settings?.enabled ? "green.300" : "gray.200"}
+      _dark={{ borderColor: settings?.enabled ? "green.600" : "gray.600" }}
+      borderRadius="4px"
+      p={1}
+      w="full"
+    >
+      <AccordionButton px={2} borderRadius="3px" onClick={toggleAccordion}>
+        <HStack w="full" justify="space-between" pr={2}>
+          <Box textAlign="start">
+            <Text fontWeight="semibold" fontSize="sm">
+              {t("nodes.watchdog")}
+            </Text>
+            <Text fontSize="xs" color="gray.500">
+              {t("nodes.watchdogDescription")}
+            </Text>
+          </Box>
+          <Badge colorScheme={settings?.enabled ? "green" : "gray"}>
+            {settings?.enabled ? t("active") : t("disabled")}
+          </Badge>
+        </HStack>
+        <AccordionIcon />
+      </AccordionButton>
+      <AccordionPanel px={2} py={4}>
+        {isLoading || !settings ? (
+          <Text fontSize="sm">{t("hostsDialog.loading")}</Text>
+        ) : (
+          <VStack spacing={4} align="stretch">
+            <HStack justify="space-between">
+              <Box>
+                <Text fontSize="sm" fontWeight="medium">
+                  {t("nodes.watchdogEnabled")}
+                </Text>
+                <Text fontSize="xs" color="gray.500">
+                  {t("nodes.watchdogEnabledHint")}
+                </Text>
+              </Box>
+              <Switch
+                colorScheme="green"
+                isChecked={settings.enabled}
+                onChange={(e) =>
+                  setSettings({ ...settings, enabled: e.target.checked })
+                }
+              />
+            </HStack>
+            <CustomInput
+              label={t("nodes.telegramBotToken")}
+              type="password"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              placeholder={
+                settings.telegram_bot_token_configured
+                  ? t("nodes.tokenConfigured")
+                  : "123456:ABC..."
+              }
+            />
+            <CustomInput
+              label={t("nodes.telegramChatId")}
+              value={settings.telegram_chat_id || ""}
+              onChange={(e) =>
+                setSettings({ ...settings, telegram_chat_id: e.target.value })
+              }
+              placeholder="-1001234567890"
+            />
+            <Grid templateColumns="repeat(3, 1fr)" gap={2}>
+              <CustomInput
+                label={t("nodes.checkInterval")}
+                type="number"
+                value={String(settings.check_interval)}
+                onChange={(v) => setNumber("check_interval", v)}
+              />
+              <CustomInput
+                label={t("nodes.backoffCap")}
+                type="number"
+                value={String(settings.backoff_cap)}
+                onChange={(v) => setNumber("backoff_cap", v)}
+              />
+              <CustomInput
+                label={t("nodes.remindEvery")}
+                type="number"
+                value={String(settings.remind_every)}
+                onChange={(v) => setNumber("remind_every", v)}
+              />
+            </Grid>
+            <HStack>
+              <Button
+                flex="1"
+                size="sm"
+                variant="outline"
+                onClick={() => test.mutate()}
+                isLoading={test.isLoading}
+              >
+                {t("nodes.sendTest")}
+              </Button>
+              <Button
+                flex="1"
+                size="sm"
+                colorScheme="primary"
+                onClick={() => save.mutate()}
+                isLoading={save.isLoading}
+              >
+                {t("nodes.saveWatchdog")}
+              </Button>
+            </HStack>
+          </VStack>
+        )}
+      </AccordionPanel>
+    </AccordionItem>
+  );
+};
 
 type AccordionInboundType = {
   toggleAccordion: () => void;
@@ -517,6 +686,27 @@ const NodeForm: NodeFormType = ({
             </Checkbox>
           </FormControl>
         )}
+        <FormControl py={1}>
+          <Controller
+            name="watchdog_enabled"
+            control={form.control}
+            render={({ field }) => (
+              <HStack justify="space-between" w="full">
+                <Box>
+                  <FormLabel m={0}>{t("nodes.monitorThisNode")}</FormLabel>
+                  <Text fontSize="xs" color="gray.500">
+                    {t("nodes.monitorThisNodeHint")}
+                  </Text>
+                </Box>
+                <Switch
+                  colorScheme="green"
+                  isChecked={field.value !== false}
+                  onChange={field.onChange}
+                />
+              </HStack>
+            )}
+          />
+        </FormControl>
         <HStack w="full">
           {btnLeftAdornment}
           <Button
@@ -579,12 +769,13 @@ export const NodesDialog: FC = () => {
               index={Object.keys(openAccordions).map((i) => parseInt(i))}
             >
               <VStack w="full">
+                <WatchdogSettings toggleAccordion={() => toggleAccordion(0)} />
                 {!isLoading &&
                   nodes &&
                   nodes.map((node, index) => {
                     return (
                       <NodeAccordion
-                        toggleAccordion={() => toggleAccordion(index)}
+                        toggleAccordion={() => toggleAccordion(index + 1)}
                         key={node.name}
                         node={node}
                       />
@@ -592,7 +783,7 @@ export const NodesDialog: FC = () => {
                   })}
 
                 <AddNodeForm
-                  toggleAccordion={() => toggleAccordion((nodes || []).length)}
+                  toggleAccordion={() => toggleAccordion((nodes || []).length + 1)}
                   resetAccordions={() => setOpenAccordions({})}
                 />
               </VStack>

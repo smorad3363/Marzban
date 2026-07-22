@@ -10,7 +10,9 @@ import {
   InputGroup,
   InputLeftElement,
   InputRightElement,
+  Select,
   Spinner,
+  Text,
 } from "@chakra-ui/react";
 import {
   ArrowPathIcon,
@@ -58,6 +60,17 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
       ...filters,
       offset: 0,
       search: "",
+    });
+  };
+  const changeSort = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    onFilterChange({ sort: e.target.value, offset: 0 });
+  };
+  const changeStatus = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    onFilterChange({
+      status: e.target.value
+        ? (e.target.value as typeof filters.status)
+        : undefined,
+      offset: 0,
     });
   };
   return (
@@ -130,6 +143,58 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
           >
             {t("createUser")}
           </Button>
+        </HStack>
+      </GridItem>
+      <GridItem
+        colSpan={{ base: 1, md: 4, lg: 3 }}
+        order={3}
+        borderTop="1px solid"
+        borderColor="light-border"
+        pt={3}
+      >
+        <HStack
+          spacing={3}
+          justify="flex-end"
+          flexWrap="wrap"
+          fontSize="sm"
+        >
+          <Text color="gray.500" fontWeight="medium" whiteSpace="nowrap">
+            {t("usersTable.organizeUsers")}
+          </Text>
+          <Select
+            aria-label={t("usersTable.filterStatus")}
+            value={filters.status || ""}
+            onChange={changeStatus}
+            size="sm"
+            rounded="md"
+            w={{ base: "full", sm: "170px" }}
+            bg="chakra-body-bg"
+          >
+            <option value="">{t("usersTable.allStatuses")}</option>
+            <option value="active">{t("active")}</option>
+            <option value="on_hold">{t("on_hold")}</option>
+            <option value="disabled">{t("disabled")}</option>
+            <option value="limited">{t("limited")}</option>
+            <option value="expired">{t("expired")}</option>
+          </Select>
+          <Select
+            aria-label={t("usersTable.sortBy")}
+            value={filters.sort}
+            onChange={changeSort}
+            size="sm"
+            rounded="md"
+            w={{ base: "full", sm: "220px" }}
+            bg="chakra-body-bg"
+          >
+            <option value="-created_at">{t("usersTable.newestFirst")}</option>
+            <option value="created_at">{t("usersTable.oldestFirst")}</option>
+            <option value="username">{t("usersTable.usernameAZ")}</option>
+            <option value="-username">{t("usersTable.usernameZA")}</option>
+            <option value="-used_traffic">{t("usersTable.usageHighLow")}</option>
+            <option value="used_traffic">{t("usersTable.usageLowHigh")}</option>
+            <option value="expire">{t("usersTable.expireSoon")}</option>
+            <option value="-expire">{t("usersTable.expireLate")}</option>
+          </Select>
         </HStack>
       </GridItem>
     </Grid>
