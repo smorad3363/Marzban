@@ -2,24 +2,42 @@ import { extendTheme } from "@chakra-ui/react";
 export const theme = extendTheme({
   shadows: { outline: "0 0 0 2px var(--chakra-colors-primary-200)" },
   fonts: {
-    body: `Inter,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Oxygen,Ubuntu,Cantarell,Fira Sans,Droid Sans,Helvetica Neue,sans-serif`,
+    heading: `Manrope, Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif`,
+    body: `Manrope, Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif`,
+    mono: `IBM Plex Mono, SFMono-Regular, Consolas, monospace`,
   },
   colors: {
-    "light-border": "#d2d2d4",
+    "light-border": "#d8e3ec",
     primary: {
-      50: "#9cb7f2",
-      100: "#88a9ef",
-      200: "#749aec",
-      300: "#618ce9",
-      400: "#4d7de7",
-      500: "#396fe4",
-      600: "#3364cd",
-      700: "#2e59b6",
-      800: "#284ea0",
-      900: "#224389",
+      50: "#ecfeff",
+      100: "#cffafe",
+      200: "#a5f3fc",
+      300: "#67e8f9",
+      400: "#22d3ee",
+      500: "#06b6d4",
+      600: "#0891b2",
+      700: "#0e7490",
+      800: "#155e75",
+      900: "#164e63",
     },
     gray: {
-      750: "#222C3B",
+      750: "#172235",
+    },
+  },
+  styles: {
+    global: {
+      body: {
+        bg: "#f4f8fb",
+        color: "#132238",
+        _dark: {
+          bg: "#07111f",
+          color: "gray.100",
+        },
+      },
+      "::selection": {
+        bg: "primary.200",
+        color: "gray.900",
+      },
     },
   },
   components: {

@@ -23,8 +23,14 @@ export const Dashboard: FC = () => {
     fetchInbounds();
   }, []);
   return (
-    <VStack justifyContent="space-between" minH="100vh" p="6" rowGap={4}>
-      <Box w="full">
+    <VStack
+      justifyContent="space-between"
+      minH="100vh"
+      px={{ base: 4, md: 6, xl: 8 }}
+      py={6}
+      rowGap={6}
+    >
+      <Box w="full" maxW="1600px" mx="auto">
         <Header />
         <Statistics mt="4" />
         <Filters />

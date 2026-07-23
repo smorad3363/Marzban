@@ -457,7 +457,7 @@ const AddNodeForm: FC<AddNodeFormType> = ({
           gap={1}
         >
           <PlusIcon display={"inline-block"} />{" "}
-          <span>{t("nodes.addNewMarzbanNode")}</span>
+          <span>{t("nodes.addNewNode")}</span>
         </Text>
       </AccordionButton>
       <AccordionPanel px={2} py={4}>
@@ -600,7 +600,7 @@ const NodeForm: NodeFormType = ({
             <CustomInput
               label={t("nodes.nodeName")}
               size="sm"
-              placeholder="Marzban-S2"
+              placeholder="Edge-Node-2"
               {...form.register("name")}
               error={form.formState?.errors?.name?.message}
             />
