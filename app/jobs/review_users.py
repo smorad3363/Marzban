@@ -48,7 +48,10 @@ def reset_user_by_next_report(db: Session, user: "User"):
 
     xray.operations.update_user(user)
 
-    report.user_data_reset_by_next(user=UserResponse.model_validate(user), user_admin=user.admin)
+    report.user_data_reset_by_next(
+        user=UserResponse.model_validate(user),
+        user_admin=user.current_owner,
+    )
 
 
 def review():
@@ -83,8 +86,12 @@ def review():
             xray.operations.remove_user(user)
             update_user_status(db, user, status)
 
-            report.status_change(username=user.username, status=status,
-                                 user=UserResponse.model_validate(user), user_admin=user.admin)
+            report.status_change(
+                username=user.username,
+                status=status,
+                user=UserResponse.model_validate(user),
+                user_admin=user.current_owner,
+            )
 
             logger.info(f"User \"{user.username}\" status changed to {status}")
 
@@ -109,8 +116,12 @@ def review():
             update_user_status(db, user, status)
             start_user_expire(db, user)
 
-            report.status_change(username=user.username, status=status,
-                                 user=UserResponse.model_validate(user), user_admin=user.admin)
+            report.status_change(
+                username=user.username,
+                status=status,
+                user=UserResponse.model_validate(user),
+                user_admin=user.current_owner,
+            )
 
             logger.info(f"User \"{user.username}\" status changed to {status}")
 

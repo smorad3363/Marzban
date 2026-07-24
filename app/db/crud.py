@@ -48,6 +48,34 @@ from app.utils.helpers import calculate_expiration_days, calculate_usage_percent
 from config import NOTIFY_DAYS_LEFT, NOTIFY_REACHED_USAGE_PERCENT, USERS_AUTODELETE_DAYS
 
 
+class OwnershipIdentityError(ValueError):
+    pass
+
+
+class OwnershipConsistencyError(ValueError):
+    pass
+
+
+def _require_database_owner(db: Session, admin: Admin) -> Admin:
+    if admin is None or admin.id is None:
+        raise OwnershipIdentityError(
+            "User ownership requires a durable database-backed admin identity"
+        )
+    persistent_admin = db.get(Admin, admin.id)
+    if persistent_admin is None:
+        raise OwnershipIdentityError(
+            "User ownership requires a durable database-backed admin identity"
+        )
+    return persistent_admin
+
+
+def _validate_current_owner(dbuser: User) -> None:
+    if dbuser.admin_id != dbuser.owner_admin_id:
+        raise OwnershipConsistencyError(
+            "admin_id and owner_admin_id must identify the same current owner"
+        )
+
+
 def add_default_host(db: Session, inbound: ProxyInbound):
     """
     Adds a default host to a proxy inbound.
@@ -178,7 +206,13 @@ def get_user_queryset(db: Session) -> Query:
     Returns:
         Query: Base user query.
     """
-    return db.query(User).options(joinedload(User.admin)).options(joinedload(User.next_plan))
+    return (
+        db.query(User)
+        .options(joinedload(User.admin))
+        .options(joinedload(User.owner_admin))
+        .options(joinedload(User.created_by_admin))
+        .options(joinedload(User.next_plan))
+    )
 
 
 def get_user(db: Session, username: str) -> Optional[User]:
@@ -274,10 +308,11 @@ def get_users(db: Session,
             query = query.filter(User.data_limit_reset_strategy == reset_strategy)
 
     if admin:
-        query = query.filter(User.admin == admin)
+        query = query.filter(User.current_owner_id == admin.id)
 
     if admins:
-        query = query.filter(User.admin.has(Admin.username.in_(admins)))
+        owner_ids = db.query(Admin.id).filter(Admin.username.in_(admins))
+        query = query.filter(User.current_owner_id.in_(owner_ids))
 
     if return_with_count:
         count = query.count()
@@ -350,13 +385,13 @@ def get_users_count(db: Session, status: UserStatus = None, admin: Admin = None)
     """
     query = db.query(User.id)
     if admin:
-        query = query.filter(User.admin == admin)
+        query = query.filter(User.current_owner_id == admin.id)
     if status:
         query = query.filter(User.status == status)
     return query.count()
 
 
-def create_user(db: Session, user: UserCreate, admin: Admin = None) -> User:
+def create_user(db: Session, user: UserCreate, admin: Admin) -> User:
     """
     Creates a new user with provided details.
 
@@ -368,6 +403,7 @@ def create_user(db: Session, user: UserCreate, admin: Admin = None) -> User:
     Returns:
         User: The created user object.
     """
+    admin = _require_database_owner(db, admin)
     excluded_inbounds_tags = user.excluded_inbounds
     proxies = []
     for proxy_type, settings in user.proxies.items():
@@ -387,6 +423,8 @@ def create_user(db: Session, user: UserCreate, admin: Admin = None) -> User:
         data_limit=(user.data_limit or None),
         expire=(user.expire or None),
         admin=admin,
+        created_by_admin=admin,
+        owner_admin=admin,
         data_limit_reset_strategy=user.data_limit_reset_strategy,
         note=user.note,
         on_hold_expire_duration=(user.on_hold_expire_duration or None),
@@ -400,6 +438,8 @@ def create_user(db: Session, user: UserCreate, admin: Admin = None) -> User:
         ) if user.next_plan else None
     )
     db.add(dbuser)
+    db.flush()
+    _validate_current_owner(dbuser)
     db.commit()
     db.refresh(dbuser)
     return dbuser
@@ -659,7 +699,7 @@ def reset_all_users_data_usage(db: Session, admin: Optional[Admin] = None):
     query = get_user_queryset(db)
 
     if admin:
-        query = query.filter(User.admin == admin)
+        query = query.filter(User.current_owner_id == admin.id)
 
     for dbuser in query.all():
         dbuser.used_traffic = 0
@@ -685,7 +725,7 @@ def disable_all_active_users(db: Session, admin: Optional[Admin] = None):
     """
     query = db.query(User).filter(User.status.in_((UserStatus.active, UserStatus.on_hold)))
     if admin:
-        query = query.filter(User.admin == admin)
+        query = query.filter(User.current_owner_id == admin.id)
 
     query.update({User.status: UserStatus.disabled, User.last_status_change: datetime.utcnow()}, synchronize_session=False)
 
@@ -707,8 +747,8 @@ def activate_all_disabled_users(db: Session, admin: Optional[Admin] = None):
                 None), User.on_hold_expire_duration.isnot(None), User.online_at.is_(None)
         ))
     if admin:
-        query_for_active_users = query_for_active_users.filter(User.admin == admin)
-        query_for_on_hold_users = query_for_on_hold_users.filter(User.admin == admin)
+        query_for_active_users = query_for_active_users.filter(User.current_owner_id == admin.id)
+        query_for_on_hold_users = query_for_on_hold_users.filter(User.current_owner_id == admin.id)
 
     query_for_on_hold_users.update(
         {User.status: UserStatus.on_hold, User.last_status_change: datetime.utcnow()}, synchronize_session=False)
@@ -743,7 +783,7 @@ def autodelete_expired_users(db: Session,
     ).filter(
         auto_delete >= 0,  # Negative values prevent auto-deletion
         User.status.in_(target_status),
-    ).options(joinedload(User.admin))
+    ).options(joinedload(User.admin), joinedload(User.owner_admin))
 
     # TODO: Handle time filter in query itself (NOTE: Be careful with sqlite's strange datetime handling)
     expired_users = [
@@ -838,7 +878,11 @@ def set_owner(db: Session, dbuser: User, admin: Admin) -> User:
     Returns:
         User: The updated user object.
     """
+    admin = _require_database_owner(db, admin)
     dbuser.admin = admin
+    dbuser.owner_admin = admin
+    db.flush()
+    _validate_current_owner(dbuser)
     db.commit()
     db.refresh(dbuser)
     return dbuser

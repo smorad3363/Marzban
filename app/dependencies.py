@@ -91,7 +91,8 @@ def get_validated_user(
     if not dbuser:
         raise HTTPException(status_code=404, detail="User not found")
 
-    if not (admin.is_sudo or (dbuser.admin and dbuser.admin.username == admin.username)):
+    current_owner = dbuser.current_owner
+    if not (admin.is_sudo or (current_owner and current_owner.username == admin.username)):
         raise HTTPException(status_code=403, detail="You're not allowed")
 
     return dbuser

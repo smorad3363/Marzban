@@ -14,9 +14,16 @@ def remove_expired_users():
         deleted_users = crud.autodelete_expired_users(db, USER_AUTODELETE_INCLUDE_LIMITED_ACCOUNTS)
 
         for user in deleted_users:
-            report.user_deleted(user.username, SYSTEM_ADMIN,
-                                user_admin=Admin.model_validate(user.admin) if user.admin else None
-                                )
+            current_owner = user.current_owner
+            report.user_deleted(
+                user.username,
+                SYSTEM_ADMIN,
+                user_admin=(
+                    Admin.model_validate(current_owner)
+                    if current_owner
+                    else None
+                ),
+            )
             logger.log(logging.INFO, "Expired user %s deleted." % user.username)
 
 

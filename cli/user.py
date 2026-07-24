@@ -47,7 +47,7 @@ def list_users(
                     readable_size(user.data_limit) if user.data_limit else "Unlimited",
                     user.data_limit_reset_strategy.value,
                     utils.readable_datetime(user.expire, include_time=False),
-                    user.admin.username if user.admin else ''
+                    user.current_owner.username if user.current_owner else ''
                 )
                 for user in users
             ]
@@ -73,8 +73,9 @@ def set_owner(
             crud.get_admin(db, username=admin), f'Admin "{admin}" not found.')
 
         # Ask for confirmation if user already has an owner
-        if user.admin and not yes_to_all and not typer.confirm(
-            f'{username}\'s current owner is "{user.admin.username}".'
+        current_owner = user.current_owner
+        if current_owner and not yes_to_all and not typer.confirm(
+            f'{username}\'s current owner is "{current_owner.username}".'
             f' Are you sure about transferring its ownership to "{admin}"?'
         ):
             utils.error("Aborted.")

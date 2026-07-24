@@ -76,7 +76,7 @@ def get_user_info_text(db_user: User) -> str:
 📱 <b>Subscription last agent:</b> <blockquote>{user.sub_last_user_agent or "-"}</blockquote>
 
 📝 <b>Note:</b> <blockquote expandable>{user.note or "empty"}</blockquote>
-👨‍💻 <b>Admin:</b> <code>{db_user.admin.username if db_user.admin else "-"}</code>
+👨‍💻 <b>Admin:</b> <code>{db_user.current_owner.username if db_user.current_owner else "-"}</code>
 🚀 <b><a href="{user.subscription_url}">Subscription</a>:</b> <code>{user.subscription_url}</code>"""
 
 

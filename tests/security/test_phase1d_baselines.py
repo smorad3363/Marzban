@@ -39,7 +39,7 @@ def _normalized(text: str) -> str:
 def test_recorded_alembic_head_matches_repository_graph():
     baseline = BASELINE_PATH.read_text(encoding="utf-8")
 
-    assert _migration_heads() == {"63fbd07b9f14"}
+    assert _migration_heads() == {"9c2f1a7b4d6e"}
     assert "`63fbd07b9f14 (head)`" in baseline
 
 

@@ -1854,7 +1854,11 @@ def confirm_user_command(call: types.CallbackQuery):
                     )
             try:
                 with GetDB() as db:
-                    db_user = crud.create_user(db, new_user)
+                    owner = crud.get_admin_by_telegram_id(
+                        db,
+                        call.from_user.id,
+                    )
+                    db_user = crud.create_user(db, new_user, admin=owner)
                     proxies = db_user.proxies
                     user = UserResponse.model_validate(db_user)
                     xray.operations.add_user(db_user)
@@ -1875,6 +1879,13 @@ def confirm_user_command(call: types.CallbackQuery):
                             call.message.message_id,
                             parse_mode="HTML",
                             reply_markup=BotKeyboard.user_menu(user_info={'status': user.status, 'username': user.username}))
+            except crud.OwnershipIdentityError as exc:
+                db.rollback()
+                return bot.answer_callback_query(
+                    call.id,
+                    str(exc),
+                    show_alert=True,
+                )
             except sqlalchemy.exc.IntegrityError:
                 db.rollback()
                 return bot.answer_callback_query(

@@ -150,7 +150,7 @@ def record_user_usages():
         return
 
     with GetDB() as db:
-        user_admin_map = dict(db.query(User.id, User.admin_id).all())
+        user_admin_map = dict(db.query(User.id, User.current_owner_id).all())
 
     admin_usage = defaultdict(int)
     for user_usage in users_usage:

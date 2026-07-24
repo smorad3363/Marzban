@@ -55,16 +55,25 @@ def add_user(
             )
 
     try:
+        dbadmin = crud.get_admin(db, admin.username)
         dbuser = crud.create_user(
-            db, new_user, admin=crud.get_admin(db, admin.username)
+            db, new_user, admin=dbadmin
         )
+    except crud.OwnershipIdentityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc))
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="User already exists")
 
     bg.add_task(xray.operations.add_user, dbuser=dbuser)
     user = UserResponse.model_validate(dbuser)
-    report.user_created(user=user, user_id=dbuser.id, by=admin, user_admin=dbuser.admin)
+    report.user_created(
+        user=user,
+        user_id=dbuser.id,
+        by=admin,
+        user_admin=dbuser.current_owner,
+    )
     logger.info(f'New user "{dbuser.username}" added')
     return user
 
@@ -117,7 +126,12 @@ def modify_user(
     else:
         bg.add_task(xray.operations.remove_user, dbuser=dbuser)
 
-    bg.add_task(report.user_updated, user=user, user_admin=dbuser.admin, by=admin)
+    bg.add_task(
+        report.user_updated,
+        user=user,
+        user_admin=dbuser.current_owner,
+        by=admin,
+    )
 
     logger.info(f'User "{user.username}" modified')
 
@@ -127,7 +141,7 @@ def modify_user(
             username=user.username,
             status=user.status,
             user=user,
-            user_admin=dbuser.admin,
+            user_admin=dbuser.current_owner,
             by=admin,
         )
         logger.info(
@@ -149,7 +163,10 @@ def remove_user(
     bg.add_task(xray.operations.remove_user, dbuser=dbuser)
 
     bg.add_task(
-        report.user_deleted, username=dbuser.username, user_admin=Admin.model_validate(dbuser.admin), by=admin
+        report.user_deleted,
+        username=dbuser.username,
+        user_admin=Admin.model_validate(dbuser.current_owner),
+        by=admin,
     )
 
     logger.info(f'User "{dbuser.username}" deleted')
@@ -170,7 +187,10 @@ def reset_user_data_usage(
 
     user = UserResponse.model_validate(dbuser)
     bg.add_task(
-        report.user_data_usage_reset, user=user, user_admin=dbuser.admin, by=admin
+        report.user_data_usage_reset,
+        user=user,
+        user_admin=dbuser.current_owner,
+        by=admin,
     )
 
     logger.info(f'User "{dbuser.username}"\'s usage was reset')
@@ -191,7 +211,10 @@ def revoke_user_subscription(
         bg.add_task(xray.operations.update_user, dbuser=dbuser)
     user = UserResponse.model_validate(dbuser)
     bg.add_task(
-        report.user_subscription_revoked, user=user, user_admin=dbuser.admin, by=admin
+        report.user_subscription_revoked,
+        user=user,
+        user_admin=dbuser.current_owner,
+        by=admin,
     )
 
     logger.info(f'User "{dbuser.username}" subscription revoked')
@@ -288,7 +311,7 @@ def active_next_plan(
 
     user = UserResponse.model_validate(dbuser)
     bg.add_task(
-        report.user_data_reset_by_next, user=user, user_admin=dbuser.admin,
+        report.user_data_reset_by_next, user=user, user_admin=dbuser.current_owner,
     )
 
     logger.info(f'User "{dbuser.username}"\'s usage was reset by next plan')
@@ -388,7 +411,12 @@ def delete_expired_users(
             report.user_deleted,
             username=removed_user,
             user_admin=next(
-                (u.admin for u in expired_users if u.username == removed_user), None
+                (
+                    u.current_owner
+                    for u in expired_users
+                    if u.username == removed_user
+                ),
+                None,
             ),
             by=admin,
         )

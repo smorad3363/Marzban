@@ -14,10 +14,12 @@ from sqlalchemy import (
     String,
     Table,
     UniqueConstraint,
+    event,
     func,
 )
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
+from sqlalchemy.orm.attributes import NEVER_SET, NO_VALUE
 from sqlalchemy.sql.expression import select, text
 
 from app import xray
@@ -38,7 +40,11 @@ class Admin(Base):
     id = Column(Integer, primary_key=True)
     username = Column(String(34), unique=True, index=True)
     hashed_password = Column(String(128))
-    users = relationship("User", back_populates="admin")
+    users = relationship(
+        "User",
+        back_populates="admin",
+        foreign_keys="User.admin_id",
+    )
     created_at = Column(DateTime, default=datetime.utcnow)
     is_sudo = Column(Boolean, default=False)
     password_reset_at = Column(DateTime, nullable=True)
@@ -77,7 +83,31 @@ class User(Base):
     usage_logs = relationship("UserUsageResetLogs", back_populates="user")  # maybe rename it to reset_usage_logs?
     expire = Column(Integer, nullable=True)
     admin_id = Column(Integer, ForeignKey("admins.id"))
-    admin = relationship("Admin", back_populates="users")
+    created_by_admin_id = Column(
+        Integer,
+        ForeignKey("admins.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    owner_admin_id = Column(
+        Integer,
+        ForeignKey("admins.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    admin = relationship(
+        "Admin",
+        back_populates="users",
+        foreign_keys=[admin_id],
+    )
+    created_by_admin = relationship(
+        "Admin",
+        foreign_keys=[created_by_admin_id],
+    )
+    owner_admin = relationship(
+        "Admin",
+        foreign_keys=[owner_admin_id],
+    )
     sub_revoked_at = Column(DateTime, nullable=True, default=None)
     sub_updated_at = Column(DateTime, nullable=True, default=None)
     sub_last_user_agent = Column(String(512), nullable=True, default=None)
@@ -114,6 +144,20 @@ class User(Base):
             label('reseted_usage')
         )
 
+    @hybrid_property
+    def current_owner_id(self):
+        return self.owner_admin_id if self.owner_admin_id is not None else self.admin_id
+
+    @current_owner_id.expression
+    def current_owner_id(cls):
+        return func.coalesce(cls.owner_admin_id, cls.admin_id)
+
+    @property
+    def current_owner(self):
+        if self.owner_admin_id is not None:
+            return self.owner_admin
+        return self.admin
+
     @property
     def lifetime_used_traffic(self) -> int:
         return int(
@@ -143,6 +187,18 @@ class User(Base):
                     _[proxy.type].append(inbound["tag"])
 
         return _
+
+
+@event.listens_for(
+    User.created_by_admin_id,
+    "set",
+    retval=True,
+    active_history=True,
+)
+def prevent_creator_change(target, value, oldvalue, initiator):
+    if oldvalue not in (NEVER_SET, NO_VALUE, None) and value != oldvalue:
+        raise ValueError("created_by_admin_id is immutable once assigned")
+    return value
 
 
 excluded_inbounds_association = Table(
