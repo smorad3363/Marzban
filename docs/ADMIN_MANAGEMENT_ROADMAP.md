@@ -1,5 +1,9 @@
 # Secure Multi-Admin and Reseller Management Roadmap
 
+> **Historical and deferred:** This roadmap is not the active implementation plan.
+> Its phases must not be executed unless explicitly reactivated.
+> The active plan is `docs/SIMPLE_ADMIN_MANAGEMENT_ROADMAP.md`.
+
 ## 0. Document status and guardrails
 
 - Status: planning only.
