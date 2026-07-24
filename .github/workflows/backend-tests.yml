@@ -1,0 +1,37 @@
+name: Backend tests
+
+on:
+  push:
+    branches:
+      - master
+      - feature/secure-admin-reseller-management
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-test.txt
+
+      - name: Install backend and test dependencies
+        run: |
+          python -m pip install --upgrade pip "setuptools<81"
+          python -m pip install -r requirements-test.txt
+
+      - name: Run backend tests
+        run: python -m pytest -q

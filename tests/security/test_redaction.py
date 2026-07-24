@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import Mock
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def load_redaction_module():
