@@ -1,9 +1,10 @@
-from typing import Optional
+from enum import Enum
+from typing import Dict, Optional
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from passlib.context import CryptContext
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.db import Session, crud, get_db
 from app.utils.jwt import get_admin_payload
@@ -18,9 +19,34 @@ class Token(BaseModel):
     token_type: str = "bearer"
 
 
+class AdminRole(str, Enum):
+    owner = "owner"
+    reseller = "reseller"
+
+
+class AdminStatus(str, Enum):
+    active = "active"
+    suspended = "suspended"
+
+
+KNOWN_ADMIN_PERMISSIONS = frozenset({
+    "user.create",
+    "user.edit",
+    "user.delete",
+    "user.reset",
+    "user.revoke",
+    "user.view_usage",
+    "user.create_unlimited",
+    "user.create_on_hold",
+})
+
+
 class Admin(BaseModel):
     username: str
     is_sudo: bool
+    role: AdminRole = AdminRole.reseller
+    status: AdminStatus = AdminStatus.active
+    permissions: Dict[str, object] = Field(default_factory=dict)
     telegram_id: Optional[int] = None
     discord_webhook: Optional[str] = None
     users_usage: Optional[int] = None
@@ -43,7 +69,13 @@ class Admin(BaseModel):
             return
 
         if payload['username'] in SUDOERS and payload['is_sudo'] is True:
-            return cls(username=payload['username'], is_sudo=True)
+            return cls(
+                username=payload['username'],
+                is_sudo=True,
+                role=AdminRole.owner,
+                status=AdminStatus.active,
+                permissions={},
+            )
 
         dbadmin = crud.get_admin(db, payload['username'])
         if not dbadmin:
@@ -109,6 +141,9 @@ class AdminCreate(Admin):
 class AdminModify(BaseModel):
     password: Optional[str] = None
     is_sudo: bool
+    role: Optional[AdminRole] = None
+    status: Optional[AdminStatus] = None
+    permissions: Optional[Dict[str, object]] = None
     telegram_id: Optional[int] = None
     discord_webhook: Optional[str] = None
 
@@ -140,3 +175,19 @@ class AdminInDB(Admin):
 class AdminValidationResult(BaseModel):
     username: str
     is_sudo: bool
+
+
+def has_admin_permission(admin: Optional[Admin], permission: str) -> bool:
+    try:
+        if admin is None or admin.status != AdminStatus.active:
+            return False
+        if permission not in KNOWN_ADMIN_PERMISSIONS:
+            return False
+        if admin.role == AdminRole.owner:
+            return True
+        if admin.role != AdminRole.reseller:
+            return False
+        value = admin.permissions.get(permission)
+        return value if type(value) is bool else False
+    except Exception:
+        return False

@@ -30,7 +30,13 @@ from app.db.models import (
     UserTemplate,
     UserUsageResetLogs,
 )
-from app.models.admin import AdminCreate, AdminModify, AdminPartialModify
+from app.models.admin import (
+    AdminCreate,
+    AdminModify,
+    AdminPartialModify,
+    AdminRole,
+    AdminStatus,
+)
 from app.models.node import (NodeCreate, NodeModify, NodeStatus,
                              NodeUsageResponse, NodeWatchdogSettingsUpdate)
 from app.models.proxy import ProxyHost as ProxyHostModify
@@ -49,6 +55,10 @@ from config import NOTIFY_DAYS_LEFT, NOTIFY_REACHED_USAGE_PERCENT, USERS_AUTODEL
 
 
 class OwnershipIdentityError(ValueError):
+    pass
+
+
+class FinalActiveOwnerError(ValueError):
     pass
 
 
@@ -972,10 +982,18 @@ def create_admin(db: Session, admin: AdminCreate) -> Admin:
     Returns:
         Admin: The created admin object.
     """
+    role = (
+        admin.role.value
+        if "role" in admin.model_fields_set
+        else (AdminRole.owner.value if admin.is_sudo else AdminRole.reseller.value)
+    )
     dbadmin = Admin(
         username=admin.username,
         hashed_password=admin.hashed_password,
-        is_sudo=admin.is_sudo,
+        is_sudo=role == AdminRole.owner.value,
+        role=role,
+        status=admin.status.value,
+        permissions=dict(admin.permissions),
         telegram_id=admin.telegram_id if admin.telegram_id else None,
         discord_webhook=admin.discord_webhook if admin.discord_webhook else None
     )
@@ -983,6 +1001,41 @@ def create_admin(db: Session, admin: AdminCreate) -> Admin:
     db.commit()
     db.refresh(dbadmin)
     return dbadmin
+
+
+def _protect_final_active_owner(
+    db: Session,
+    dbadmin: Admin,
+    *,
+    desired_role: Optional[str] = None,
+    desired_status: Optional[str] = None,
+    deleting: bool = False,
+) -> None:
+    if (
+        dbadmin.role != AdminRole.owner.value
+        or dbadmin.status != AdminStatus.active.value
+    ):
+        return
+
+    remains_active_owner = (
+        not deleting
+        and (desired_role or dbadmin.role) == AdminRole.owner.value
+        and (desired_status or dbadmin.status) == AdminStatus.active.value
+    )
+    if remains_active_owner:
+        return
+
+    active_owner_ids = (
+        db.query(Admin.id)
+        .filter(
+            Admin.role == AdminRole.owner.value,
+            Admin.status == AdminStatus.active.value,
+        )
+        .with_for_update()
+        .all()
+    )
+    if len(active_owner_ids) <= 1:
+        raise FinalActiveOwnerError("The final active owner must be preserved")
 
 
 def update_admin(db: Session, dbadmin: Admin, modified_admin: AdminModify) -> Admin:
@@ -997,8 +1050,31 @@ def update_admin(db: Session, dbadmin: Admin, modified_admin: AdminModify) -> Ad
     Returns:
         Admin: The updated admin object.
     """
-    if modified_admin.is_sudo:
-        dbadmin.is_sudo = modified_admin.is_sudo
+    desired_role = (
+        modified_admin.role.value
+        if modified_admin.role is not None
+        else (
+            AdminRole.owner.value
+            if modified_admin.is_sudo
+            else AdminRole.reseller.value
+        )
+    )
+    desired_status = (
+        modified_admin.status.value
+        if modified_admin.status is not None
+        else dbadmin.status
+    )
+    _protect_final_active_owner(
+        db,
+        dbadmin,
+        desired_role=desired_role,
+        desired_status=desired_status,
+    )
+    dbadmin.role = desired_role
+    dbadmin.status = desired_status
+    dbadmin.is_sudo = desired_role == AdminRole.owner.value
+    if modified_admin.permissions is not None:
+        dbadmin.permissions = dict(modified_admin.permissions)
     if modified_admin.password is not None and dbadmin.hashed_password != modified_admin.hashed_password:
         dbadmin.hashed_password = modified_admin.hashed_password
         dbadmin.password_reset_at = datetime.utcnow()
@@ -1024,8 +1100,31 @@ def partial_update_admin(db: Session, dbadmin: Admin, modified_admin: AdminParti
     Returns:
         Admin: The updated admin object.
     """
-    if modified_admin.is_sudo is not None:
-        dbadmin.is_sudo = modified_admin.is_sudo
+    desired_role = dbadmin.role
+    if modified_admin.role is not None:
+        desired_role = modified_admin.role.value
+    elif modified_admin.is_sudo is not None:
+        desired_role = (
+            AdminRole.owner.value
+            if modified_admin.is_sudo
+            else AdminRole.reseller.value
+        )
+    desired_status = (
+        modified_admin.status.value
+        if modified_admin.status is not None
+        else dbadmin.status
+    )
+    _protect_final_active_owner(
+        db,
+        dbadmin,
+        desired_role=desired_role,
+        desired_status=desired_status,
+    )
+    dbadmin.role = desired_role
+    dbadmin.status = desired_status
+    dbadmin.is_sudo = desired_role == AdminRole.owner.value
+    if modified_admin.permissions is not None:
+        dbadmin.permissions = dict(modified_admin.permissions)
     if modified_admin.password is not None and dbadmin.hashed_password != modified_admin.hashed_password:
         dbadmin.hashed_password = modified_admin.hashed_password
         dbadmin.password_reset_at = datetime.utcnow()
@@ -1050,6 +1149,7 @@ def remove_admin(db: Session, dbadmin: Admin) -> Admin:
     Returns:
         Admin: The removed admin object.
     """
+    _protect_final_active_owner(db, dbadmin, deleting=True)
     db.delete(dbadmin)
     db.commit()
     return dbadmin

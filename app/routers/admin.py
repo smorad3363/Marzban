@@ -87,7 +87,10 @@ def modify_admin(
             detail="You're not allowed to edit another sudoer's account. Use marzban-cli instead.",
         )
 
-    updated_admin = crud.update_admin(db, dbadmin, modified_admin)
+    try:
+        updated_admin = crud.update_admin(db, dbadmin, modified_admin)
+    except crud.FinalActiveOwnerError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
     return updated_admin
 
@@ -108,7 +111,10 @@ def remove_admin(
             detail="You're not allowed to delete sudo accounts. Use marzban-cli instead.",
         )
 
-    crud.remove_admin(db, dbadmin)
+    try:
+        crud.remove_admin(db, dbadmin)
+    except crud.FinalActiveOwnerError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
     return {"detail": "Admin removed successfully"}
 
 

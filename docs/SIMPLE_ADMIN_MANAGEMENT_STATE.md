@@ -8,7 +8,7 @@ Use this compact state in a fresh Codex chat together with `AGENTS.override.md`.
 - Active branch: `feature/simple-admin-management`
 - Starting commit: `e03887ea2152ad6f937597f7d2cc4d8bbc2e22f4`
 - Application version: `0.8.4`
-- Current Alembic head: `9c2f1a7b4d6e`
+- Current Alembic head: `b4c2d8e6f1a3`
 - Database policy: new work targets MySQL 8.0/InnoDB only
 - SQLAlchemy and Alembic remain in use
 - Historical migrations are immutable
@@ -22,11 +22,13 @@ Use this compact state in a fresh Codex chat together with `AGENTS.override.md`.
 
 ## Progress
 
-- Current active milestone: Milestone 0 — Project pivot
-- Completed milestones: none
-- Next milestone: Milestone 1 — Admin identity foundation
-- Last successful tests: preflight Alembic head check passed at `9c2f1a7b4d6e`
-- Last commit: `e03887ea2152ad6f937597f7d2cc4d8bbc2e22f4`
+- Current active milestone: Milestone 1 — Admin identity foundation
+- Completed milestones: Milestone 0 and Milestone 1
+- Next milestone: Milestone 2 — User read isolation
+- Focused tests: 28 passed; 5 conditional MySQL tests skipped because `PHASE2_MYSQL_URL` was unavailable
+- Backend regression: 57 passed; 5 conditional MySQL tests skipped
+- Last successful tests: focused and backend regression suites passed
+- Last commit: pending in this commit
 
 ## Explicit exclusions
 

@@ -222,7 +222,7 @@ def _ownership_row(url: str):
 
 
 def test_empty_database_upgrade_has_phase2_schema(ownership_database):
-    _upgrade(ownership_database, "head")
+    _upgrade(ownership_database, PHASE2_HEAD)
 
     engine = _engine(ownership_database)
     inspector = sa.inspect(engine)
@@ -261,8 +261,8 @@ def test_valid_legacy_owner_is_backfilled_and_retry_is_deterministic(
     _prepare_pre_phase2_schema(ownership_database)
     _insert_admin_and_user(ownership_database, admin_id=1, user_admin_id=1)
 
-    _upgrade(ownership_database, "head")
-    _upgrade(ownership_database, "head")
+    _upgrade(ownership_database, PHASE2_HEAD)
+    _upgrade(ownership_database, PHASE2_HEAD)
 
     assert _ownership_row(ownership_database) == (1, 1, 1)
 
@@ -274,11 +274,11 @@ def test_null_legacy_owner_requires_explicit_verified_destination(
     _insert_admin_and_user(ownership_database, admin_id=7, user_admin_id=None)
 
     with pytest.raises(RuntimeError, match="explicit existing destination"):
-        _upgrade(ownership_database, "head")
+        _upgrade(ownership_database, PHASE2_HEAD)
 
     _upgrade(
         ownership_database,
-        "head",
+        PHASE2_HEAD,
         [
             "legacy_owner_username=approved-owner",
             "legacy_owner_verified=true",
@@ -294,11 +294,11 @@ def test_orphaned_legacy_owner_requires_explicit_verified_destination(
     _insert_admin_and_user(ownership_database, admin_id=7, user_admin_id=999)
 
     with pytest.raises(RuntimeError, match="explicit existing destination"):
-        _upgrade(ownership_database, "head")
+        _upgrade(ownership_database, PHASE2_HEAD)
 
     _upgrade(
         ownership_database,
-        "head",
+        PHASE2_HEAD,
         [
             "legacy_owner_username=approved-owner",
             "legacy_owner_verified=true",
@@ -312,7 +312,7 @@ def test_admin_delete_is_restricted_and_downgrade_is_non_destructive(
 ):
     _prepare_pre_phase2_schema(ownership_database)
     _insert_admin_and_user(ownership_database, admin_id=1, user_admin_id=1)
-    _upgrade(ownership_database, "head")
+    _upgrade(ownership_database, PHASE2_HEAD)
 
     engine = _engine(ownership_database)
     with pytest.raises(DBAPIError):
