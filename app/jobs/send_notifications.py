@@ -9,6 +9,7 @@ from app import app, logger, scheduler
 from app.db import GetDB
 from app.db.models import NotificationReminder
 from app.utils.notification import queue
+from app.utils.redaction import REDACTED, redact_sensitive_data, redact_text
 from config import (JOB_SEND_NOTIFICATIONS_INTERVAL,
                     NUMBER_OF_RECURRENT_NOTIFICATIONS,
                     RECURRENT_NOTIFICATIONS_TIMEOUT, WEBHOOK_ADDRESS,
@@ -41,13 +42,20 @@ def send(data: List[Dict[Any, Any]]) -> bool:
 
 def send_req(w_address: str, data):
     try:
-        logger.debug(f"Sending {len(data)} webhook updates to {w_address}")
-        r = session.post(w_address, json=data, headers=headers)
+        logger.debug(
+            "Sending %s webhook updates",
+            len(data),
+        )
+        r = session.post(
+            w_address,
+            json=redact_sensitive_data(data),
+            headers=headers,
+        )
         if r.ok:
             return True
-        logger.error(r)
+        logger.error(redact_text(str(r)))
     except Exception as err:
-        logger.error(err)
+        logger.error(redact_text(str(err).replace(w_address, REDACTED)))
     return False
 
 

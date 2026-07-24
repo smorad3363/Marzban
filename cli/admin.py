@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from app.db import GetDB, crud
 from app.db.models import Admin, User
 from app.models.admin import AdminCreate, AdminPartialModify
+from app.utils.redaction import redact_sensitive_data
 from app.utils.system import readable_size
 
 from . import utils
@@ -68,7 +69,13 @@ def list_admins(
                  "✔️" if admin.is_sudo else "✖️",
                  utils.readable_datetime(admin.created_at),
                  str(admin.telegram_id or "✖️"),
-                 str(admin.discord_webhook or "✖️"))
+                 str(
+                     redact_sensitive_data(
+                         {"discord_webhook": admin.discord_webhook}
+                     )["discord_webhook"]
+                     if admin.discord_webhook
+                     else "✖️"
+                 ))
                 for admin in admins
             ]
         )

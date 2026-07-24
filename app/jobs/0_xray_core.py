@@ -1,5 +1,4 @@
 import time
-import traceback
 
 from app import app, logger, scheduler, xray
 from app.db import GetDB, crud
@@ -47,7 +46,7 @@ def start_core():
     try:
         xray.core.start(config)
     except Exception:
-        traceback.print_exc()
+        logger.exception("Unable to start main Xray core")
 
     # nodes' core
     logger.info("Starting nodes Xray core")

@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 
+from app.utils.redaction import install_redaction_filter
 from config import ALLOWED_ORIGINS, DOCS, XRAY_SUBSCRIPTION_PATH
 
 __version__ = "0.8.4"
@@ -24,6 +25,7 @@ scheduler = BackgroundScheduler(
     {"apscheduler.job_defaults.max_instances": 20}, timezone="UTC"
 )
 logger = logging.getLogger("uvicorn.error")
+install_redaction_filter("uvicorn.error", "uvicorn.access")
 
 app.add_middleware(
     CORSMiddleware,
