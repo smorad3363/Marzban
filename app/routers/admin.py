@@ -57,9 +57,9 @@ def admin_token(
 def create_admin(
     new_admin: AdminCreate,
     db: Session = Depends(get_db),
-    admin: Admin = Depends(Admin.check_sudo_admin),
+    admin: Admin = Depends(Admin.check_owner),
 ):
-    """Create a new admin if the current admin has sudo privileges."""
+    """Create a new database admin as an active owner."""
     try:
         dbadmin = crud.create_admin(db, new_admin)
     except IntegrityError:
@@ -78,15 +78,9 @@ def modify_admin(
     modified_admin: AdminModify,
     dbadmin: Admin = Depends(get_admin_by_username),
     db: Session = Depends(get_db),
-    current_admin: Admin = Depends(Admin.check_sudo_admin),
+    current_admin: Admin = Depends(Admin.check_owner),
 ):
     """Modify an existing admin's details."""
-    if (dbadmin.username != current_admin.username) and dbadmin.is_sudo:
-        raise HTTPException(
-            status_code=403,
-            detail="You're not allowed to edit another sudoer's account. Use marzban-cli instead.",
-        )
-
     try:
         updated_admin = crud.update_admin(db, dbadmin, modified_admin)
     except crud.FinalActiveOwnerError as exc:
@@ -102,15 +96,9 @@ def modify_admin(
 def remove_admin(
     dbadmin: Admin = Depends(get_admin_by_username),
     db: Session = Depends(get_db),
-    current_admin: Admin = Depends(Admin.check_sudo_admin),
+    current_admin: Admin = Depends(Admin.check_owner),
 ):
     """Remove an admin from the database."""
-    if dbadmin.is_sudo:
-        raise HTTPException(
-            status_code=403,
-            detail="You're not allowed to delete sudo accounts. Use marzban-cli instead.",
-        )
-
     try:
         crud.remove_admin(db, dbadmin)
     except crud.FinalActiveOwnerError as exc:
@@ -134,7 +122,7 @@ def get_admins(
     limit: Optional[int] = None,
     username: Optional[str] = None,
     db: Session = Depends(get_db),
-    admin: Admin = Depends(Admin.check_sudo_admin),
+    admin: Admin = Depends(Admin.check_owner),
 ):
     """Fetch a list of admins with optional filters for pagination and username."""
     return crud.get_admins(db, offset, limit, username)

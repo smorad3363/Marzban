@@ -68,6 +68,9 @@ export type UserCreate = Pick<
 export type UserApi = {
   discord_webook: string;
   is_sudo: boolean;
+  role: "owner" | "reseller";
+  status: "active" | "suspended";
+  permissions: Record<string, unknown>;
   telegram_id: number | string;
   username: string;
 }

@@ -80,6 +80,11 @@ class Admin(BaseModel):
         dbadmin = crud.get_admin(db, payload['username'])
         if not dbadmin:
             return
+        if (
+            dbadmin.status != AdminStatus.active.value
+            or dbadmin.role not in {AdminRole.owner.value, AdminRole.reseller.value}
+        ):
+            return
 
         if dbadmin.password_reset_at:
             if not payload.get("created_at"):
@@ -99,6 +104,18 @@ class Admin(BaseModel):
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Could not validate credentials",
                 headers={"WWW-Authenticate": "Bearer"},
+            )
+        return admin
+
+    @classmethod
+    def check_owner(cls,
+                    db: Session = Depends(get_db),
+                    token: str = Depends(oauth2_scheme)):
+        admin = cls.get_current(db, token)
+        if admin.role != AdminRole.owner or admin.status != AdminStatus.active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You're not allowed"
             )
         return admin
 

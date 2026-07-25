@@ -1,5 +1,11 @@
 from typing import Optional, Union
-from app.models.admin import AdminInDB, AdminValidationResult, Admin
+from app.models.admin import (
+    Admin,
+    AdminRole,
+    AdminStatus,
+    AdminValidationResult,
+    pwd_context,
+)
 from app.models.user import UserResponse, UserStatus
 from app.db import Session, crud, get_db
 from config import SUDOERS
@@ -14,8 +20,16 @@ def validate_admin(db: Session, username: str, password: str) -> Optional[AdminV
         return AdminValidationResult(username=username, is_sudo=True)
 
     dbadmin = crud.get_admin(db, username)
-    if dbadmin and AdminInDB.model_validate(dbadmin).verify_password(password):
-        return AdminValidationResult(username=dbadmin.username, is_sudo=dbadmin.is_sudo)
+    if dbadmin and pwd_context.verify(password, dbadmin.hashed_password):
+        if (
+            dbadmin.status != AdminStatus.active.value
+            or dbadmin.role not in {AdminRole.owner.value, AdminRole.reseller.value}
+        ):
+            return None
+        return AdminValidationResult(
+            username=dbadmin.username,
+            is_sudo=dbadmin.role == AdminRole.owner.value,
+        )
 
     return None
 

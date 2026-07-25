@@ -24,12 +24,13 @@ import {
 } from "@heroicons/react/24/outline";
 import brandIcon from "assets/brand/secure-network-icon.png";
 import { useDashboard } from "contexts/DashboardContext";
-import { FC, ReactNode } from "react";
+import { FC, ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { updateThemeColor } from "utils/themeColor";
 import { Language } from "./Language";
 import useGetUser from "hooks/useGetUser";
+import { AdminManagementModal } from "./AdminManagementModal";
 
 type HeaderProps = {
   actions?: ReactNode;
@@ -53,6 +54,13 @@ const ResetUsageIcon = chakra(DocumentMinusIcon, iconProps);
 export const Header: FC<HeaderProps> = ({ actions }) => {
   const { userData, getUserIsSuccess, getUserIsPending } = useGetUser();
 
+  const isActiveOwner = () => {
+    if (!getUserIsPending && getUserIsSuccess) {
+      return userData.role === "owner" && userData.status === "active";
+    }
+    return false;
+  };
+
   const isSudo = () => {
     if (!getUserIsPending && getUserIsSuccess) {
       return userData.is_sudo;
@@ -66,6 +74,7 @@ export const Header: FC<HeaderProps> = ({ actions }) => {
     onEditingNodes,
     onShowingNodesUsage,
   } = useDashboard();
+  const [isAdminManagementOpen, setAdminManagementOpen] = useState(false);
   const { t } = useTranslation();
   const { colorMode, toggleColorMode } = useColorMode();
   return (
@@ -154,6 +163,16 @@ export const Header: FC<HeaderProps> = ({ actions }) => {
                   </MenuItem>
                 </>
               )}
+              {isActiveOwner() && (
+                <MenuItem
+                  maxW="170px"
+                  fontSize="sm"
+                  icon={<SettingsIcon />}
+                  onClick={() => setAdminManagementOpen(true)}
+                >
+                  {t("adminManagement.menu")}
+                </MenuItem>
+              )}
               <Link to="/login">
                 <MenuItem maxW="170px" fontSize="sm" icon={<LogoutIcon />}>
                   {t("header.logout")}
@@ -190,6 +209,10 @@ export const Header: FC<HeaderProps> = ({ actions }) => {
           </IconButton>
         </HStack>
       </Box>
+      <AdminManagementModal
+        isOpen={isAdminManagementOpen}
+        onClose={() => setAdminManagementOpen(false)}
+      />
     </HStack>
   );
 };

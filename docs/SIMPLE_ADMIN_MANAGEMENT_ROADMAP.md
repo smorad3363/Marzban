@@ -3,6 +3,12 @@
 This is the active implementation plan for `feature/simple-admin-management`.
 Every milestone requires narrow scope, focused tests, one commit, one push, a clean working tree, and a mandatory stop before the next milestone.
 New work is MySQL 8.0/InnoDB only; SQLite compatibility is not required.
+Existing non-sudo user ownership/read isolation and the existing Admin
+create/list/update/delete API are inherited baseline functionality. They must
+be adapted, tested, and reused rather than rebuilt.
+
+Current milestone: `Admin authentication integration and minimal dashboard management`.
+Next milestone: `User mutation permission enforcement`.
 
 ## Milestone 0 — Project pivot
 
@@ -26,14 +32,14 @@ New work is MySQL 8.0/InnoDB only; SQLite compatibility is not required.
 - One MySQL-compatible migration
 - Focused tests
 
-## Milestone 2 — User read isolation
+## Inherited baseline — User read isolation
 
 - Owner reads all users
 - Reseller reads only users matching `owner_admin_id`
 - Protect user detail, list, count, statistics, and usage
 - Out-of-scope detail returns concealed `404`
 
-## Milestone 3 — User mutation permissions
+## Next milestone — User mutation permissions
 
 Protect only:
 
@@ -45,17 +51,19 @@ Protect only:
 - Unlimited-user creation
 - On-hold-user creation
 
-## Milestone 4 — Admin management API
+## Current milestone — Admin authentication integration and minimal dashboard management
 
-Minimal owner-only endpoints for:
+Adapt the existing owner-only endpoints and add a minimal visible dashboard:
 
 - List admins
 - Create admin
 - Change password
 - Change role
 - Change status
-- Change permissions
 - Delete admin when safe
+- Reject suspended or unknown-role database admins during authentication
+- Reuse the existing Admin API; do not create replacement endpoints
+- Do not show permission toggles until user permissions are enforced
 
 ## Milestone 5 — Simple admin limits
 
@@ -66,17 +74,6 @@ Only:
 - Maximum traffic per user
 - Maximum expiration days
 - Maximum unlimited users
-
-## Milestone 6 — Minimal frontend
-
-Only:
-
-- Admin list
-- Create/edit admin modal
-- Role selector
-- Status selector
-- Permission toggles
-- Limit fields
 
 ## Milestone 7 — Final validation
 

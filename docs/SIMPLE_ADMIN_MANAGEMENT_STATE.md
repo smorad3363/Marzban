@@ -19,16 +19,22 @@ Use this compact state in a fresh Codex chat together with `AGENTS.override.md`.
 - Environment `SUDOERS` authentication compatibility exists.
 - Database admins retain `is_sudo`.
 - Phase 2 ownership foundation exists through `owner_admin_id`, `created_by_admin_id`, compatibility behavior, migration coverage, and unit tests.
+- Existing non-sudo user ownership/read isolation is inherited and must be reused.
+- Existing Admin create/list/update/delete API is inherited and must be adapted.
 
 ## Progress
 
-- Current active milestone: Milestone 1 — Admin identity foundation
-- Completed milestones: Milestone 0 and Milestone 1
-- Next milestone: Milestone 2 — User read isolation
-- Focused tests: 28 passed; 5 conditional MySQL tests skipped because `PHASE2_MYSQL_URL` was unavailable
-- Backend regression: 57 passed; 5 conditional MySQL tests skipped
-- Last successful tests: focused and backend regression suites passed
+- Current active milestone: Admin authentication integration and minimal dashboard management completed
+- Completed milestones: Milestone 0, Milestone 1, and Admin authentication integration with minimal dashboard management
+- Next milestone: User mutation permission enforcement
+- Focused tests: 13 passed
+- Backend regression: 70 passed; 5 conditional MySQL tests skipped because `PHASE2_MYSQL_URL` was unavailable
+- Dashboard production build: passed
+- Migration: none created; Alembic head remains `b4c2d8e6f1a3`
+- Last successful tests: focused and full backend regression suites passed
 - Last commit: pending in this commit
+- No permission toggles are visible until user permissions are enforced.
+- Simple admin limits remain a later milestone.
 
 ## Explicit exclusions
 
