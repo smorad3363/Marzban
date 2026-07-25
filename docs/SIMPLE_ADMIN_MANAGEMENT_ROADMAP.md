@@ -7,8 +7,8 @@ Existing non-sudo user ownership/read isolation and the existing Admin
 create/list/update/delete API are inherited baseline functionality. They must
 be adapted, tested, and reused rather than rebuilt.
 
-Current milestone: `Admin authentication integration and minimal dashboard management`.
-Next milestone: `User mutation permission enforcement`.
+Current milestone: `User mutation permission enforcement` completed.
+Next milestone: `Simple admin limits`.
 
 ## Milestone 0 — Project pivot
 
@@ -39,7 +39,7 @@ Next milestone: `User mutation permission enforcement`.
 - Protect user detail, list, count, statistics, and usage
 - Out-of-scope detail returns concealed `404`
 
-## Next milestone — User mutation permissions
+## Completed milestone — User mutation permissions
 
 Protect only:
 
@@ -51,7 +51,7 @@ Protect only:
 - Unlimited-user creation
 - On-hold-user creation
 
-## Current milestone — Admin authentication integration and minimal dashboard management
+## Completed milestone — Admin authentication integration and minimal dashboard management
 
 Adapt the existing owner-only endpoints and add a minimal visible dashboard:
 

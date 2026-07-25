@@ -6,7 +6,12 @@ from sqlalchemy.exc import IntegrityError
 
 from app import logger, xray
 from app.db import Session, crud, get_db
-from app.dependencies import get_expired_users_list, get_validated_user, validate_dates
+from app.dependencies import (
+    get_expired_users_list,
+    get_validated_user,
+    require_admin_permission,
+    validate_dates,
+)
 from app.models.admin import Admin
 from app.models.user import (
     UserCreate,
@@ -14,6 +19,7 @@ from app.models.user import (
     UserResponse,
     UsersResponse,
     UserStatus,
+    UserStatusCreate,
     UsersUsagesResponse,
     UserUsagesResponse,
 )
@@ -22,7 +28,15 @@ from app.utils import report, responses
 router = APIRouter(tags=["User"], prefix="/api", responses={401: responses._401})
 
 
-@router.post("/user", response_model=UserResponse, responses={400: responses._400, 409: responses._409})
+@router.post(
+    "/user",
+    response_model=UserResponse,
+    responses={
+        400: responses._400,
+        403: responses._403,
+        409: responses._409,
+    },
+)
 def add_user(
     new_user: UserCreate,
     bg: BackgroundTasks,
@@ -46,6 +60,12 @@ def add_user(
     """
 
     # TODO expire should be datetime instead of timestamp
+
+    require_admin_permission(admin, "user.create")
+    if new_user.data_limit in (None, 0):
+        require_admin_permission(admin, "user.create_unlimited")
+    if new_user.status == UserStatusCreate.on_hold:
+        require_admin_permission(admin, "user.create_on_hold")
 
     for proxy_type in new_user.proxies:
         if not xray.config.inbounds_by_protocol.get(proxy_type):
@@ -110,6 +130,8 @@ def modify_user(
     Note: Fields set to `null` or omitted will not be modified.
     """
 
+    require_admin_permission(admin, "user.edit")
+
     for proxy_type in modified_user.proxies:
         if not xray.config.inbounds_by_protocol.get(proxy_type):
             raise HTTPException(
@@ -159,6 +181,7 @@ def remove_user(
     admin: Admin = Depends(Admin.get_current),
 ):
     """Remove a user"""
+    require_admin_permission(admin, "user.delete")
     crud.remove_user(db, dbuser)
     bg.add_task(xray.operations.remove_user, dbuser=dbuser)
 
@@ -181,6 +204,7 @@ def reset_user_data_usage(
     admin: Admin = Depends(Admin.get_current),
 ):
     """Reset user data usage"""
+    require_admin_permission(admin, "user.reset")
     dbuser = crud.reset_user_data_usage(db=db, dbuser=dbuser)
     if dbuser.status in [UserStatus.active, UserStatus.on_hold]:
         bg.add_task(xray.operations.add_user, dbuser=dbuser)
@@ -205,6 +229,7 @@ def revoke_user_subscription(
     admin: Admin = Depends(Admin.get_current),
 ):
     """Revoke users subscription (Subscription link and proxies)"""
+    require_admin_permission(admin, "user.revoke")
     dbuser = crud.revoke_user_sub(db=db, dbuser=dbuser)
 
     if dbuser.status in [UserStatus.active, UserStatus.on_hold]:

@@ -24,17 +24,18 @@ Use this compact state in a fresh Codex chat together with `AGENTS.override.md`.
 
 ## Progress
 
-- Current active milestone: Admin authentication integration and minimal dashboard management completed
-- Completed milestones: Milestone 0, Milestone 1, and Admin authentication integration with minimal dashboard management
-- Next milestone: User mutation permission enforcement
-- Focused tests: 13 passed
-- Backend regression: 70 passed; 5 conditional MySQL tests skipped because `PHASE2_MYSQL_URL` was unavailable
-- Dashboard production build: passed
+- Current active milestone: User mutation permission enforcement completed
+- Completed milestones: Milestone 0, Milestone 1, Admin authentication integration with minimal dashboard management, and user mutation permission enforcement
+- Next milestone: Simple admin limits
+- Focused user mutation permission tests: 17 passed
+- Related security and ownership tests: 47 passed
+- Backend regression: 87 passed; 5 conditional MySQL tests skipped because `PHASE2_MYSQL_URL` was unavailable
+- Dashboard production build: not rerun because this milestone made no frontend changes; the previous build passed
 - Migration: none created; Alembic head remains `b4c2d8e6f1a3`
-- Last successful tests: focused and full backend regression suites passed
-- Last commit: pending in this commit
-- No permission toggles are visible until user permissions are enforced.
-- Simple admin limits remain a later milestone.
+- Last successful tests: focused, related security, and full backend regression suites passed
+- Milestone base commit: `511ea178700e656efa4349492fbc96c1f5cc0e4a`
+- Permission toggles are not visible yet; frontend permission controls were outside this milestone.
+- Simple admin limits are the next milestone.
 
 ## Explicit exclusions
 

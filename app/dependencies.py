@@ -4,6 +4,7 @@ from app.models.admin import (
     AdminRole,
     AdminStatus,
     AdminValidationResult,
+    has_admin_permission,
     pwd_context,
 )
 from app.models.user import UserResponse, UserStatus
@@ -40,6 +41,11 @@ def get_admin_by_username(username: str, db: Session = Depends(get_db)):
     if not dbadmin:
         raise HTTPException(status_code=404, detail="Admin not found")
     return dbadmin
+
+
+def require_admin_permission(admin: Admin, permission: str) -> None:
+    if not has_admin_permission(admin, permission):
+        raise HTTPException(status_code=403, detail="You're not allowed")
 
 
 def get_dbnode(node_id: int, db: Session = Depends(get_db)):
