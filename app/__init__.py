@@ -10,7 +10,7 @@ from fastapi.routing import APIRoute
 
 from config import ALLOWED_ORIGINS, DOCS, XRAY_SUBSCRIPTION_PATH
 
-__version__ = "0.8.4"
+__version__ = "0.9.0-marzhelp.1"
 
 app = FastAPI(
     title="Network Control API",
@@ -36,6 +36,17 @@ from app import dashboard, jobs, routers, telegram  # noqa
 from app.routers import api_router  # noqa
 
 app.include_router(api_router)
+
+
+from app.utils.marzhelp_policy import MarzhelpPolicyError  # noqa: E402
+
+
+@app.exception_handler(MarzhelpPolicyError)
+def marzhelp_policy_exception_handler(request: Request, exc: MarzhelpPolicyError):
+    return JSONResponse(
+        status_code=status.HTTP_409_CONFLICT,
+        content={"detail": str(exc), "code": exc.code},
+    )
 
 
 def use_route_names_as_operation_ids(app: FastAPI) -> None:

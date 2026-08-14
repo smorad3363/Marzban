@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app import __version__, xray
 from app.db import Session, crud, get_db
+from app.db.models import MarzhelpMetadata
 from app.models.admin import Admin
 from app.models.proxy import ProxyHost, ProxyInbound, ProxyTypes
 from app.models.system import SystemStats
@@ -12,6 +13,23 @@ from app.utils import responses
 from app.utils.system import cpu_usage, memory_usage, realtime_bandwidth
 
 router = APIRouter(tags=["System"], prefix="/api", responses={401: responses._401})
+
+
+@router.get("/marzhelp/compatibility")
+def get_marzhelp_compatibility(db: Session = Depends(get_db)):
+    """Public installer preflight backed by the migrated database marker."""
+
+    rows = db.query(MarzhelpMetadata).all()
+    metadata = {row.key: row.value for row in rows}
+    if metadata.get("source_id") != "smorad3363-marzban" or metadata.get("schema_version") != "1":
+        raise HTTPException(status_code=409, detail="MarzHelp schema compatibility marker is missing")
+    return {
+        "compatible": True,
+        "source_id": metadata["source_id"],
+        "schema_version": int(metadata["schema_version"]),
+        "minimum_marzhelp_version": metadata.get("minimum_marzhelp_version", "2"),
+        "marzban_version": __version__,
+    }
 
 
 @router.get("/system", response_model=SystemStats)

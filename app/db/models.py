@@ -6,13 +6,16 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Column,
+    Date,
     DateTime,
     Enum,
     Float,
     ForeignKey,
     Integer,
+    Numeric,
     String,
     Table,
+    Text,
     UniqueConstraint,
     func,
 )
@@ -56,6 +59,118 @@ class AdminUsageLogs(Base):
     admin = relationship("Admin", back_populates="usage_logs")
     used_traffic_at_reset = Column(BigInteger, nullable=False)
     reset_at = Column(DateTime, default=datetime.utcnow)
+
+
+class MarzhelpMetadata(Base):
+    """Compatibility metadata owned and migrated by Marzban."""
+
+    __tablename__ = "marzhelp_metadata"
+
+    key = Column(String(64), primary_key=True)
+    value = Column(String(255), nullable=False)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class MarzhelpAdminSettings(Base):
+    """Canonical Marzhelp policy and admin-accounting settings."""
+
+    __tablename__ = "marzhelp_admin_settings"
+
+    admin_id = Column(Integer, ForeignKey("admins.id"), primary_key=True)
+    total_traffic = Column(BigInteger, nullable=True)
+    used_traffic = Column(BigInteger, nullable=False, default=0)
+    expiry_date = Column(Date, nullable=True)
+    status = Column(JSON, nullable=True)
+    # Remaining successful create/renew operations. NULL means unrestricted.
+    user_limit = Column(BigInteger, nullable=True)
+    max_user_duration_days = Column(Integer, nullable=True)
+    hashed_password_before = Column(String(255), nullable=True)
+    last_expiry_notification = Column(DateTime, nullable=True)
+    last_traffic_notification = Column(Integer, nullable=True)
+    last_traffic_notify = Column(Integer, nullable=True)
+    calculate_volume = Column(String(50), nullable=False, default="used_traffic")
+    prevent_user_creation = Column(Boolean, nullable=False, default=False)
+    prevent_user_deletion = Column(Boolean, nullable=False, default=False)
+    prevent_user_reset = Column(Boolean, nullable=False, default=False)
+    prevent_revoke_subscription = Column(Boolean, nullable=False, default=False)
+    prevent_unlimited_traffic = Column(Boolean, nullable=False, default=False)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class MarzhelpUserState(Base):
+    __tablename__ = "marzhelp_user_states"
+
+    user_id = Column(BigInteger, primary_key=True)
+    username = Column(String(50), nullable=True)
+    lang = Column(String(10), nullable=True)
+    state = Column(String(50), nullable=True)
+    admin_id = Column(Integer, nullable=True)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    data = Column(Text, nullable=True)
+    message_id = Column(Integer, nullable=True)
+    template_index = Column(Integer, nullable=False, default=0)
+
+
+class MarzhelpUserTemporary(Base):
+    __tablename__ = "marzhelp_user_temporaries"
+
+    user_id = Column(BigInteger, primary_key=True)
+    user_key = Column(String(50), primary_key=True)
+    value = Column(Text, nullable=True)
+
+
+class MarzhelpAdminUsage(Base):
+    __tablename__ = "marzhelp_admin_usage"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    admin_id = Column(Integer, ForeignKey("admins.id"), nullable=False, index=True)
+    used_traffic_gb = Column(Numeric(18, 2), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+
+class MarzhelpLimit(Base):
+    __tablename__ = "marzhelp_limits"
+    __table_args__ = (UniqueConstraint("type", "admin_id", "inbound_tag", name="uq_marzhelp_limit"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    type = Column(String(16), nullable=False)
+    admin_id = Column(Integer, ForeignKey("admins.id"), nullable=False, index=True)
+    inbound_tag = Column(String(255), nullable=False)
+
+
+class MarzhelpRuntimeSetting(Base):
+    __tablename__ = "marzhelp_runtime_settings"
+
+    setting_name = Column(String(64), primary_key=True)
+    setting_value = Column(String(255), nullable=False)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class MarzhelpDeletedUser(Base):
+    __tablename__ = "marzhelp_deleted_users"
+
+    user_id = Column(Integer, primary_key=True)
+    admin_id = Column(Integer, nullable=False, index=True)
+    username = Column(String(34), nullable=True)
+    used_traffic_total = Column(BigInteger, nullable=False, default=0)
+    allocated_traffic = Column(BigInteger, nullable=True)
+    refunded_traffic = Column(BigInteger, nullable=False, default=0)
+    deleted_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+
+class MarzhelpAccountingTransaction(Base):
+    __tablename__ = "marzhelp_accounting_transactions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    operation_key = Column(String(128), nullable=False, unique=True)
+    operation_type = Column(String(32), nullable=False)
+    admin_id = Column(Integer, nullable=False, index=True)
+    user_id = Column(Integer, nullable=True)
+    username = Column(String(34), nullable=True)
+    traffic_delta = Column(BigInteger, nullable=False, default=0)
+    allowance_delta = Column(Integer, nullable=False, default=0)
+    details = Column(JSON, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
 
 
 class User(Base):

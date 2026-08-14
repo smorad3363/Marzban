@@ -15,6 +15,9 @@ from app.db.models import (
     TLS,
     Admin,
     AdminUsageLogs,
+    MarzhelpAdminSettings,
+    MarzhelpAdminUsage,
+    MarzhelpLimit,
     NextPlan,
     Node,
     NodeWatchdogSettings,
@@ -45,6 +48,7 @@ from app.models.user import (
 )
 from app.models.user_template import UserTemplateCreate, UserTemplateModify
 from app.utils.helpers import calculate_expiration_days, calculate_usage_percent
+from app.utils import marzhelp_policy
 from config import NOTIFY_DAYS_LEFT, NOTIFY_REACHED_USAGE_PERCENT, USERS_AUTODELETE_DAYS
 
 
@@ -380,6 +384,10 @@ def create_user(db: Session, user: UserCreate, admin: Admin = None) -> User:
                   excluded_inbounds=excluded_inbounds)
         )
 
+    policy_settings = marzhelp_policy.validate_create(
+        db, admin.id if admin is not None else None, user
+    )
+
     dbuser = User(
         username=user.username,
         proxies=proxies,
@@ -400,6 +408,10 @@ def create_user(db: Session, user: UserCreate, admin: Admin = None) -> User:
         ) if user.next_plan else None
     )
     db.add(dbuser)
+    db.flush()
+    marzhelp_policy.record_create(
+        db, dbuser, policy_settings is not None and policy_settings.user_limit is not None
+    )
     db.commit()
     db.refresh(dbuser)
     return dbuser
@@ -416,6 +428,7 @@ def remove_user(db: Session, dbuser: User) -> User:
     Returns:
         User: The removed user object.
     """
+    marzhelp_policy.capture_delete(db, dbuser)
     db.delete(dbuser)
     db.commit()
     return dbuser
@@ -430,6 +443,7 @@ def remove_users(db: Session, dbusers: List[User]):
         dbusers (List[User]): List of user objects to be removed.
     """
     for dbuser in dbusers:
+        marzhelp_policy.capture_delete(db, dbuser)
         db.delete(dbuser)
     db.commit()
     return
@@ -447,6 +461,7 @@ def update_user(db: Session, dbuser: User, modify: UserModify) -> User:
     Returns:
         User: The updated user object.
     """
+    renewal, allowance_consumed = marzhelp_policy.validate_update(db, dbuser, modify)
     added_proxies: Dict[ProxyTypes, Proxy] = {}
     if modify.proxies:
         for proxy_type, settings in modify.proxies.items():
@@ -485,7 +500,7 @@ def update_user(db: Session, dbuser: User, modify: UserModify) -> User:
                             dbuser.used_traffic, dbuser.data_limit) < percent):
                         reminder = get_notification_reminder(db, dbuser.id, ReminderType.data_usage, threshold=percent)
                         if reminder:
-                            delete_notification_reminder(db, reminder)
+                            delete_notification_reminder(db, reminder, commit=False)
 
             else:
                 dbuser.status = UserStatus.limited
@@ -501,7 +516,7 @@ def update_user(db: Session, dbuser: User, modify: UserModify) -> User:
                         reminder = get_notification_reminder(
                             db, dbuser.id, ReminderType.expiration_date, threshold=days_left)
                         if reminder:
-                            delete_notification_reminder(db, reminder)
+                            delete_notification_reminder(db, reminder, commit=False)
             else:
                 dbuser.status = UserStatus.expired
 
@@ -529,6 +544,10 @@ def update_user(db: Session, dbuser: User, modify: UserModify) -> User:
 
     dbuser.edit_at = datetime.utcnow()
 
+    if renewal:
+        db.flush()
+        marzhelp_policy.record_renewal(db, dbuser, allowance_consumed)
+
     db.commit()
     db.refresh(dbuser)
     return dbuser
@@ -545,6 +564,7 @@ def reset_user_data_usage(db: Session, dbuser: User) -> User:
     Returns:
         User: The updated user object.
     """
+    marzhelp_policy.validate_reset(db, dbuser)
     usage_log = UserUsageResetLogs(
         user=dbuser,
         used_traffic_at_reset=dbuser.used_traffic,
@@ -581,6 +601,8 @@ def reset_user_by_next(db: Session, dbuser: User) -> User:
     if (dbuser.next_plan is None):
         return
 
+    allowance_consumed = marzhelp_policy.validate_next_plan_activation(db, dbuser)
+
     usage_log = UserUsageResetLogs(
         user=dbuser,
         used_traffic_at_reset=dbuser.used_traffic,
@@ -590,14 +612,15 @@ def reset_user_by_next(db: Session, dbuser: User) -> User:
     dbuser.node_usages.clear()
     dbuser.status = UserStatus.active.value
 
-    dbuser.data_limit = dbuser.next_plan.data_limit + \
-        (0 if dbuser.next_plan.add_remaining_traffic else dbuser.data_limit - dbuser.used_traffic)
+    dbuser.data_limit = marzhelp_policy.resulting_next_plan_data_limit(dbuser)
     dbuser.expire = dbuser.next_plan.expire
 
     dbuser.used_traffic = 0
     db.delete(dbuser.next_plan)
     dbuser.next_plan = None
     db.add(dbuser)
+    db.flush()
+    marzhelp_policy.record_renewal(db, dbuser, allowance_consumed)
 
     db.commit()
     db.refresh(dbuser)
@@ -615,6 +638,7 @@ def revoke_user_sub(db: Session, dbuser: User) -> User:
     Returns:
         User: The updated user object.
     """
+    marzhelp_policy.validate_revoke(db, dbuser)
     dbuser.sub_revoked_at = datetime.utcnow()
 
     user = UserResponse.model_validate(dbuser)
@@ -661,7 +685,11 @@ def reset_all_users_data_usage(db: Session, admin: Optional[Admin] = None):
     if admin:
         query = query.filter(User.admin == admin)
 
-    for dbuser in query.all():
+    users = query.all()
+    for dbuser in users:
+        marzhelp_policy.validate_reset(db, dbuser)
+
+    for dbuser in users:
         dbuser.used_traffic = 0
         if dbuser.status not in [UserStatus.on_hold, UserStatus.expired, UserStatus.disabled]:
             dbuser.status = UserStatus.active
@@ -819,6 +847,8 @@ def update_user_status(db: Session, dbuser: User, status: UserStatus) -> User:
     Returns:
         User: The updated user object.
     """
+    if status == UserStatus.active:
+        marzhelp_policy.validate_activation(db, dbuser)
     dbuser.status = status
     dbuser.last_status_change = datetime.utcnow()
     db.commit()
@@ -838,6 +868,7 @@ def set_owner(db: Session, dbuser: User, admin: Admin) -> User:
     Returns:
         User: The updated user object.
     """
+    marzhelp_policy.validate_transfer(db, dbuser, admin.id)
     dbuser.admin = admin
     db.commit()
     db.refresh(dbuser)
@@ -856,6 +887,7 @@ def start_user_expire(db: Session, dbuser: User) -> User:
         User: The updated user object.
     """
     expire = int(datetime.utcnow().timestamp()) + dbuser.on_hold_expire_duration
+    marzhelp_policy.validate_start_expiration(db, dbuser, expire)
     dbuser.expire = expire
     dbuser.on_hold_expire_duration = None
     dbuser.on_hold_timeout = None
@@ -1006,6 +1038,14 @@ def remove_admin(db: Session, dbadmin: Admin) -> Admin:
     Returns:
         Admin: The removed admin object.
     """
+    # Canonical MarzHelp rows with admin foreign keys must be removed in the
+    # same transaction before the Marzban admin row. Audit/deletion ledgers are
+    # intentionally retained because they have no destructive foreign key.
+    db.query(MarzhelpAdminUsage).filter(MarzhelpAdminUsage.admin_id == dbadmin.id).delete()
+    db.query(MarzhelpLimit).filter(MarzhelpLimit.admin_id == dbadmin.id).delete()
+    db.query(MarzhelpAdminSettings).filter(
+        MarzhelpAdminSettings.admin_id == dbadmin.id
+    ).delete()
     db.delete(dbadmin)
     db.commit()
     return dbadmin
@@ -1481,7 +1521,7 @@ def get_notification_reminder(
     # Check if the reminder has expired
     if reminder.expires_at and reminder.expires_at < datetime.utcnow():
         db.delete(reminder)
-        db.commit()
+        db.flush()
         return None
 
     return reminder
@@ -1512,7 +1552,9 @@ def delete_notification_reminder_by_type(
     db.commit()
 
 
-def delete_notification_reminder(db: Session, dbreminder: NotificationReminder) -> None:
+def delete_notification_reminder(
+    db: Session, dbreminder: NotificationReminder, commit: bool = True
+) -> None:
     """
     Deletes a specific notification reminder.
 
@@ -1521,7 +1563,10 @@ def delete_notification_reminder(db: Session, dbreminder: NotificationReminder) 
         dbreminder (NotificationReminder): The NotificationReminder object to delete.
     """
     db.delete(dbreminder)
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return
 
 
