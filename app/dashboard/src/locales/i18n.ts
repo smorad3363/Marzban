@@ -16,6 +16,12 @@ declare module "i18next" {
     }
 }
 
+const syncDocumentLanguage = (language: string) => {
+    const normalizedLanguage = language.toLowerCase();
+    document.documentElement.lang = normalizedLanguage;
+    document.documentElement.dir = normalizedLanguage === "fa" ? "rtl" : "ltr";
+};
+
 i18n
     .use(LanguageDetector)
     .use(initReactI18next)
@@ -44,11 +50,13 @@ i18n
         },
         function (err, t) {
             dayjs.locale(i18n.language);
+            syncDocumentLanguage(i18n.language);
         }
     );
 
 i18n.on("languageChanged", (lng) => {
     dayjs.locale(lng);
+    syncDocumentLanguage(lng);
 });
 
 // DataPicker

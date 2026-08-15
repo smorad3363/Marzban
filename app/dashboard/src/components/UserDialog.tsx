@@ -40,11 +40,15 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { resetStrategy } from "constants/UserSettings";
 import { FilterUsageType, useDashboard } from "contexts/DashboardContext";
 import dayjs from "dayjs";
+import useGetUser from "hooks/useGetUser";
 import { FC, useEffect, useState } from "react";
 import ReactApexChart from "react-apexcharts";
 import ReactDatePicker from "react-datepicker";
 import { Controller, FormProvider, useForm, useWatch } from "react-hook-form";
 import { useTranslation } from "react-i18next";
+import { useQuery, useQueryClient } from "react-query";
+import { fetch } from "service/http";
+import { ManagedAdmin, ManagedAdminList } from "types/Admin";
 import {
   ProxyKeys,
   ProxyType,
@@ -87,6 +91,8 @@ export type UserDialogProps = {};
 
 export type FormType = Pick<UserCreate, keyof UserCreate> & {
   selected_proxies: ProxyKeys;
+  concurrent_user_limit: number | null;
+  owner_admin: string;
 };
 
 const formatUser = (user: User): FormType => {
@@ -99,6 +105,8 @@ const formatUser = (user: User): FormType => {
       ? Number(user.on_hold_expire_duration / (24 * 60 * 60))
       : user.on_hold_expire_duration,
     selected_proxies: Object.keys(user.proxies) as ProxyKeys,
+    concurrent_user_limit: null,
+    owner_admin: "",
   };
 };
 const getDefaultValues = (): FormType => {
@@ -116,6 +124,8 @@ const getDefaultValues = (): FormType => {
     status: "active",
     on_hold_expire_duration: null,
     note: "",
+    concurrent_user_limit: null,
+    owner_admin: "",
     inbounds,
     proxies: {
       vless: { id: "", flow: "" },
@@ -175,6 +185,11 @@ const baseSchema = {
     }),
   expire: z.number().nullable(),
   data_limit_reset_strategy: z.string(),
+  concurrent_user_limit: z.preprocess(
+    (value) => value === "" || value === null ? null : Number(value),
+    z.number().int().min(1).nullable()
+  ),
+  owner_admin: z.string(),
   inbounds: z.record(z.string(), z.array(z.string())).transform((ins) => {
     Object.keys(ins).forEach((protocol) => {
       if (Array.isArray(ins[protocol]) && !ins[protocol]?.length)
@@ -213,6 +228,24 @@ const schema = z.discriminatedUnion("status", [
   }),
 ]);
 
+const fetchAssignableAdmins = async (): Promise<ManagedAdmin[]> => {
+  const admins: ManagedAdmin[] = [];
+  let offset = 0;
+  let total = 0;
+
+  do {
+    const page = await fetch<ManagedAdminList>(
+      `/admin-management?offset=${offset}&limit=100`
+    );
+    admins.push(...page.admins);
+    total = page.total;
+    if (page.admins.length === 0) break;
+    offset += page.admins.length;
+  } while (offset < total);
+
+  return admins;
+};
+
 export const UserDialog: FC<UserDialogProps> = () => {
   const {
     editingUser,
@@ -230,6 +263,8 @@ export const UserDialog: FC<UserDialogProps> = () => {
   const [error, setError] = useState<string | null>("");
   const toast = useToast();
   const { t, i18n } = useTranslation();
+  const queryClient = useQueryClient();
+  const { userData } = useGetUser();
 
   const { colorMode } = useColorMode();
 
@@ -243,6 +278,12 @@ export const UserDialog: FC<UserDialogProps> = () => {
     resolver: zodResolver(schema),
   });
 
+  const adminsQuery = useQuery<ManagedAdmin[], Error>(
+    ["assignable-admins"],
+    fetchAssignableAdmins,
+    { enabled: isOpen && !isEditing && userData.is_sudo, staleTime: 30000 }
+  );
+
   useEffect(
     () =>
       useDashboard.subscribe(
@@ -254,10 +295,13 @@ export const UserDialog: FC<UserDialogProps> = () => {
     []
   );
 
-  const [dataLimit, userStatus] = useWatch({
+  const [dataLimit, userStatus, ownerAdmin] = useWatch({
     control: form.control,
-    name: ["data_limit", "status"],
+    name: ["data_limit", "status", "owner_admin"],
   });
+  const selectedOwner = adminsQuery.data?.find(
+    (admin) => admin.username === ownerAdmin
+  );
 
   const usageTitle = t("userDialog.total");
   const [usage, setUsage] = useState(createUsageConfig(colorMode, usageTitle));
@@ -290,7 +334,12 @@ export const UserDialog: FC<UserDialogProps> = () => {
     const method = isEditing ? "edited" : "created";
     setError(null);
 
-    const { selected_proxies, ...rest } = values;
+    const {
+      selected_proxies,
+      concurrent_user_limit,
+      owner_admin,
+      ...rest
+    } = values;
 
     let body: UserCreate = {
       ...rest,
@@ -308,7 +357,25 @@ export const UserDialog: FC<UserDialogProps> = () => {
           : "active",
     };
 
-    methods[method](body)
+    const request = methods[method](body).then(async () => {
+      if (!isEditing && owner_admin) {
+        try {
+          await fetch(`/user/${encodeURIComponent(values.username)}/set-owner`, {
+            method: "PUT",
+            query: { admin_username: owner_admin },
+          });
+          queryClient.invalidateQueries("admin-management");
+        } catch (assignmentError) {
+          await fetch(`/user/${encodeURIComponent(values.username)}`, {
+            method: "DELETE",
+          }).catch(() => undefined);
+          useDashboard.getState().refetchUsers();
+          throw assignmentError;
+        }
+      }
+    });
+
+    request
       .then(() => {
         toast({
           title: t(
@@ -516,6 +583,35 @@ export const UserDialog: FC<UserDialogProps> = () => {
                           </FormControl>
                         )}
                       </Flex>
+                      {!isEditing && userData.is_sudo && (
+                        <FormControl mb="10px">
+                          <FormLabel>{t("userDialog.ownerAdmin")}</FormLabel>
+                          <Select
+                            size="sm"
+                            disabled={disabled || adminsQuery.isLoading}
+                            {...form.register("owner_admin")}
+                          >
+                            <option value="">{t("userDialog.currentSudoOwner")}</option>
+                            {adminsQuery.data?.map((admin) => {
+                              const isFull = admin.policy.max_users !== null &&
+                                admin.user_count >= admin.policy.max_users;
+                              return (
+                                <option key={admin.username} value={admin.username} disabled={isFull}>
+                                  {admin.username} ({admin.user_count} / {admin.policy.max_users ?? t("unlimited")})
+                                </option>
+                              );
+                            })}
+                          </Select>
+                          <FormHelperText>
+                            {selectedOwner
+                              ? t("userDialog.ownerCapacity", {
+                                current: selectedOwner.user_count,
+                                max: selectedOwner.policy.max_users ?? t("unlimited"),
+                              })
+                              : t("userDialog.ownerAdminHelp")}
+                          </FormHelperText>
+                        </FormControl>
+                      )}
                       <FormControl mb={"10px"}>
                         <FormLabel>{t("userDialog.dataLimit")}</FormLabel>
                         <Controller
@@ -539,6 +635,29 @@ export const UserDialog: FC<UserDialogProps> = () => {
                           }}
                         />
                       </FormControl>
+                      {!isEditing && (
+                        <FormControl mb="10px" isInvalid={!!form.formState.errors.concurrent_user_limit}>
+                          <FormLabel>{t("userDialog.concurrentUserLimit")}</FormLabel>
+                          <Controller
+                            control={form.control}
+                            name="concurrent_user_limit"
+                            render={({ field }) => (
+                              <Input
+                                type="number"
+                                min={1}
+                                step={1}
+                                size="sm"
+                                borderRadius="6px"
+                                disabled={disabled}
+                                value={field.value ? String(field.value) : ""}
+                                onChange={field.onChange}
+                                error={form.formState.errors.concurrent_user_limit?.message}
+                              />
+                            )}
+                          />
+                          <FormHelperText>{t("userDialog.concurrentUserLimitHelp")}</FormHelperText>
+                        </FormControl>
+                      )}
                       <Collapse
                         in={!!(dataLimit && dataLimit > 0)}
                         animateOpacity

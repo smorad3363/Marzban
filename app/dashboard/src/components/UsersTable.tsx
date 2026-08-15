@@ -198,18 +198,8 @@ export const UsersTable: FC<UsersTableProps> = (props) => {
   const [selectedRow, setSelectedRow] = useState<ExpandedIndex | undefined>(
     undefined
   );
-  const marginTop = useBreakpointValue({ base: 120, lg: 72 }) || 72;
-  const [top, setTop] = useState(`${marginTop}px`);
+  const top = "0px";
   const useTable = useBreakpointValue({ base: false, md: true });
-
-  useEffect(() => {
-    const calcTop = () => {
-      const el = document.querySelectorAll("#filters")[0] as HTMLElement;
-      setTop(`${el.offsetHeight}px`);
-    };
-    window.addEventListener("scroll", calcTop);
-    () => window.removeEventListener("scroll", calcTop);
-  }, []);
 
   const isFiltered = users.length !== totalUsers.total;
 
@@ -233,7 +223,7 @@ export const UsersTable: FC<UsersTableProps> = (props) => {
   };
 
   return (
-    <Box id="users-table" overflowX={{ base: "unset", md: "unset" }}>
+    <Box id="users-table" overflowX={{ base: "unset", md: "unset" }} borderTopWidth="1px" borderColor="gray.200" _dark={{ borderColor: "whiteAlpha.200" }}>
       <Accordion
         allowMultiple
         display={{ base: "block", md: "none" }}

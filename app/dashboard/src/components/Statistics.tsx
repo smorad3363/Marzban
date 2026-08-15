@@ -1,4 +1,4 @@
-import { Box, BoxProps, Card, chakra, HStack, Text } from "@chakra-ui/react";
+import { Box, BoxProps, Card, chakra, HStack, SimpleGrid, Text } from "@chakra-ui/react";
 import {
   ChartBarIcon,
   ChartPieIcon,
@@ -53,19 +53,21 @@ const StatisticCard: FC<PropsWithChildren<StatisticCardProps>> = ({
     <Card
       p={{ base: 4, md: 5 }}
       borderWidth="1px"
-      borderColor="light-border"
+      borderColor="gray.200"
       bg="white"
-      _dark={{ borderColor: "gray.600", bg: "#0d1929" }}
+      _dark={{ borderColor: "whiteAlpha.200", bg: "surface.dark" }}
       borderStyle="solid"
-      boxShadow="none"
-      borderRadius="12px"
+      boxShadow="panel"
+      borderRadius="18px"
       width="full"
       display="flex"
       justifyContent="space-between"
-      flexDirection="row"
+      flexDirection={{ base: "row", xl: "column" }}
+      alignItems={{ base: "center", xl: "stretch" }}
+      minH={{ xl: "154px" }}
     >
       <HStack alignItems="center" columnGap="4">
-        <Box p="2.5" position="relative" color="primary.700" bg="primary.50" _dark={{ color: "primary.300", bg: "whiteAlpha.100" }} borderRadius="9px">
+        <Box p="2.5" position="relative" color="primary.600" bg="primary.50" _dark={{ color: "primary.300", bg: "whiteAlpha.100" }} borderRadius="12px">
           {icon}
         </Box>
         <Text
@@ -80,7 +82,7 @@ const StatisticCard: FC<PropsWithChildren<StatisticCardProps>> = ({
           {title}
         </Text>
       </HStack>
-      <Box fontSize={{ base: "2xl", xl: "3xl" }} fontWeight="700" mt="2">
+      <Box fontSize={{ base: "2xl", xl: "3xl" }} fontWeight="800" letterSpacing="-0.035em" mt={{ base: 0, xl: 5 }}>
         {content}
       </Box>
     </Card>
@@ -100,13 +102,9 @@ export const Statistics: FC<BoxProps> = (props) => {
   });
   const { t } = useTranslation();
   return (
-    <HStack
-      justifyContent="space-between"
-      gap={0}
-      columnGap={{ lg: 4, md: 0 }}
-      rowGap={{ lg: 0, base: 4 }}
-      display="flex"
-      flexDirection={{ lg: "row", base: "column" }}
+    <SimpleGrid
+      columns={{ base: 1, md: 3 }}
+      gap={{ base: 3, md: 4 }}
       {...props}
     >
       <StatisticCard
@@ -160,6 +158,6 @@ export const Statistics: FC<BoxProps> = (props) => {
         }
         icon={<MemoryIcon />}
       />
-    </HStack>
+    </SimpleGrid>
   );
 };

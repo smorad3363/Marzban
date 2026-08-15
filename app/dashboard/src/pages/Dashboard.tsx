@@ -1,9 +1,8 @@
-import { Box, VStack } from "@chakra-ui/react";
+import { Box, HStack, Text } from "@chakra-ui/react";
+import { AppShell } from "components/AppShell";
 import { CoreSettingsModal } from "components/CoreSettingsModal";
 import { DeleteUserModal } from "components/DeleteUserModal";
 import { Filters } from "components/Filters";
-import { Footer } from "components/Footer";
-import { Header } from "components/Header";
 import { HostsDialog } from "components/HostsDialog";
 import { NodesDialog } from "components/NodesModal";
 import { NodesUsage } from "components/NodesUsage";
@@ -15,26 +14,34 @@ import { UserDialog } from "components/UserDialog";
 import { UsersTable } from "components/UsersTable";
 import { fetchInbounds, useDashboard } from "contexts/DashboardContext";
 import { FC, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { Statistics } from "../components/Statistics";
 
 export const Dashboard: FC = () => {
+  const { t } = useTranslation();
   useEffect(() => {
     useDashboard.getState().refetchUsers();
     fetchInbounds();
   }, []);
   return (
-    <VStack
-      justifyContent="space-between"
-      minH="100vh"
-      px={{ base: 4, md: 6, xl: 8 }}
-      py={6}
-      rowGap={6}
-    >
-      <Box w="full" maxW="1600px" mx="auto">
-        <Header />
-        <Statistics mt="4" />
+    <AppShell>
+      <HStack justify="space-between" align="end" mb={6}>
+        <Box>
+          <Text color="primary.600" _dark={{ color: "primary.300" }} fontSize="xs" fontWeight="800" letterSpacing="0.13em" textTransform="uppercase">
+            Dashboard
+          </Text>
+          <Text as="h1" fontSize={{ base: "2xl", md: "3xl" }} fontWeight="800" letterSpacing="-0.035em" mt={1}>
+            {t("users")}
+          </Text>
+        </Box>
+      </HStack>
+      <Statistics />
+      <Box mt={6} bg="white" _dark={{ bg: "surface.dark" }} borderWidth="1px" borderColor="gray.200" borderRadius={{ base: "16px", md: "20px" }} boxShadow="panel" overflow="hidden">
         <Filters />
-        <UsersTable />
+        <Box px={{ base: 3, md: 5 }} pb={5}>
+          <UsersTable />
+        </Box>
+      </Box>
         <UserDialog />
         <DeleteUserModal />
         <QRCodeDialog />
@@ -45,9 +52,7 @@ export const Dashboard: FC = () => {
         <NodesUsage />
         <ResetAllUsageModal />
         <CoreSettingsModal />
-      </Box>
-      <Footer />
-    </VStack>
+    </AppShell>
   );
 };
 

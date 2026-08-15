@@ -81,17 +81,15 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
         md: "repeat(4, 1fr)",
         base: "repeat(1, 1fr)",
       }}
-      position="sticky"
-      top={0}
-      mx="-6"
-      px="6"
+      position="relative"
+      px={{ base: 4, md: 5 }}
       rowGap={4}
       gap={{
         lg: 4,
         base: 0,
       }}
-      bg="var(--chakra-colors-chakra-body-bg)"
-      py={4}
+      bg="transparent"
+      py={5}
       zIndex="docked"
       {...props}
     >
@@ -149,7 +147,8 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
         colSpan={{ base: 1, md: 4, lg: 3 }}
         order={3}
         borderTop="1px solid"
-        borderColor="light-border"
+        borderColor="gray.200"
+        _dark={{ borderColor: "whiteAlpha.200" }}
         pt={3}
       >
         <HStack

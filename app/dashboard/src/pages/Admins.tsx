@@ -54,8 +54,7 @@ import {
   TrashIcon,
   UserGroupIcon,
 } from "@heroicons/react/24/outline";
-import { Footer } from "components/Footer";
-import { Header } from "components/Header";
+import { AppShell } from "components/AppShell";
 import useGetUser from "hooks/useGetUser";
 import { ChangeEvent, FC, FormEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -104,13 +103,13 @@ const getErrorMessage = (error: any) =>
 
 type StatProps = { label: string; value: string | number; icon: JSX.Element };
 const AdminStat: FC<StatProps> = ({ label, value, icon }) => (
-  <Card variant="outline" p={5} boxShadow="none" borderRadius="12px">
+  <Card variant="outline" p={5} boxShadow="panel" borderRadius="18px" borderColor="gray.200" _dark={{ borderColor: "whiteAlpha.200" }}>
     <HStack justify="space-between">
       <Box>
         <Text color="gray.500" fontSize="sm" fontWeight="600">{label}</Text>
         <Text mt={1} fontSize="2xl" fontWeight="750">{value}</Text>
       </Box>
-      <Box color="primary.600" bg="primary.50" _dark={{ bg: "whiteAlpha.100", color: "primary.300" }} p={3} borderRadius="10px">
+      <Box color="primary.600" bg="primary.50" _dark={{ bg: "whiteAlpha.100", color: "primary.300" }} p={3} borderRadius="12px">
         {icon}
       </Box>
     </HStack>
@@ -338,12 +337,11 @@ export const Admins: FC = () => {
   const openDelete = (item: ManagedAdmin) => { setSelected(item); deleteDisclosure.onOpen(); };
 
   return (
-    <VStack minH="100vh" justify="space-between" px={{ base: 4, md: 6, xl: 8 }} py={6} rowGap={6}>
-      <Box w="full" maxW="1600px" mx="auto">
-        <Header />
-        <Stack direction={{ base: "column", md: "row" }} justify="space-between" align={{ md: "end" }} mt={8} mb={5} gap={4}>
+    <AppShell>
+        <Stack direction={{ base: "column", md: "row" }} justify="space-between" align={{ md: "end" }} mb={6} gap={4}>
           <Box>
-            <Text as="h2" fontSize={{ base: "xl", md: "2xl" }} fontWeight="750">{t("admins.title")}</Text>
+            <Text color="primary.600" _dark={{ color: "primary.300" }} fontSize="xs" fontWeight="800" letterSpacing="0.13em" textTransform="uppercase">Dashboard</Text>
+            <Text as="h1" fontSize={{ base: "2xl", md: "3xl" }} fontWeight="800" letterSpacing="-0.035em" mt={1}>{t("admins.title")}</Text>
             <Text color="gray.500" mt={1} maxW="650px">{t("admins.subtitle")}</Text>
           </Box>
           <Button colorScheme="primary" leftIcon={<AddIcon />} onClick={openCreate}>{t("admins.create")}</Button>
@@ -355,7 +353,7 @@ export const Admins: FC = () => {
           <AdminStat label={t("admins.restrictedAdmins")} value={restrictedCount} icon={<ShieldCheckIcon width={20} />} />
         </SimpleGrid>
 
-        <Card variant="outline" borderRadius="12px" boxShadow="none" overflow="hidden">
+        <Card variant="outline" borderRadius={{ base: "16px", md: "20px" }} borderColor="gray.200" _dark={{ borderColor: "whiteAlpha.200" }} boxShadow="panel" overflow="hidden">
           <HStack p={4} justify="space-between" borderBottomWidth="1px" flexWrap="wrap" gap={3}>
             <InputGroup maxW={{ base: "full", md: "360px" }}>
               <InputLeftElement pointerEvents="none"><SearchIcon /></InputLeftElement>
@@ -411,9 +409,7 @@ export const Admins: FC = () => {
         <AlertDialog isOpen={deleteDisclosure.isOpen} leastDestructiveRef={cancelRef} onClose={deleteDisclosure.onClose}>
           <AlertDialogOverlay><AlertDialogContent borderRadius="12px"><AlertDialogHeader>{t("admins.deleteTitle")}</AlertDialogHeader><AlertDialogBody>{t("admins.deleteConfirm", { username: selected?.username })}</AlertDialogBody><AlertDialogFooter gap={3}><Button ref={cancelRef} onClick={deleteDisclosure.onClose}>{t("cancel")}</Button><Button colorScheme="red" isLoading={removeMutation.isLoading} onClick={() => selected && removeMutation.mutate(selected.username)}>{t("delete")}</Button></AlertDialogFooter></AlertDialogContent></AlertDialogOverlay>
         </AlertDialog>
-      </Box>
-      <Footer />
-    </VStack>
+    </AppShell>
   );
 };
 

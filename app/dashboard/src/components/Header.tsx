@@ -2,6 +2,7 @@ import {
   Box,
   Button,
   chakra,
+  Flex,
   HStack,
   IconButton,
   Image,
@@ -9,6 +10,7 @@ import {
   MenuButton,
   MenuItem,
   MenuList,
+  Spacer,
   Stack,
   Text,
   useColorMode,
@@ -77,55 +79,116 @@ export const Header: FC<HeaderProps> = ({ actions }) => {
   const isAdminsPage = location.pathname.startsWith("/admins");
   const { colorMode, toggleColorMode } = useColorMode();
   return (
-    <Stack
-      direction={{ base: "column", lg: "row" }}
-      gap={{ base: 4, lg: 6 }}
-      align={{ base: "stretch", lg: "center" }}
-      justifyContent="space-between"
+    <Flex
+      as="aside"
+      w={{ base: "full", lg: "252px" }}
+      minW={{ lg: "252px" }}
+      minH={{ lg: "100vh" }}
+      h={{ lg: "100vh" }}
+      position={{ base: "relative", lg: "sticky" }}
+      top="0"
+      zIndex="sticky"
+      direction="column"
+      bg="whiteAlpha.900"
+      _dark={{ bg: "rgba(8, 17, 31, 0.94)", borderColor: "whiteAlpha.200" }}
+      borderEndWidth={{ lg: "1px" }}
+      borderBottomWidth={{ base: "1px", lg: "0" }}
+      borderColor="gray.200"
+      backdropFilter="blur(18px)"
+      px={{ base: 4, lg: 4 }}
+      py={{ base: 3, lg: 5 }}
       __css={{
         "& .menuList": {
           direction: "ltr",
         },
       }}
-      position="relative"
     >
-      <HStack spacing={3} minW={0}>
-        <Image
-          src={brandIcon}
-          alt="Network console"
-          boxSize={{ base: "34px", md: "40px" }}
-          borderRadius="12px"
-          objectFit="cover"
-          boxShadow="0 8px 24px rgba(8, 145, 178, 0.18)"
-        />
-        <Box minW={0}>
-          <Text
-            fontSize="10px"
-            fontWeight="800"
-            letterSpacing="0.14em"
-            color="primary.600"
-            _dark={{ color: "primary.300" }}
+      <HStack justify="space-between" align="center">
+        <HStack spacing={3} minW={0}>
+          <Image
+            src={brandIcon}
+            alt="Network console"
+            boxSize={{ base: "38px", lg: "46px" }}
+            borderRadius="14px"
+            objectFit="cover"
+            boxShadow="0 10px 30px rgba(37, 99, 235, 0.2)"
+          />
+          <Box minW={0}>
+            <Text fontSize="xs" fontWeight="800" letterSpacing="0.13em" color="primary.600" _dark={{ color: "primary.300" }}>
+              MARZBAN
+            </Text>
+            <Text fontSize="xs" color="gray.500" mt="1px">
+              Control center
+            </Text>
+          </Box>
+        </HStack>
+        <HStack display={{ base: "flex", lg: "none" }} spacing={2}>
+          <Menu>
+            <MenuButton as={IconButton} size="sm" variant="ghost" icon={<SettingsIcon />} aria-label="settings" />
+            <MenuList minW="190px" zIndex={99999} className="menuList">
+              {isSudo() && (
+                <>
+                  <MenuItem icon={<CoreSettingsIcon />} onClick={() => useDashboard.setState({ isEditingCore: true })}>
+                    {t("core.title")}
+                  </MenuItem>
+                  <MenuItem icon={<HostsIcon />} onClick={onEditingHosts.bind(null, true)}>
+                    {t("header.hostSettings")}
+                  </MenuItem>
+                  <MenuItem icon={<NodesIcon />} onClick={onEditingNodes.bind(null, true)}>
+                    {t("header.nodeSettings")}
+                  </MenuItem>
+                  <MenuItem icon={<NodesUsageIcon />} onClick={onShowingNodesUsage.bind(null, true)}>
+                    {t("header.nodesUsage")}
+                  </MenuItem>
+                  <MenuItem icon={<ResetUsageIcon />} onClick={onResetAllUsage.bind(null, true)}>
+                    {t("resetAllUsage")}
+                  </MenuItem>
+                </>
+              )}
+              <Link to="/login">
+                <MenuItem icon={<LogoutIcon />}>{t("header.logout")}</MenuItem>
+              </Link>
+            </MenuList>
+          </Menu>
+          <Language />
+          <IconButton
+            size="sm"
+            variant="ghost"
+            aria-label="switch theme"
+            onClick={() => {
+              updateThemeColor(colorMode == "dark" ? "light" : "dark");
+              toggleColorMode();
+            }}
           >
-            NETWORK CONTROL
-          </Text>
-          <Text as="h1" fontWeight="700" fontSize={{ base: "lg", md: "2xl" }}>
-            {t(isAdminsPage ? "admins.title" : "users")}
-          </Text>
-        </Box>
+            {colorMode === "light" ? <DarkIcon /> : <LightIcon />}
+          </IconButton>
+        </HStack>
       </HStack>
-      <HStack justify={{ base: "space-between", lg: "flex-end" }} minW={0}>
-        <HStack p="3px" bg="blackAlpha.50" _dark={{ bg: "whiteAlpha.100" }} borderRadius="9px" borderWidth="1px" spacing={1}>
-          <Button as={Link} to="/" size="sm" variant={!isAdminsPage ? "solid" : "ghost"} colorScheme={!isAdminsPage ? "primary" : "gray"} leftIcon={<UsersNavIcon />}>
+
+      <Stack
+        as="nav"
+        direction={{ base: "row", lg: "column" }}
+        spacing={{ base: 2, lg: 1 }}
+        mt={{ base: 3, lg: 9 }}
+        overflowX={{ base: "auto", lg: "visible" }}
+      >
+          <Button as={Link} to="/" size="md" variant={!isAdminsPage ? "solid" : "ghost"} colorScheme={!isAdminsPage ? "primary" : "gray"} leftIcon={<UsersNavIcon />} justifyContent="flex-start" minW={{ base: "max-content", lg: "full" }}>
             {t("users")}
           </Button>
           {isSudo() && (
-            <Button as={Link} to="/admins/" size="sm" variant={isAdminsPage ? "solid" : "ghost"} colorScheme={isAdminsPage ? "primary" : "gray"} leftIcon={<AdminsNavIcon />}>
+            <Button as={Link} to="/admins/" size="md" variant={isAdminsPage ? "solid" : "ghost"} colorScheme={isAdminsPage ? "primary" : "gray"} leftIcon={<AdminsNavIcon />} justifyContent="flex-start" minW={{ base: "max-content", lg: "full" }}>
               {t("admins.nav")}
             </Button>
           )}
-        </HStack>
-        <Box overflow="auto" css={{ direction: "rtl" }}>
-        <HStack alignItems="center">
+      </Stack>
+
+      <Spacer display={{ base: "none", lg: "block" }} />
+      {actions}
+      <Box display={{ base: "none", lg: "block" }} mt={6} pt={4} borderTopWidth="1px" borderColor="gray.200" _dark={{ borderColor: "whiteAlpha.200" }}>
+        <Text fontSize="xs" color="gray.500" mb={3} px={1} noOfLines={1}>
+          {userData?.username || "Administrator"}
+        </Text>
+        <HStack alignItems="center" spacing={2}>
           <Menu>
             <MenuButton
               as={IconButton}
@@ -210,8 +273,7 @@ export const Header: FC<HeaderProps> = ({ actions }) => {
             {colorMode === "light" ? <DarkIcon /> : <LightIcon />}
           </IconButton>
         </HStack>
-        </Box>
-      </HStack>
-    </Stack>
+      </Box>
+    </Flex>
   );
 };
