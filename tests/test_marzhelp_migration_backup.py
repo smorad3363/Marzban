@@ -20,6 +20,8 @@ REQUIRED_TABLES = {
     "marzhelp_runtime_settings",
     "marzhelp_deleted_users",
     "marzhelp_accounting_transactions",
+    "marzhelp_admin_allowed_inbounds",
+    "marzhelp_admin_allowed_user_limits",
 }
 
 
@@ -59,6 +61,13 @@ def test_fresh_and_existing_migration_preserve_data(tmp_path, monkeypatch):
         row[1] for row in connection.execute("PRAGMA table_info(marzhelp_admin_settings)")
     }
     assert "max_users" in settings_columns
+    assert "capacity_used" in settings_columns
+    assert "all_inbounds" in settings_columns
+    assert "all_user_limits" in settings_columns
+    user_columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(users)")
+    }
+    assert "concurrent_user_limit" in user_columns
     user_indexes = {
         row[1] for row in connection.execute("PRAGMA index_list(users)")
     }

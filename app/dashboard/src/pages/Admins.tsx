@@ -13,6 +13,7 @@ import {
   Card,
   Checkbox,
   Divider,
+  Flex,
   FormControl,
   FormHelperText,
   FormLabel,
@@ -33,6 +34,9 @@ import {
   Skeleton,
   Stack,
   Switch,
+  Tag,
+  TagCloseButton,
+  TagLabel,
   Table,
   TableContainer,
   Tbody,
@@ -55,6 +59,7 @@ import {
   UserGroupIcon,
 } from "@heroicons/react/24/outline";
 import { AppShell } from "components/AppShell";
+import { useDashboard } from "contexts/DashboardContext";
 import useGetUser from "hooks/useGetUser";
 import { ChangeEvent, FC, FormEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -80,6 +85,10 @@ const emptyPolicy = (): AdminPolicy => ({
   expiry_date: null,
   user_limit: null,
   max_users: null,
+  all_inbounds: true,
+  allowed_inbounds: [],
+  all_user_limits: true,
+  allowed_user_limits: [],
   max_user_duration_days: null,
   calculate_volume: "used_traffic",
   prevent_user_creation: false,
@@ -126,7 +135,10 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
   const { t, i18n } = useTranslation();
   const toast = useToast();
   const queryClient = useQueryClient();
+  const { inbounds } = useDashboard();
   const [form, setForm] = useState<ManagedAdminPayload>(emptyAdmin());
+  const [inboundSearch, setInboundSearch] = useState("");
+  const [newUserLimit, setNewUserLimit] = useState("");
   const isEditing = Boolean(admin);
 
   useEffect(() => {
@@ -139,6 +151,12 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
       policy: { ...admin.policy },
     } : emptyAdmin());
   }, [admin, isOpen]);
+
+  const availableInbounds = [...inbounds.values()]
+    .flat()
+    .filter((inbound) =>
+      inbound.tag.toLocaleLowerCase().includes(inboundSearch.trim().toLocaleLowerCase())
+    );
 
   const mutation = useMutation(
     (payload: ManagedAdminPayload) =>
@@ -171,9 +189,31 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
       toast({ title: t("admins.passwordRequired"), status: "warning", duration: 3000 });
       return;
     }
+    if (!form.policy.all_inbounds && form.policy.allowed_inbounds.length === 0) {
+      toast({ title: t("admins.selectInboundRequired"), status: "warning", duration: 3000 });
+      return;
+    }
+    if (!form.policy.all_user_limits && form.policy.allowed_user_limits.length === 0) {
+      toast({ title: t("admins.selectUserLimitRequired"), status: "warning", duration: 3000 });
+      return;
+    }
     const payload = { ...form };
     if (isEditing && !payload.password) delete payload.password;
     mutation.mutate(payload);
+  };
+
+  const toggleInbound = (tag: string, checked: boolean) => {
+    const next = checked
+      ? [...new Set([...form.policy.allowed_inbounds, tag])]
+      : form.policy.allowed_inbounds.filter((value) => value !== tag);
+    setPolicy("allowed_inbounds", next.sort());
+  };
+
+  const addUserLimit = () => {
+    const value = Number(newUserLimit);
+    if (!Number.isInteger(value) || value < 1) return;
+    setPolicy("allowed_user_limits", [...new Set([...form.policy.allowed_user_limits, value])].sort((a, b) => a - b));
+    setNewUserLimit("");
   };
 
   const toggles: Array<[keyof AdminPolicy, string, string]> = [
@@ -284,6 +324,98 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
                 ))}
               </SimpleGrid>
             </Box>
+
+            <SimpleGrid columns={{ base: 1, lg: 2 }} gap={5}>
+              <Box p={{ base: 4, md: 5 }} bg="#0d1812" borderWidth="1px" borderColor="#33483b" borderRadius="12px" minW={0}>
+                <Text fontWeight="700">{t("admins.inboundAccess")}</Text>
+                <Text color="gray.400" fontSize="sm" mt={1}>{t("admins.inboundAccessHelp")}</Text>
+                <Checkbox
+                  mt={4}
+                  colorScheme="primary"
+                  isChecked={form.policy.all_inbounds}
+                  onChange={(event) => setPolicy("all_inbounds", event.target.checked)}
+                >
+                  {t("admins.allInbounds")}
+                </Checkbox>
+                {!form.policy.all_inbounds && (
+                  <Stack mt={4} spacing={3}>
+                    <Input
+                      aria-label={t("admins.searchInbounds")}
+                      value={inboundSearch}
+                      onChange={(event) => setInboundSearch(event.target.value)}
+                      placeholder={t("admins.searchInbounds")}
+                    />
+                    <Stack
+                      maxH="220px"
+                      overflowY="auto"
+                      spacing={1}
+                      p={2}
+                      borderWidth="1px"
+                      borderColor="#33483b"
+                      borderRadius="10px"
+                    >
+                      {availableInbounds.map((inbound) => (
+                        <Checkbox
+                          key={inbound.tag}
+                          minH="44px"
+                          px={2}
+                          colorScheme="primary"
+                          isChecked={form.policy.allowed_inbounds.includes(inbound.tag)}
+                          onChange={(event) => toggleInbound(inbound.tag, event.target.checked)}
+                        >
+                          <Text dir="ltr" fontSize="sm" overflowWrap="anywhere">{inbound.tag}</Text>
+                        </Checkbox>
+                      ))}
+                    </Stack>
+                  </Stack>
+                )}
+              </Box>
+
+              <Box p={{ base: 4, md: 5 }} bg="#0d1812" borderWidth="1px" borderColor="#33483b" borderRadius="12px" minW={0}>
+                <Text fontWeight="700">{t("admins.allowedUserLimits")}</Text>
+                <Text color="gray.400" fontSize="sm" mt={1}>{t("admins.allowedUserLimitsHelp")}</Text>
+                <Checkbox
+                  mt={4}
+                  colorScheme="primary"
+                  isChecked={form.policy.all_user_limits}
+                  onChange={(event) => setPolicy("all_user_limits", event.target.checked)}
+                >
+                  {t("admins.allUserLimits")}
+                </Checkbox>
+                {!form.policy.all_user_limits && (
+                  <Stack mt={4} spacing={3}>
+                    <HStack align="end">
+                      <FormControl>
+                        <FormLabel>{t("admins.addUserLimit")}</FormLabel>
+                        <Input
+                          type="number"
+                          min={1}
+                          step={1}
+                          dir="ltr"
+                          value={newUserLimit}
+                          onChange={(event) => setNewUserLimit(event.target.value)}
+                        />
+                      </FormControl>
+                      <Button minH="44px" onClick={addUserLimit} isDisabled={!newUserLimit}>{t("add")}</Button>
+                    </HStack>
+                    <Flex gap={2} wrap="wrap" minH="34px">
+                      {form.policy.allowed_user_limits.map((limit) => (
+                        <Tag key={limit} colorScheme="yellow" variant="subtle" minH="32px">
+                          <TagLabel>{t("admins.userLimitValue", { count: limit })}</TagLabel>
+                          <TagCloseButton
+                            aria-label={t("remove")}
+                            onClick={() => setPolicy(
+                              "allowed_user_limits",
+                              form.policy.allowed_user_limits.filter((value) => value !== limit)
+                            )}
+                          />
+                        </Tag>
+                      ))}
+                    </Flex>
+                  </Stack>
+                )}
+              </Box>
+            </SimpleGrid>
           </Stack>
         </ModalBody>
         <ModalFooter borderTopWidth="1px" borderColor="#33483b" gap={3} px={{ base: 4, md: 6 }} py={4} flexWrap="wrap">
@@ -390,7 +522,7 @@ export const Admins: FC = () => {
                     <Tr key={item.username}>
                       <Td><Text color="white" fontWeight="650">{item.username}</Text><Text fontSize="xs" color="gray.400">{item.telegram_id ? `Telegram: ${item.telegram_id}` : t("admins.noContact")}</Text></Td>
                       <Td><Badge bg={item.is_sudo ? "rgba(168, 85, 247, .18)" : "whiteAlpha.100"} color={item.is_sudo ? "purple.200" : "gray.200"} borderWidth="1px" borderColor={item.is_sudo ? "rgba(192, 132, 252, .4)" : "whiteAlpha.200"}>{t(item.is_sudo ? "admins.sudo" : "admins.adminRole")}</Badge></Td>
-                      <Td>{item.user_count} / {item.policy.max_users ?? t("unlimited")}</Td>
+                      <Td>{item.capacity_used} / {item.policy.max_users ?? t("unlimited")}</Td>
                       <Td>{item.policy.total_traffic === null ? t("unlimited") : formatBytes(Math.max(item.policy.total_traffic - item.policy.used_traffic, 0))}</Td>
                       <Td>{item.policy.user_limit ?? t("unlimited")}</Td>
                       <Td>{item.policy.max_user_duration_days ? `${item.policy.max_user_duration_days} ${t("days")}` : t("unlimited")}</Td>
@@ -405,7 +537,7 @@ export const Admins: FC = () => {
                 {admins.map((item) => (
                   <Box key={item.username} p={4}>
                     <HStack justify="space-between" align="start"><Box><Text color="white" fontWeight="700">{item.username}</Text><Badge mt={1} bg={item.is_sudo ? "rgba(168, 85, 247, .18)" : "whiteAlpha.100"} color={item.is_sudo ? "purple.200" : "gray.200"} borderWidth="1px" borderColor={item.is_sudo ? "rgba(192, 132, 252, .4)" : "whiteAlpha.200"}>{t(item.is_sudo ? "admins.sudo" : "admins.adminRole")}</Badge></Box><HStack><IconButton aria-label={t("edit")} size="sm" variant="ghost" icon={<EditIcon />} isDisabled={!canEdit(item)} onClick={() => openEdit(item)} /><IconButton aria-label={t("delete")} size="sm" variant="ghost" colorScheme="red" icon={<RemoveIcon />} isDisabled={item.is_sudo} onClick={() => openDelete(item)} /></HStack></HStack>
-                    <SimpleGrid columns={2} gap={3} mt={4} fontSize="sm"><Box><Text color="gray.400" fontSize="xs">{t("admins.usersCount")}</Text><Text color="gray.100" mt={1}>{item.user_count} / {item.policy.max_users ?? t("unlimited")}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.credit")}</Text><Text color="gray.100" mt={1}>{item.policy.total_traffic === null ? t("unlimited") : formatBytes(Math.max(item.policy.total_traffic - item.policy.used_traffic, 0))}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.operationLimit")}</Text><Text color="gray.100" mt={1}>{item.policy.user_limit ?? t("unlimited")}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.maxDuration")}</Text><Text color="gray.100" mt={1}>{item.policy.max_user_duration_days ? `${item.policy.max_user_duration_days} ${t("days")}` : t("unlimited")}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.expiryDate")}</Text><Text color="gray.100" mt={1}>{item.policy.expiry_date || t("unlimited")}</Text></Box></SimpleGrid>
+                    <SimpleGrid columns={2} gap={3} mt={4} fontSize="sm"><Box><Text color="gray.400" fontSize="xs">{t("admins.usersCount")}</Text><Text color="gray.100" mt={1}>{item.capacity_used} / {item.policy.max_users ?? t("unlimited")}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.credit")}</Text><Text color="gray.100" mt={1}>{item.policy.total_traffic === null ? t("unlimited") : formatBytes(Math.max(item.policy.total_traffic - item.policy.used_traffic, 0))}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.operationLimit")}</Text><Text color="gray.100" mt={1}>{item.policy.user_limit ?? t("unlimited")}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.maxDuration")}</Text><Text color="gray.100" mt={1}>{item.policy.max_user_duration_days ? `${item.policy.max_user_duration_days} ${t("days")}` : t("unlimited")}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.expiryDate")}</Text><Text color="gray.100" mt={1}>{item.policy.expiry_date || t("unlimited")}</Text></Box></SimpleGrid>
                   </Box>
                 ))}
               </Stack>

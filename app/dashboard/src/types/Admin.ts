@@ -4,6 +4,10 @@ export type AdminPolicy = {
   expiry_date: string | null;
   user_limit: number | null;
   max_users: number | null;
+  all_inbounds: boolean;
+  allowed_inbounds: string[];
+  all_user_limits: boolean;
+  allowed_user_limits: number[];
   max_user_duration_days: number | null;
   calculate_volume: "used_traffic" | "created_traffic";
   prevent_user_creation: boolean;
@@ -20,6 +24,7 @@ export type ManagedAdmin = {
   discord_webhook: string | null;
   users_usage: number | null;
   user_count: number;
+  capacity_used: number;
   policy: AdminPolicy;
 };
 
@@ -30,6 +35,16 @@ export type ManagedAdminList = {
   limit: number;
 };
 
-export type ManagedAdminPayload = Omit<ManagedAdmin, "users_usage" | "user_count"> & {
+export type ManagedAdminPayload = Omit<ManagedAdmin, "users_usage" | "user_count" | "capacity_used"> & {
   password?: string;
+};
+
+export type AdminCapabilities = {
+  all_inbounds: boolean;
+  allowed_inbounds: string[];
+  all_user_limits: boolean;
+  allowed_user_limits: number[];
+  capacity_used: number;
+  capacity_limit: number | null;
+  capacity_remaining: number | null;
 };

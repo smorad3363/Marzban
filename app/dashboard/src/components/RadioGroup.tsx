@@ -136,6 +136,7 @@ const RadioCard: FC<
       description: string;
       toggleAccordion: () => void;
       isSelected: boolean;
+      allowedInboundTags?: string[] | null;
     }
   >
 > = ({
@@ -144,6 +145,7 @@ const RadioCard: FC<
   description,
   toggleAccordion,
   isSelected,
+  allowedInboundTags,
   ...props
 }) => {
   const form = useFormContext();
@@ -173,15 +175,18 @@ const RadioCard: FC<
     },
   });
 
+  const visibleInbounds = (
+    (inbounds.get(title as ProtocolType) as InboundType[]) || []
+  ).filter(
+    (inbound) => !allowedInboundTags || allowedInboundTags.includes(inbound.tag)
+  );
+
   const isPartialSelected =
     inBoundDefaultValue &&
     isSelected &&
-    (useDashboard.getState().inbounds.get(title as ProtocolType) || [])
-      .length !== inBoundDefaultValue.length;
+    visibleInbounds.length !== inBoundDefaultValue.length;
 
-  const protocolHasInbound =
-    (useDashboard.getState().inbounds.get(title as ProtocolType) || []).length >
-    0;
+  const protocolHasInbound = visibleInbounds.length > 0;
 
   const shouldBeDisabled = !isSelected && !protocolHasInbound;
 
@@ -333,9 +338,7 @@ const RadioCard: FC<
               columns={1}
               spacing={1}
             >
-              {(
-                (inbounds.get(title as ProtocolType) as InboundType[]) || []
-              ).map((inbound) => {
+              {visibleInbounds.map((inbound) => {
                 return (
                   <InboundCard
                     key={inbound.tag}
@@ -462,10 +465,11 @@ export type RadioListType = {
 export type RadioGroupProps = ControllerRenderProps & {
   list: RadioListType[];
   disabled?: boolean;
+  allowedInboundTags?: string[] | null;
 };
 
 export const RadioGroup = forwardRef<any, RadioGroupProps>(
-  ({ name, list, onChange, disabled, ...props }, ref) => {
+  ({ name, list, onChange, disabled, allowedInboundTags, ...props }, ref) => {
     const form = useFormContext();
     const [expandedAccordions, setExpandedAccordions] = useState<number[]>([]);
 
@@ -487,6 +491,10 @@ export const RadioGroup = forwardRef<any, RadioGroupProps>(
             useDashboard
               .getState()
               .inbounds.get(selectedItem[0] as ProtocolType)
+              ?.filter(
+                (inbound) =>
+                  !allowedInboundTags || allowedInboundTags.includes(inbound.tag)
+              )
               ?.map((i) => i.tag)
           );
         }
@@ -523,6 +531,7 @@ export const RadioGroup = forwardRef<any, RadioGroupProps>(
                 key={value.title}
                 title={value.title}
                 description={value.description}
+                allowedInboundTags={allowedInboundTags}
                 isSelected={
                   !!(props.value as string[]).find((v) => v === value.title)
                 }

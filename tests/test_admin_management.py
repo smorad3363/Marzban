@@ -92,3 +92,10 @@ def test_policy_rejects_negative_or_unknown_volume_rules():
         MarzhelpAdminPolicy(max_users=0)
     with pytest.raises(ValidationError):
         MarzhelpAdminPolicy(calculate_volume="invalid")
+
+
+def test_selected_permission_modes_require_values():
+    with pytest.raises(ValidationError):
+        MarzhelpAdminPolicy(all_inbounds=False)
+    with pytest.raises(ValidationError):
+        MarzhelpAdminPolicy(all_user_limits=False)

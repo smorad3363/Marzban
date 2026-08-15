@@ -9,7 +9,7 @@ from app.models.admin import Admin
 from app.models.proxy import ProxyHost, ProxyInbound, ProxyTypes
 from app.models.system import SystemStats
 from app.models.user import UserStatus
-from app.utils import responses
+from app.utils import marzhelp_policy, responses
 from app.utils.audit import AuditLogService
 from app.utils.system import cpu_usage, memory_usage, realtime_bandwidth
 
@@ -42,24 +42,40 @@ def get_system_stats(
     cpu = cpu_usage()
     system = crud.get_system_usage(db)
     dbadmin: Union[Admin, None] = crud.get_admin(db, admin.username)
+    effective_admin = dbadmin or admin
+    allowed_inbounds = marzhelp_policy.allowed_inbound_tags(db, effective_admin)
 
-    total_user = crud.get_users_count(db, admin=dbadmin if not admin.is_sudo else None)
+    total_user = crud.get_users_count(
+        db,
+        admin=dbadmin if not admin.is_sudo else None,
+        allowed_inbounds=allowed_inbounds,
+    )
     users_active = crud.get_users_count(
-        db, status=UserStatus.active, admin=dbadmin if not admin.is_sudo else None
+        db, status=UserStatus.active, admin=dbadmin if not admin.is_sudo else None,
+        allowed_inbounds=allowed_inbounds,
     )
     users_disabled = crud.get_users_count(
-        db, status=UserStatus.disabled, admin=dbadmin if not admin.is_sudo else None
+        db, status=UserStatus.disabled, admin=dbadmin if not admin.is_sudo else None,
+        allowed_inbounds=allowed_inbounds,
     )
     users_on_hold = crud.get_users_count(
-        db, status=UserStatus.on_hold, admin=dbadmin if not admin.is_sudo else None
+        db, status=UserStatus.on_hold, admin=dbadmin if not admin.is_sudo else None,
+        allowed_inbounds=allowed_inbounds,
     )
     users_expired = crud.get_users_count(
-        db, status=UserStatus.expired, admin=dbadmin if not admin.is_sudo else None
+        db, status=UserStatus.expired, admin=dbadmin if not admin.is_sudo else None,
+        allowed_inbounds=allowed_inbounds,
     )
     users_limited = crud.get_users_count(
-        db, status=UserStatus.limited, admin=dbadmin if not admin.is_sudo else None
+        db, status=UserStatus.limited, admin=dbadmin if not admin.is_sudo else None,
+        allowed_inbounds=allowed_inbounds,
     )
-    online_users = crud.count_online_users(db, 24)
+    online_users = crud.count_online_users(
+        db,
+        24,
+        admin=dbadmin if not admin.is_sudo else None,
+        allowed_inbounds=allowed_inbounds,
+    )
     realtime_bandwidth_stats = realtime_bandwidth()
 
     return SystemStats(
@@ -75,17 +91,28 @@ def get_system_stats(
         users_expired=users_expired,
         users_limited=users_limited,
         users_on_hold=users_on_hold,
-        incoming_bandwidth=system.uplink,
-        outgoing_bandwidth=system.downlink,
-        incoming_bandwidth_speed=realtime_bandwidth_stats.incoming_bytes,
-        outgoing_bandwidth_speed=realtime_bandwidth_stats.outgoing_bytes,
+        incoming_bandwidth=system.uplink if admin.is_sudo else 0,
+        outgoing_bandwidth=system.downlink if admin.is_sudo else 0,
+        incoming_bandwidth_speed=realtime_bandwidth_stats.incoming_bytes if admin.is_sudo else 0,
+        outgoing_bandwidth_speed=realtime_bandwidth_stats.outgoing_bytes if admin.is_sudo else 0,
     )
 
 
 @router.get("/inbounds", response_model=Dict[ProxyTypes, List[ProxyInbound]])
-def get_inbounds(admin: Admin = Depends(Admin.get_current)):
+def get_inbounds(
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
     """Retrieve inbound configurations grouped by protocol."""
-    return xray.config.inbounds_by_protocol
+    dbadmin = crud.get_admin(db, admin.username)
+    allowed = marzhelp_policy.allowed_inbound_tags(db, dbadmin or admin)
+    if allowed is None:
+        return xray.config.inbounds_by_protocol
+    return {
+        protocol: [inbound for inbound in inbounds if inbound["tag"] in allowed]
+        for protocol, inbounds in xray.config.inbounds_by_protocol.items()
+        if any(inbound["tag"] in allowed for inbound in inbounds)
+    }
 
 
 @router.get(

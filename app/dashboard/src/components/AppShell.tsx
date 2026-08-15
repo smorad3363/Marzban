@@ -15,7 +15,7 @@ export const AppShell: FC<PropsWithChildren> = ({ children }) => (
       px={{ base: 4, md: 7, xl: 9 }}
       py={{ base: 5, md: 7 }}
     >
-      <Box w="full" maxW="1480px" mx="auto" flex="1">
+      <Box w="full" maxW="none" minW={0} flex="1">
         {children}
       </Box>
       <Footer mt={8} />

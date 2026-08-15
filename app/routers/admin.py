@@ -11,6 +11,7 @@ from app.dependencies import get_admin_by_username, validate_admin
 from app.db.models import MarzhelpAdminSettings, User
 from app.models.admin import (
     Admin,
+    AdminCapabilities,
     AdminCreate,
     AdminModify,
     ManagedAdmin,
@@ -21,7 +22,7 @@ from app.models.admin import (
     Token,
 )
 from app.models.user import UserStatus
-from app.utils import report, responses
+from app.utils import marzhelp_policy, report, responses
 from app.utils.audit import (
     AuditLogService,
     AuditStatus,
@@ -35,7 +36,12 @@ from config import LOGIN_NOTIFY_WHITE_LIST
 router = APIRouter(tags=["Admin"], prefix="/api", responses={401: responses._401})
 
 
-def managed_admin_response(dbadmin, settings=None, user_count: int = 0) -> ManagedAdmin:
+def managed_admin_response(
+    dbadmin,
+    settings=None,
+    user_count: int = 0,
+    capacity_used: int = 0,
+) -> ManagedAdmin:
     policy = (
         MarzhelpAdminPolicy.model_validate(settings)
         if settings is not None
@@ -48,6 +54,7 @@ def managed_admin_response(dbadmin, settings=None, user_count: int = 0) -> Manag
         discord_webhook=dbadmin.discord_webhook,
         users_usage=dbadmin.users_usage,
         user_count=user_count,
+        capacity_used=capacity_used,
         policy=policy,
     )
 
@@ -226,6 +233,32 @@ def get_current_admin(admin: Admin = Depends(Admin.get_current)):
     return admin
 
 
+@router.get("/admin/capabilities", response_model=AdminCapabilities)
+def get_admin_capabilities(
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
+    """Return effective inbound, device-limit, and weighted-capacity rules."""
+
+    dbadmin = crud.get_admin(db, admin.username)
+    if admin.is_sudo or dbadmin is None:
+        return AdminCapabilities()
+    settings = db.get(MarzhelpAdminSettings, dbadmin.id)
+    if settings is None:
+        return AdminCapabilities()
+    used = marzhelp_policy.capacity_used(db, dbadmin.id)
+    maximum = settings.max_users
+    return AdminCapabilities(
+        all_inbounds=settings.all_inbounds,
+        allowed_inbounds=settings.allowed_inbounds,
+        all_user_limits=settings.all_user_limits,
+        allowed_user_limits=settings.allowed_user_limits,
+        capacity_used=used,
+        capacity_limit=maximum,
+        capacity_remaining=(max(int(maximum) - used, 0) if maximum is not None else None),
+    )
+
+
 @router.get(
     "/admins",
     response_model=List[Admin],
@@ -281,7 +314,10 @@ def get_managed_admins(
     return ManagedAdminList(
         admins=[
             managed_admin_response(
-                item, settings_by_admin.get(item.id), user_counts.get(item.id, 0)
+                item,
+                settings_by_admin.get(item.id),
+                user_counts.get(item.id, 0),
+                marzhelp_policy.capacity_used(db, item.id),
             )
             for item in dbadmins
         ],
@@ -314,7 +350,7 @@ def create_managed_admin(
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="Admin already exists")
-    response = managed_admin_response(dbadmin, settings, 0)
+    response = managed_admin_response(dbadmin, settings, 0, 0)
     AuditLogService.log(
         db,
         admin,
@@ -363,7 +399,12 @@ def modify_managed_admin(
     db.refresh(dbadmin)
     db.refresh(settings)
     user_count = db.query(func.count(User.id)).filter(User.admin_id == dbadmin.id).scalar() or 0
-    response = managed_admin_response(dbadmin, settings, user_count)
+    response = managed_admin_response(
+        dbadmin,
+        settings,
+        user_count,
+        marzhelp_policy.capacity_used(db, dbadmin.id),
+    )
     AuditLogService.log(
         db,
         current_admin,

@@ -56,7 +56,7 @@ const setSearchField = debounce((search: string) => {
 export const Filters: FC<FilterProps> = ({ ...props }) => {
   const { loading, filters, onFilterChange, refetchUsers, onCreateUser } =
     useDashboard();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { userData } = useGetUser();
   const adminOptions = useQuery<AdminOption[], Error>(
     ["user-filter-admins"],
@@ -64,6 +64,16 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
     { enabled: userData.is_sudo, staleTime: 30000 }
   );
   const [search, setSearch] = useState("");
+  const controlStyle = {
+    bg: "rgba(2, 6, 23, .58)",
+    color: "gray.100",
+    borderColor: "rgba(148, 163, 184, .2)",
+    _hover: { borderColor: "rgba(34, 197, 94, .42)" },
+    _focusVisible: {
+      borderColor: "green.400",
+      boxShadow: "0 0 0 2px rgba(34, 197, 94, .2)",
+    },
+  } as const;
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(e.target.value);
     setSearchField(e.target.value);
@@ -93,6 +103,7 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
   return (
     <Grid
       id="filters"
+      dir={i18n.dir()}
       templateColumns={{
         lg: "repeat(3, 1fr)",
         md: "repeat(4, 1fr)",
@@ -116,8 +127,8 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
           <Input
             placeholder={t("search")}
             value={search}
-            borderColor="light-border"
             onChange={onChange}
+            {...controlStyle}
           />
 
           <InputRightElement>
@@ -143,6 +154,12 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
             onClick={refetchUsers}
             size="sm"
             variant="outline"
+            minW="44px"
+            h="44px"
+            color="gray.300"
+            bg="rgba(2, 6, 23, .5)"
+            borderColor="rgba(148, 163, 184, .2)"
+            _hover={{ color: "green.200", borderColor: "green.500" }}
           >
             <ReloadIcon
               className={classNames({
@@ -155,6 +172,8 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
             size="sm"
             onClick={() => onCreateUser(true)}
             px={5}
+            minH="44px"
+            boxShadow="0 0 18px rgba(34, 197, 94, .18)"
           >
             {t("createUser")}
           </Button>
@@ -185,7 +204,8 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
             size="sm"
             rounded="md"
             w={{ base: "full", sm: "170px" }}
-            bg="chakra-body-bg"
+            {...controlStyle}
+            sx={{ option: { background: "#080f19", color: "#f8fafc" } }}
           >
             <option value="">{t("usersTable.allStatuses")}</option>
             <option value="active">{t("active")}</option>
@@ -202,7 +222,8 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
               size="sm"
               rounded="md"
               w={{ base: "full", sm: "180px" }}
-              bg="chakra-body-bg"
+              {...controlStyle}
+              sx={{ option: { background: "#080f19", color: "#f8fafc" } }}
               isDisabled={adminOptions.isLoading}
             >
               <option value="">{t("usersTable.allAdmins")}</option>
@@ -220,7 +241,8 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
             size="sm"
             rounded="md"
             w={{ base: "full", sm: "220px" }}
-            bg="chakra-body-bg"
+            {...controlStyle}
+            sx={{ option: { background: "#080f19", color: "#f8fafc" } }}
           >
             <option value="-created_at">{t("usersTable.newestFirst")}</option>
             <option value="created_at">{t("usersTable.oldestFirst")}</option>

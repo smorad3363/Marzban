@@ -6,6 +6,7 @@ from config import SUDOERS
 from fastapi import Depends, HTTPException
 from datetime import datetime, timezone, timedelta
 from app.utils.jwt import get_subscription_payload
+from app.utils import marzhelp_policy
 
 
 def validate_admin(db: Session, username: str, password: str) -> Optional[AdminValidationResult]:
@@ -91,7 +92,9 @@ def get_validated_user(
     if not dbuser:
         raise HTTPException(status_code=404, detail="User not found")
 
-    if not (admin.is_sudo or (dbuser.admin and dbuser.admin.username == admin.username)):
+    dbadmin = crud.get_admin(db, admin.username)
+    effective_admin = dbadmin or admin
+    if not marzhelp_policy.can_access_user(db, effective_admin, dbuser):
         raise HTTPException(status_code=403, detail="You're not allowed")
 
     return dbuser
@@ -103,10 +106,12 @@ def get_expired_users_list(db: Session, admin: Admin, expired_after: Optional[da
     expired_after = expired_after or datetime.min.replace(tzinfo=timezone.utc)
 
     dbadmin = crud.get_admin(db, admin.username)
+    allowed_inbounds = marzhelp_policy.allowed_inbound_tags(db, dbadmin or admin)
     dbusers = crud.get_users(
         db=db,
         status=[UserStatus.expired, UserStatus.limited],
-        admin=dbadmin if not admin.is_sudo else None
+        admin=dbadmin if not admin.is_sudo else None,
+        allowed_inbounds=allowed_inbounds,
     )
 
     return [

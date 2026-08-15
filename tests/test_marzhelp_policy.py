@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -11,10 +12,20 @@ from app.db.models import (
     Admin,
     MarzhelpAccountingTransaction,
     MarzhelpAdminSettings,
+    MarzhelpAdminInboundPermission,
+    MarzhelpAdminUserLimitPermission,
     MarzhelpDeletedUser,
+    Proxy,
+    ProxyInbound,
     User,
     UserUsageResetLogs,
 )
+from app.db import crud
+from app.dependencies import get_validated_user
+from app.models.admin import Admin as AdminSchema
+from app.models.proxy import ProxyTypes
+from app.models.user import UserCreate
+from app.routers.system import get_inbounds
 from app.models.user import UserStatus
 from app.utils import marzhelp_policy as policy
 
@@ -76,7 +87,7 @@ def test_existing_user_count_limit_blocks_create_and_delete_frees_slot(session):
 
     with pytest.raises(policy.MarzhelpPolicyError) as exc:
         policy.validate_create(session, admin.id, plan())
-    assert exc.value.code == "user_count_limit_reached"
+    assert exc.value.code == "weighted_capacity_exceeded"
 
     session.delete(session.query(User).filter(User.username == "counted-two").one())
     session.commit()
@@ -248,3 +259,196 @@ def test_maximum_duration_create_and_renewal(session):
     session.commit()
     with pytest.raises(policy.MarzhelpPolicyError, match="31 days"):
         policy.validate_update(session, user, plan(data_limit=GB, expire=now + 32 * 86400))
+
+
+def test_weighted_capacity_counts_existing_users_and_requested_limit(session):
+    admin, settings = add_admin(session, max_users=10)
+    session.add_all(
+        [
+            User(username="weighted-two", admin_id=admin.id, concurrent_user_limit=2),
+            User(username="weighted-four", admin_id=admin.id, concurrent_user_limit=4),
+        ]
+    )
+    session.commit()
+
+    request = plan()
+    request.concurrent_user_limit = 4
+    policy.validate_create(session, admin.id, request)
+
+    assert settings.capacity_used == 10
+    with pytest.raises(policy.MarzhelpPolicyError) as exc:
+        policy.validate_create(session, admin.id, request)
+    assert exc.value.code == "weighted_capacity_exceeded"
+
+
+def test_weighted_capacity_edit_applies_only_delta(session):
+    admin, settings = add_admin(session, max_users=10)
+    user = User(
+        username="weighted-edit",
+        admin_id=admin.id,
+        concurrent_user_limit=2,
+        status=UserStatus.active,
+    )
+    session.add(user)
+    session.commit()
+
+    upgrade = SimpleNamespace(
+        data_limit=None,
+        expire=None,
+        next_plan=None,
+        inbounds={},
+        proxies={},
+        on_hold_expire_duration=None,
+        concurrent_user_limit=4,
+        model_fields_set={"concurrent_user_limit"},
+    )
+    policy.validate_update(session, user, upgrade)
+    user.concurrent_user_limit = 4
+    session.commit()
+    assert settings.capacity_used == 4
+
+    downgrade = SimpleNamespace(
+        data_limit=None,
+        expire=None,
+        next_plan=None,
+        inbounds={},
+        proxies={},
+        on_hold_expire_duration=None,
+        concurrent_user_limit=1,
+        model_fields_set={"concurrent_user_limit"},
+    )
+    policy.validate_update(session, user, downgrade)
+    user.concurrent_user_limit = 1
+    session.commit()
+    assert settings.capacity_used == 1
+
+
+def test_selected_user_limits_are_enforced_server_side(session):
+    admin, settings = add_admin(session, all_user_limits=False)
+    settings.user_limit_permissions = [
+        MarzhelpAdminUserLimitPermission(admin_id=admin.id, concurrent_user_limit=1),
+        MarzhelpAdminUserLimitPermission(admin_id=admin.id, concurrent_user_limit=2),
+    ]
+    session.commit()
+
+    allowed = plan()
+    allowed.concurrent_user_limit = 2
+    policy.validate_create(session, admin.id, allowed)
+    session.rollback()
+
+    denied = plan()
+    denied.concurrent_user_limit = 4
+    with pytest.raises(policy.MarzhelpPolicyError) as exc:
+        policy.validate_create(session, admin.id, denied)
+    assert exc.value.code == "user_limit_forbidden"
+
+
+def test_inbound_permissions_filter_and_protect_users(session, monkeypatch):
+    inbounds = [
+        {"tag": "allowed", "protocol": "vless", "network": "tcp", "tls": "none"},
+        {"tag": "denied", "protocol": "vless", "network": "tcp", "tls": "none"},
+    ]
+    monkeypatch.setattr(policy.xray.config, "inbounds_by_protocol", {ProxyTypes.VLESS: inbounds})
+    monkeypatch.setattr(policy.xray.config, "inbounds_by_tag", {item["tag"]: item for item in inbounds})
+
+    admin, settings = add_admin(session, all_inbounds=False)
+    settings.inbound_permissions = [
+        MarzhelpAdminInboundPermission(admin_id=admin.id, inbound_tag="allowed")
+    ]
+    allowed_inbound = ProxyInbound(tag="allowed")
+    denied_inbound = ProxyInbound(tag="denied")
+    accessible = User(
+        username="accessible-user",
+        admin_id=admin.id,
+        proxies=[Proxy(type=ProxyTypes.VLESS, settings={}, excluded_inbounds=[denied_inbound])],
+    )
+    inaccessible = User(
+        username="inaccessible-user",
+        admin_id=admin.id,
+        proxies=[Proxy(type=ProxyTypes.VLESS, settings={})],
+    )
+    session.add_all([allowed_inbound, accessible, inaccessible])
+    session.commit()
+
+    assert policy.can_access_user(session, admin, accessible)
+    assert not policy.can_access_user(session, admin, inaccessible)
+    assert [user.username for user in crud.get_users(
+        session,
+        admin=admin,
+        allowed_inbounds={"allowed"},
+    )] == ["accessible-user"]
+    api_admin = AdminSchema.model_validate(admin)
+    assert get_validated_user("accessible-user", admin=api_admin, db=session).username == "accessible-user"
+    with pytest.raises(HTTPException) as exc:
+        get_validated_user("inaccessible-user", admin=api_admin, db=session)
+    assert exc.value.status_code == 403
+    visible_inbounds = get_inbounds(db=session, admin=api_admin)
+    assert [item["tag"] for item in visible_inbounds[ProxyTypes.VLESS]] == ["allowed"]
+
+    request = plan()
+    request.concurrent_user_limit = 1
+    request.inbounds = {ProxyTypes.VLESS: ["denied"]}
+    with pytest.raises(policy.MarzhelpPolicyError) as exc:
+        policy.validate_create(session, admin.id, request)
+    assert exc.value.code == "inbound_forbidden"
+
+    sudo = Admin(username="root-access", hashed_password="x", is_sudo=True)
+    session.add(sudo)
+    session.commit()
+    assert policy.can_access_user(session, sudo, inaccessible)
+
+
+def test_deleting_weighted_user_releases_active_capacity(session):
+    admin, settings = add_admin(session, max_users=6)
+    user = User(
+        username="weighted-delete",
+        admin_id=admin.id,
+        concurrent_user_limit=4,
+        status=UserStatus.active,
+    )
+    session.add(user)
+    session.commit()
+    settings.capacity_used = 4
+    session.commit()
+
+    policy.capture_delete(session, user)
+    session.delete(user)
+    session.commit()
+
+    assert settings.capacity_used == 0
+    assert policy.capacity_used(session, admin.id) == 0
+
+
+def test_concurrent_weighted_creates_cannot_exceed_capacity(session, monkeypatch):
+    inbounds = [{"tag": "capacity", "protocol": "vless", "network": "tcp", "tls": "none"}]
+    monkeypatch.setattr(policy.xray.config, "inbounds_by_protocol", {ProxyTypes.VLESS: inbounds})
+    monkeypatch.setattr(policy.xray.config, "inbounds_by_tag", {"capacity": inbounds[0]})
+    admin, _ = add_admin(session, max_users=4)
+    Session = session.info["session_factory"]
+
+    def attempt(index: int):
+        db = Session()
+        try:
+            dbadmin = db.get(Admin, admin.id)
+            crud.create_user(
+                db,
+                UserCreate(
+                    username=f"concurrent-{index}",
+                    proxies={"vless": {}},
+                    inbounds={"vless": ["capacity"]},
+                    concurrent_user_limit=3,
+                ),
+                admin=dbadmin,
+            )
+            return True
+        except policy.MarzhelpPolicyError:
+            db.rollback()
+            return False
+        finally:
+            db.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(attempt, range(2)))
+
+    assert sorted(results) == [False, True]
+    assert policy.capacity_used(session, admin.id) == 3

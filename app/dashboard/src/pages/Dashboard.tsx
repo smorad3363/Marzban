@@ -36,9 +36,20 @@ export const Dashboard: FC = () => {
         </Box>
       </HStack>
       <Statistics />
-      <Box mt={5} bg="white" _dark={{ bg: "surface.dark" }} borderWidth="1px" borderColor="gray.200" borderRadius="12px" boxShadow="panel" overflow="hidden">
+      <Box
+        mt={5}
+        w="full"
+        minW={0}
+        bg="rgba(3, 9, 17, .76)"
+        borderWidth="1px"
+        borderColor="rgba(148, 163, 184, .14)"
+        borderRadius="14px"
+        boxShadow="0 18px 48px rgba(0, 0, 0, .24)"
+        backdropFilter="blur(18px)"
+        overflow="hidden"
+      >
         <Filters />
-        <Box px={{ base: 3, md: 5 }} pb={5}>
+        <Box px={{ base: 3, md: 4, xl: 5 }} pb={5} minW={0}>
           <UsersTable />
         </Box>
       </Box>

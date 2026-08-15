@@ -134,8 +134,12 @@ class MarzhelpAdminSettings(Base):
     status = Column(JSON, nullable=True)
     # Remaining successful create/renew operations. NULL means unrestricted.
     user_limit = Column(BigInteger, nullable=True)
-    # Maximum number of existing users owned by this admin. NULL means unrestricted.
+    # Maximum weighted concurrent-user capacity. NULL means unrestricted.
     max_users = Column(BigInteger, nullable=True)
+    # Transactional reservation counter; reconciled against active users.
+    capacity_used = Column(BigInteger, nullable=False, default=0)
+    all_inbounds = Column(Boolean, nullable=False, default=True)
+    all_user_limits = Column(Boolean, nullable=False, default=True)
     max_user_duration_days = Column(Integer, nullable=True)
     hashed_password_before = Column(String(255), nullable=True)
     last_expiry_notification = Column(DateTime, nullable=True)
@@ -148,6 +152,46 @@ class MarzhelpAdminSettings(Base):
     prevent_revoke_subscription = Column(Boolean, nullable=False, default=False)
     prevent_unlimited_traffic = Column(Boolean, nullable=False, default=False)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    inbound_permissions = relationship(
+        "MarzhelpAdminInboundPermission",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    user_limit_permissions = relationship(
+        "MarzhelpAdminUserLimitPermission",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+    @property
+    def allowed_inbounds(self):
+        return sorted(item.inbound_tag for item in self.inbound_permissions)
+
+    @property
+    def allowed_user_limits(self):
+        return sorted(item.concurrent_user_limit for item in self.user_limit_permissions)
+
+
+class MarzhelpAdminInboundPermission(Base):
+    __tablename__ = "marzhelp_admin_allowed_inbounds"
+
+    admin_id = Column(
+        Integer,
+        ForeignKey("marzhelp_admin_settings.admin_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    inbound_tag = Column(String(256), primary_key=True)
+
+
+class MarzhelpAdminUserLimitPermission(Base):
+    __tablename__ = "marzhelp_admin_allowed_user_limits"
+
+    admin_id = Column(
+        Integer,
+        ForeignKey("marzhelp_admin_settings.admin_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    concurrent_user_limit = Column(Integer, primary_key=True)
 
 
 class MarzhelpUserState(Base):
@@ -237,6 +281,8 @@ class User(Base):
     node_usages = relationship("NodeUserUsage", back_populates="user", cascade="all, delete-orphan")
     notification_reminders = relationship("NotificationReminder", back_populates="user", cascade="all, delete-orphan")
     data_limit = Column(BigInteger, nullable=True)
+    # NULL keeps the historical unlimited-device behavior.
+    concurrent_user_limit = Column(Integer, nullable=True)
     data_limit_reset_strategy = Column(
         Enum(UserDataLimitResetStrategy),
         nullable=False,

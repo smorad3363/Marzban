@@ -8,9 +8,20 @@ from app.models.admin import Admin
 from app.models.user_template import (UserTemplateCreate, UserTemplateModify,
                                       UserTemplateResponse)
 from app.dependencies import get_user_template
+from app.utils import marzhelp_policy
 from app.utils.audit import AuditLogService, sanitize_audit_value
 
 router = APIRouter(tags=['User Template'], prefix='/api')
+
+
+def _validate_template_access(db: Session, admin: Admin, template) -> UserTemplateResponse:
+    response = UserTemplateResponse.model_validate(template)
+    dbadmin = crud.get_admin(db, admin.username)
+    allowed = marzhelp_policy.allowed_inbound_tags(db, dbadmin or admin)
+    tags = {tag for values in response.inbounds.values() for tag in values}
+    if allowed is not None and not tags.issubset(allowed):
+        raise HTTPException(status_code=403, detail="You're not allowed")
+    return response
 
 @router.post("/user_template", response_model=UserTemplateResponse)
 def add_user_template(
@@ -49,9 +60,10 @@ def add_user_template(
 @router.get("/user_template/{template_id}", response_model=UserTemplateResponse)
 def get_user_template_endpoint(
     dbuser_template: UserTemplateResponse = Depends(get_user_template),
+    db: Session = Depends(get_db),
     admin: Admin = Depends(Admin.get_current)):
     """Get User Template information with id"""
-    return dbuser_template
+    return _validate_template_access(db, admin, dbuser_template)
 
 
 @router.put("/user_template/{template_id}", response_model=UserTemplateResponse)
@@ -125,4 +137,12 @@ def get_user_templates(
     admin: Admin = Depends(Admin.get_current)
 ):
     """Get a list of User Templates with optional pagination"""
-    return crud.get_user_templates(db, offset, limit)
+    templates = crud.get_user_templates(db, offset, limit)
+    result = []
+    for template in templates:
+        try:
+            result.append(_validate_template_access(db, admin, template))
+        except HTTPException as exc:
+            if exc.status_code != 403:
+                raise
+    return result

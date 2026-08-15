@@ -50,7 +50,7 @@ import { Controller, FormProvider, useForm, useWatch } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "react-query";
 import { fetch } from "service/http";
-import { ManagedAdmin, ManagedAdminList } from "types/Admin";
+import { AdminCapabilities, ManagedAdmin, ManagedAdminList } from "types/Admin";
 import {
   ProxyKeys,
   ProxyType,
@@ -268,6 +268,16 @@ const fetchAssignableAdmins = async (): Promise<ManagedAdmin[]> => {
   return admins;
 };
 
+const unrestrictedCapabilities: AdminCapabilities = {
+  all_inbounds: true,
+  allowed_inbounds: [],
+  all_user_limits: true,
+  allowed_user_limits: [],
+  capacity_used: 0,
+  capacity_limit: null,
+  capacity_remaining: null,
+};
+
 export const UserDialog: FC<UserDialogProps> = () => {
   const {
     editingUser,
@@ -305,6 +315,11 @@ export const UserDialog: FC<UserDialogProps> = () => {
     fetchAssignableAdmins,
     { enabled: isOpen && userData.is_sudo, staleTime: 30000 }
   );
+  const capabilitiesQuery = useQuery<AdminCapabilities, Error>(
+    ["admin-capabilities"],
+    () => fetch("/admin/capabilities"),
+    { enabled: isOpen, staleTime: 30000 }
+  );
 
   useEffect(
     () =>
@@ -317,13 +332,63 @@ export const UserDialog: FC<UserDialogProps> = () => {
     []
   );
 
-  const [dataLimit, userStatus, ownerAdmin] = useWatch({
+  const [dataLimit, userStatus, ownerAdmin, concurrentUserLimit] = useWatch({
     control: form.control,
-    name: ["data_limit", "status", "owner_admin"],
+    name: ["data_limit", "status", "owner_admin", "concurrent_user_limit"],
   });
   const selectedOwner = adminsQuery.data?.find(
     (admin) => admin.username === ownerAdmin
   );
+  const effectiveCapabilities: AdminCapabilities = selectedOwner
+    ? {
+      all_inbounds: selectedOwner.policy.all_inbounds,
+      allowed_inbounds: selectedOwner.policy.allowed_inbounds,
+      all_user_limits: selectedOwner.policy.all_user_limits,
+      allowed_user_limits: selectedOwner.policy.allowed_user_limits,
+      capacity_used: selectedOwner.capacity_used,
+      capacity_limit: selectedOwner.policy.max_users,
+      capacity_remaining: selectedOwner.policy.max_users === null
+        ? null
+        : Math.max(selectedOwner.policy.max_users - selectedOwner.capacity_used, 0),
+    }
+    : capabilitiesQuery.data || unrestrictedCapabilities;
+  const allowedInboundTags = effectiveCapabilities.all_inbounds
+    ? null
+    : effectiveCapabilities.allowed_inbounds;
+  const currentOwner = editingUser?.admin?.username || userData.username;
+  const requestedOwner = ownerAdmin || userData.username;
+  const reclaimedCapacity = isEditing && requestedOwner === currentOwner
+    ? editingUser?.concurrent_user_limit || 1
+    : 0;
+  const assignableCapacity = effectiveCapabilities.capacity_remaining === null
+    ? null
+    : effectiveCapabilities.capacity_remaining + reclaimedCapacity;
+  const requestedCapacity = concurrentUserLimit || 1;
+  const lacksCapacity = assignableCapacity !== null && requestedCapacity > assignableCapacity;
+
+  useEffect(() => {
+    if (!isOpen || effectiveCapabilities.all_user_limits) return;
+    const current = form.getValues("concurrent_user_limit");
+    if (!isEditing && (current === null || !effectiveCapabilities.allowed_user_limits.includes(current))) {
+      form.setValue("concurrent_user_limit", effectiveCapabilities.allowed_user_limits[0] ?? null);
+    }
+  }, [
+    isOpen,
+    isEditing,
+    effectiveCapabilities.all_user_limits,
+    effectiveCapabilities.allowed_user_limits.join(","),
+  ]);
+
+  useEffect(() => {
+    if (!isOpen || allowedInboundTags === null) return;
+    const current = form.getValues("inbounds");
+    Object.entries(current).forEach(([protocol, tags]) => {
+      form.setValue(
+        `inbounds.${protocol}`,
+        tags.filter((tag) => allowedInboundTags.includes(tag))
+      );
+    });
+  }, [isOpen, ownerAdmin, allowedInboundTags?.join(",")]);
 
   const usageTitle = t("userDialog.total");
   const [usage, setUsage] = useState(createUsageConfig(colorMode, usageTitle));
@@ -654,10 +719,10 @@ export const UserDialog: FC<UserDialogProps> = () => {
                             <option value="">{t("userDialog.currentSudoOwner")}</option>
                             {adminsQuery.data?.filter((admin) => !admin.is_sudo).map((admin) => {
                               const isFull = admin.policy.max_users !== null &&
-                                admin.user_count >= admin.policy.max_users;
+                                admin.capacity_used >= admin.policy.max_users;
                               return (
                                 <option key={admin.username} value={admin.username} disabled={isFull}>
-                                  {admin.username} ({admin.user_count} / {admin.policy.max_users ?? t("unlimited")})
+                                  {admin.username} ({admin.capacity_used} / {admin.policy.max_users ?? t("unlimited")})
                                 </option>
                               );
                             })}
@@ -665,7 +730,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                           <FormHelperText>
                             {selectedOwner
                               ? t("userDialog.ownerCapacity", {
-                                current: selectedOwner.user_count,
+                                current: selectedOwner.capacity_used,
                                 max: selectedOwner.policy.max_users ?? t("unlimited"),
                               })
                               : t("userDialog.ownerAdminHelp")}
@@ -706,7 +771,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                           <Controller
                             control={form.control}
                             name="concurrent_user_limit"
-                            render={({ field }) => (
+                            render={({ field }) => effectiveCapabilities.all_user_limits ? (
                               <Input
                                 type="number"
                                 dir="ltr"
@@ -719,9 +784,34 @@ export const UserDialog: FC<UserDialogProps> = () => {
                                 onChange={field.onChange}
                                 error={form.formState.errors.concurrent_user_limit?.message}
                               />
+                            ) : (
+                              <Select
+                                {...field}
+                                value={field.value ?? ""}
+                                onChange={(event) => field.onChange(Number(event.target.value))}
+                                isDisabled={disabled}
+                                dir="ltr"
+                                minH="44px"
+                              >
+                                <option value="" disabled>{t("userDialog.selectConnectionLimit")}</option>
+                                {effectiveCapabilities.allowed_user_limits.map((limit) => (
+                                  <option
+                                    key={limit}
+                                    value={limit}
+                                    disabled={assignableCapacity !== null && limit > assignableCapacity}
+                                  >
+                                    {t("userDialog.connectionLimitOption", { count: limit })}
+                                  </option>
+                                ))}
+                              </Select>
                             )}
                           />
-                          <FormHelperText>{t("userDialog.concurrentUserLimitHelp")}</FormHelperText>
+                          <FormHelperText color={lacksCapacity ? "red.300" : "gray.400"}>
+                            {t("userDialog.capacityCost", {
+                              cost: requestedCapacity,
+                              remaining: assignableCapacity ?? t("unlimited"),
+                            })}
+                          </FormHelperText>
                         </FormControl>
                       <Collapse
                         in={!!(dataLimit && dataLimit > 0)}
@@ -945,6 +1035,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                               },
                             ]}
                             disabled={disabled}
+                            allowedInboundTags={allowedInboundTags}
                             {...field}
                           />
                         );
@@ -1058,7 +1149,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                     variant="ghost"
                     minH="44px"
                     onClick={onClose}
-                    isDisabled={disabled}
+                    isDisabled={disabled || lacksCapacity}
                     w={{ base: "full", sm: "auto" }}
                   >
                     {t("cancel")}

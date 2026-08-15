@@ -10,7 +10,7 @@ from fastapi.routing import APIRoute
 
 from config import ALLOWED_ORIGINS, DOCS, XRAY_SUBSCRIPTION_PATH
 
-__version__ = "4.4.0"
+__version__ = "4.5.0"
 
 app = FastAPI(
     title="Network Control API",

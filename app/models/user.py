@@ -72,6 +72,11 @@ class User(BaseModel):
     data_limit: Optional[int] = Field(
         ge=0, default=None, description="data_limit can be 0 or greater"
     )
+    concurrent_user_limit: Optional[int] = Field(
+        default=None,
+        ge=1,
+        description="Maximum concurrent devices; null means unlimited",
+    )
     data_limit_reset_strategy: UserDataLimitResetStrategy = (
         UserDataLimitResetStrategy.no_reset
     )

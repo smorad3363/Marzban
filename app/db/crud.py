@@ -6,16 +6,19 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Dict, List, Optional, Tuple, Union
 
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import and_, delete, exists, func, or_, select
 from sqlalchemy.orm import Query, Session, joinedload
 from sqlalchemy.sql.functions import coalesce
 
+from app import xray
 from app.db.models import (
     JWT,
     TLS,
     Admin,
     AdminUsageLogs,
     MarzhelpAdminSettings,
+    MarzhelpAdminInboundPermission,
+    MarzhelpAdminUserLimitPermission,
     MarzhelpAdminUsage,
     MarzhelpLimit,
     NextPlan,
@@ -32,6 +35,7 @@ from app.db.models import (
     User,
     UserTemplate,
     UserUsageResetLogs,
+    excluded_inbounds_association,
 )
 from app.models.admin import (
     AdminCreate,
@@ -190,6 +194,29 @@ def get_user_queryset(db: Session) -> Query:
     return db.query(User).options(joinedload(User.admin)).options(joinedload(User.next_plan))
 
 
+def apply_inbound_access_filter(query: Query, allowed_inbounds: set[str] | None) -> Query:
+    """Exclude users connected to any configured inbound outside allowed set."""
+
+    if allowed_inbounds is None:
+        return query
+    for proxy_type, inbounds in xray.config.inbounds_by_protocol.items():
+        for inbound in inbounds:
+            tag = inbound["tag"]
+            if tag in allowed_inbounds:
+                continue
+            tag_is_excluded = exists().where(
+                excluded_inbounds_association.c.proxy_id == Proxy.id,
+                excluded_inbounds_association.c.inbound_tag == tag,
+            )
+            uses_forbidden_inbound = exists().where(
+                Proxy.user_id == User.id,
+                Proxy.type == proxy_type,
+                ~tag_is_excluded,
+            )
+            query = query.filter(~uses_forbidden_inbound)
+    return query
+
+
 def get_user(db: Session, username: str) -> Optional[User]:
     """
     Retrieves a user by username.
@@ -249,7 +276,8 @@ def get_users(db: Session,
               admin: Optional[Admin] = None,
               admins: Optional[List[str]] = None,
               reset_strategy: Optional[Union[UserDataLimitResetStrategy, list]] = None,
-              return_with_count: bool = False) -> Union[List[User], Tuple[List[User], int]]:
+              return_with_count: bool = False,
+              allowed_inbounds: set[str] | None = None) -> Union[List[User], Tuple[List[User], int]]:
     """
     Retrieves users based on various filters and options.
 
@@ -270,6 +298,7 @@ def get_users(db: Session,
         Union[List[User], Tuple[List[User], int]]: List of users or tuple of users and total count.
     """
     query = get_user_queryset(db)
+    query = apply_inbound_access_filter(query, allowed_inbounds)
 
     if search:
         query = query.filter(or_(User.username.ilike(f"%{search}%"), User.note.ilike(f"%{search}%")))
@@ -352,7 +381,12 @@ def get_user_usages(db: Session, dbuser: User, start: datetime, end: datetime) -
     return list(usages.values())
 
 
-def get_users_count(db: Session, status: UserStatus = None, admin: Admin = None) -> int:
+def get_users_count(
+    db: Session,
+    status: UserStatus = None,
+    admin: Admin = None,
+    allowed_inbounds: set[str] | None = None,
+) -> int:
     """
     Retrieves the count of users based on status and admin filters.
 
@@ -365,6 +399,7 @@ def get_users_count(db: Session, status: UserStatus = None, admin: Admin = None)
         int: Count of users matching the criteria.
     """
     query = db.query(User.id)
+    query = apply_inbound_access_filter(query, allowed_inbounds)
     if admin:
         query = query.filter(User.admin == admin)
     if status:
@@ -405,6 +440,7 @@ def create_user(db: Session, user: UserCreate, admin: Admin = None) -> User:
         proxies=proxies,
         status=user.status,
         data_limit=(user.data_limit or None),
+        concurrent_user_limit=user.concurrent_user_limit,
         expire=(user.expire or None),
         admin=admin,
         data_limit_reset_strategy=user.data_limit_reset_strategy,
@@ -518,6 +554,9 @@ def update_user(
 
             else:
                 dbuser.status = UserStatus.limited
+
+    if "concurrent_user_limit" in modify.model_fields_set:
+        dbuser.concurrent_user_limit = modify.concurrent_user_limit
 
     if modify.expire is not None:
         dbuser.expire = (modify.expire or None)
@@ -804,7 +843,11 @@ def autodelete_expired_users(db: Session,
 
 
 def get_all_users_usages(
-        db: Session, admin: Admin, start: datetime, end: datetime
+        db: Session,
+        admin: Admin,
+        start: datetime,
+        end: datetime,
+        allowed_inbounds: set[str] | None = None,
 ) -> List[UserUsageResponse]:
     """
     Retrieves usage data for all users associated with an admin within a specified time range.
@@ -835,7 +878,10 @@ def get_all_users_usages(
             used_traffic=0
         )
 
-    admin_users = set(user.id for user in get_users(db=db, admins=admin))
+    admin_users = set(
+        user.id
+        for user in get_users(db=db, admins=admin, allowed_inbounds=allowed_inbounds)
+    )
 
     cond = and_(
         NodeUserUsage.created_at >= start,
@@ -1029,13 +1075,48 @@ def upsert_marzhelp_admin_policy(
     commit: bool = True,
 ) -> MarzhelpAdminSettings:
     """Create or replace the dashboard-editable MarzHelp policy fields."""
-    settings = db.get(MarzhelpAdminSettings, admin_id)
+    unknown_inbounds = sorted(set(policy.allowed_inbounds) - set(xray.config.inbounds_by_tag))
+    if unknown_inbounds:
+        raise marzhelp_policy.MarzhelpPolicyError(
+            "unknown_inbound",
+            "MarzHelp: unknown inbound(s): " + ", ".join(unknown_inbounds),
+        )
+    settings = (
+        db.query(MarzhelpAdminSettings)
+        .filter(MarzhelpAdminSettings.admin_id == admin_id)
+        .with_for_update()
+        .first()
+    )
     if settings is None:
         settings = MarzhelpAdminSettings(admin_id=admin_id)
         db.add(settings)
 
-    for field, value in policy.model_dump().items():
+    used_capacity = marzhelp_policy.capacity_used(db, admin_id)
+    if policy.max_users is not None and used_capacity > policy.max_users:
+        raise marzhelp_policy.MarzhelpPolicyError(
+            "capacity_below_usage",
+            (
+                "MarzHelp: total user capacity cannot be lower than current usage "
+                f"({used_capacity})"
+            ),
+        )
+    settings.capacity_used = used_capacity
+
+    values = policy.model_dump(exclude={"allowed_inbounds", "allowed_user_limits"})
+    for field, value in values.items():
         setattr(settings, field, value)
+
+    settings.inbound_permissions = [
+        MarzhelpAdminInboundPermission(admin_id=admin_id, inbound_tag=tag)
+        for tag in policy.allowed_inbounds
+    ]
+    settings.user_limit_permissions = [
+        MarzhelpAdminUserLimitPermission(
+            admin_id=admin_id,
+            concurrent_user_limit=limit,
+        )
+        for limit in policy.allowed_user_limits
+    ]
 
     if commit:
         db.commit()
@@ -1088,6 +1169,12 @@ def remove_admin(db: Session, dbadmin: Admin) -> Admin:
     # intentionally retained because they have no destructive foreign key.
     db.query(MarzhelpAdminUsage).filter(MarzhelpAdminUsage.admin_id == dbadmin.id).delete()
     db.query(MarzhelpLimit).filter(MarzhelpLimit.admin_id == dbadmin.id).delete()
+    db.query(MarzhelpAdminInboundPermission).filter(
+        MarzhelpAdminInboundPermission.admin_id == dbadmin.id
+    ).delete()
+    db.query(MarzhelpAdminUserLimitPermission).filter(
+        MarzhelpAdminUserLimitPermission.admin_id == dbadmin.id
+    ).delete()
     db.query(MarzhelpAdminSettings).filter(
         MarzhelpAdminSettings.admin_id == dbadmin.id
     ).delete()
@@ -1629,8 +1716,16 @@ def delete_notification_reminder(
     return
 
 
-def count_online_users(db: Session, hours: int = 24):
+def count_online_users(
+    db: Session,
+    hours: int = 24,
+    admin: Admin | None = None,
+    allowed_inbounds: set[str] | None = None,
+):
     twenty_four_hours_ago = datetime.utcnow() - timedelta(hours=hours)
     query = db.query(func.count(User.id)).filter(User.online_at.isnot(
         None), User.online_at >= twenty_four_hours_ago)
+    if admin is not None:
+        query = query.filter(User.admin_id == admin.id)
+    query = apply_inbound_access_filter(query, allowed_inbounds)
     return query.scalar()

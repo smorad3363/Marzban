@@ -323,6 +323,9 @@ def get_users(
         status=status,
         sort=sort,
         admins=owner if admin.is_sudo else [admin.username],
+        allowed_inbounds=marzhelp_policy.allowed_inbound_tags(
+            db, crud.get_admin(db, admin.username) or admin
+        ),
         return_with_count=True,
     )
 
@@ -355,10 +358,11 @@ def bulk_user_action(
         raise HTTPException(status_code=404, detail={"missing_users": missing})
 
     if not admin.is_sudo:
+        effective_admin = crud.get_admin(db, admin.username) or admin
         forbidden = [
             user.username
             for user in dbusers
-            if user.admin is None or user.admin.username != admin.username
+            if not marzhelp_policy.can_access_user(db, effective_admin, user)
         ]
         if forbidden:
             raise HTTPException(status_code=403, detail={"forbidden_users": forbidden})
@@ -591,7 +595,13 @@ def get_users_usage(
     start, end = validate_dates(start, end)
 
     usages = crud.get_all_users_usages(
-        db=db, start=start, end=end, admin=owner if admin.is_sudo else [admin.username]
+        db=db,
+        start=start,
+        end=end,
+        admin=owner if admin.is_sudo else [admin.username],
+        allowed_inbounds=marzhelp_policy.allowed_inbound_tags(
+            db, crud.get_admin(db, admin.username) or admin
+        ),
     )
 
     return {"usages": usages}
