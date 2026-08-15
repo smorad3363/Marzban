@@ -1,5 +1,6 @@
 from datetime import date, datetime
 
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from starlette.requests import Request
@@ -7,7 +8,8 @@ from starlette.requests import Request
 from app.db.base import Base
 from app.db.models import Admin as DBAdmin
 from app.db.models import AdminAuditLog
-from app.models.admin import Admin
+from app.models.admin import Admin, pwd_context
+from app.routers.admin import admin_token
 from app.routers.audit import get_audit_logs
 from app.utils.audit import (
     AuditLogService,
@@ -132,3 +134,47 @@ def test_audit_query_filters_combined_and_uses_server_pagination(tmp_path):
     assert result.total == 1
     assert result.limit == 1
     assert [item.target_name for item in result.logs] == ["test123"]
+
+
+def test_successful_admin_login_issues_token_and_writes_audit_log(
+    tmp_path, monkeypatch
+):
+    db = make_db(tmp_path)
+    dbadmin = DBAdmin(
+        username="saji",
+        hashed_password=pwd_context.hash("correct-password"),
+        is_sudo=True,
+        users_usage=0,
+    )
+    db.add(dbadmin)
+    db.commit()
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/admin/token",
+            "headers": [],
+            "client": ("127.0.0.1", 1234),
+        }
+    )
+    form = OAuth2PasswordRequestForm(
+        grant_type="password",
+        username="saji",
+        password="correct-password",
+        scope="",
+        client_id=None,
+        client_secret=None,
+    )
+    monkeypatch.setattr("app.routers.admin.report.login", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "app.routers.admin.create_admin_token",
+        lambda username, is_sudo: f"token-for-{username}-{is_sudo}",
+    )
+
+    token = admin_token(request=request, form_data=form, db=db)
+
+    assert token.access_token
+    entry = db.query(AdminAuditLog).filter_by(action="auth.login").one()
+    assert entry.admin_id == dbadmin.id
+    assert entry.target_id == str(dbadmin.id)
+    assert entry.target_name == "saji"

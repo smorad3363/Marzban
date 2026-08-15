@@ -68,8 +68,8 @@ def admin_token(
     """Authenticate an admin and issue a token."""
     client_ip = get_client_ip(request) or "Unknown"
 
-    dbadmin = validate_admin(db, form_data.username, form_data.password)
-    if not dbadmin:
+    authenticated_admin = validate_admin(db, form_data.username, form_data.password)
+    if not authenticated_admin:
         report.login(form_data.username, form_data.password, client_ip, False)
         AuditLogService.log(
             db,
@@ -90,17 +90,23 @@ def admin_token(
     if client_ip not in LOGIN_NOTIFY_WHITE_LIST:
         report.login(form_data.username, "🔒", client_ip, True)
 
+    dbadmin = crud.get_admin(db, authenticated_admin.username)
     AuditLogService.log(
         db,
-        dbadmin,
+        authenticated_admin,
         "auth.login",
         "admin",
-        f"Admin {dbadmin.username} logged in",
-        target_id=dbadmin.id,
-        target_name=dbadmin.username,
+        f"Admin {authenticated_admin.username} logged in",
+        target_id=dbadmin.id if dbadmin is not None else None,
+        target_name=authenticated_admin.username,
         request=request,
     )
-    return Token(access_token=create_admin_token(form_data.username, dbadmin.is_sudo))
+    return Token(
+        access_token=create_admin_token(
+            authenticated_admin.username,
+            authenticated_admin.is_sudo,
+        )
+    )
 
 
 @router.post("/admin/logout")
