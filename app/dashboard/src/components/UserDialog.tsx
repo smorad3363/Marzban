@@ -21,7 +21,6 @@ import {
   ModalHeader,
   ModalOverlay,
   Select,
-  Spinner,
   Switch,
   Text,
   Textarea,
@@ -447,11 +446,11 @@ export const UserDialog: FC<UserDialogProps> = () => {
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="2xl">
+    <Modal isOpen={isOpen} onClose={onClose} size="2xl" scrollBehavior="inside">
       <ModalOverlay bg="blackAlpha.300" backdropFilter="blur(10px)" />
       <FormProvider {...form}>
         <ModalContent mx="3">
-          <form onSubmit={form.handleSubmit(submit)}>
+          <form onSubmit={form.handleSubmit(submit)} style={{ display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
             <ModalHeader pt={6}>
               <HStack gap={2}>
                 <Icon color="primary">
@@ -468,8 +467,8 @@ export const UserDialog: FC<UserDialogProps> = () => {
                 </Text>
               </HStack>
             </ModalHeader>
-            <ModalCloseButton mt={3} disabled={disabled} />
-            <ModalBody>
+            <ModalCloseButton mt={3} isDisabled={disabled} />
+            <ModalBody overflowY="auto">
               <Grid
                 templateColumns={{
                   base: "repeat(1, 1fr)",
@@ -490,11 +489,11 @@ export const UserDialog: FC<UserDialogProps> = () => {
                             <Flex gap={2} alignItems={"center"}>
                               {t("username")}
                               {!isEditing && (
-                                <ReloadIcon
-                                  cursor={"pointer"}
-                                  className={classNames({
-                                    "animate-spin": randomUsernameLoading,
-                                  })}
+                                <IconButton
+                                  size="xs"
+                                  variant="ghost"
+                                  aria-label="Generate username"
+                                  icon={<ReloadIcon className={classNames({ "animate-spin": randomUsernameLoading })} />}
                                   onClick={() => {
                                     const randomUsername =
                                       createRandomUsername();
@@ -930,13 +929,16 @@ export const UserDialog: FC<UserDialogProps> = () => {
                     base: "full",
                     sm: "unset",
                   }}
+                  flexWrap="wrap"
                 >
                   {isEditing && (
                     <>
                       <Tooltip label={t("delete")} placement="top">
                         <IconButton
-                          aria-label="Delete"
+                          aria-label={t("delete")}
                           size="sm"
+                          colorScheme="red"
+                          variant="ghost"
                           onClick={() => {
                             onDeletingUser(editingUser);
                             onClose();
@@ -947,7 +949,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                       </Tooltip>
                       <Tooltip label={t("userDialog.usage")} placement="top">
                         <IconButton
-                          aria-label="usage"
+                          aria-label={t("userDialog.usage")}
                           size="sm"
                           onClick={handleUsageToggle}
                         >
@@ -973,8 +975,9 @@ export const UserDialog: FC<UserDialogProps> = () => {
                     size="sm"
                     px="8"
                     colorScheme="primary"
-                    leftIcon={loading ? <Spinner size="xs" /> : undefined}
-                    disabled={disabled}
+                    isLoading={loading}
+                    isDisabled={disabled}
+                    w={{ base: "full", sm: "auto" }}
                   >
                     {isEditing ? t("userDialog.editUser") : t("createUser")}
                   </Button>

@@ -1,4 +1,4 @@
-import { Badge, Text } from "@chakra-ui/react";
+import { Badge, HStack, Text } from "@chakra-ui/react";
 
 import { statusColors } from "constants/UserSettings";
 import { FC } from "react";
@@ -24,7 +24,7 @@ export const StatusBadge: FC<UserStatusProps> = ({
   const dateInfo = relativeExpiryDate(expiryDate);
   const Icon = statusColors[userStatus].icon;
   return (
-    <>
+    <HStack display="inline-flex" spacing={2} flexWrap="wrap" align="center">
       <Badge
         colorScheme={statusColors[userStatus].statusColor}
         rounded="full"
@@ -34,7 +34,7 @@ export const StatusBadge: FC<UserStatusProps> = ({
         columnGap={compact ? 1 : 2}
         alignItems="center"
       >
-        <Icon w={compact ? 3 : 4} />
+        <Icon w={compact ? 3 : 4} aria-hidden="true" />
         {showDetail && (
           <Text
             textTransform="capitalize"
@@ -53,7 +53,7 @@ export const StatusBadge: FC<UserStatusProps> = ({
           display="inline-block"
           fontSize="xs"
           fontWeight="medium"
-          ml="2"
+          ms="0"
           color="gray.600"
           _dark={{
             color: "gray.400",
@@ -62,6 +62,6 @@ export const StatusBadge: FC<UserStatusProps> = ({
           {t(dateInfo.status, { time: dateInfo.time })}
         </Text>
       )}
-    </>
+    </HStack>
   );
 };

@@ -161,7 +161,7 @@ const WatchdogSettings: FC<{ toggleAccordion: () => void }> = ({
       w="full"
     >
       <AccordionButton px={2} borderRadius="3px" onClick={toggleAccordion}>
-        <HStack w="full" justify="space-between" pr={2}>
+        <HStack w="full" justify="space-between" pe={2}>
           <Box textAlign="start">
             <Text fontWeight="semibold" fontSize="sm">
               {t("nodes.watchdog")}
@@ -315,7 +315,7 @@ const NodeAccordion: FC<AccordionInboundType> = ({ toggleAccordion, node }) => {
       w="full"
     >
       <AccordionButton px={2} borderRadius="3px" onClick={toggleAccordion}>
-        <HStack w="full" justifyContent="space-between" pr={2}>
+        <HStack w="full" justifyContent="space-between" pe={2}>
           <Text
             as="span"
             fontWeight="medium"
@@ -330,7 +330,7 @@ const NodeAccordion: FC<AccordionInboundType> = ({ toggleAccordion, node }) => {
           <HStack>
             {node.xray_version && (
               <Badge
-                colorScheme="blue"
+                colorScheme="primary"
                 rounded="full"
                 display="inline-flex"
                 px={3}
@@ -748,16 +748,16 @@ export const NodesDialog: FC = () => {
 
   return (
     <>
-      <Modal isOpen={isEditingNodes} onClose={onClose}>
+      <Modal isOpen={isEditingNodes} onClose={onClose} scrollBehavior="inside">
         <ModalOverlay bg="blackAlpha.300" backdropFilter="blur(10px)" />
-        <ModalContent mx="3" w="fit-content" maxW="3xl">
+        <ModalContent mx="3" w={{ base: "calc(100% - 24px)", md: "fit-content" }} maxW="3xl">
           <ModalHeader pt={6}>
             <Icon color="primary">
               <ModalIcon color="white" />
             </Icon>
           </ModalHeader>
           <ModalCloseButton mt={3} />
-          <ModalBody w="440px" pb={6} pt={3}>
+          <ModalBody w={{ base: "full", md: "440px" }} maxW="full" pb={6} pt={3}>
             <Text mb={3} opacity={0.8} fontSize="sm">
               {t("nodes.title")}
             </Text>

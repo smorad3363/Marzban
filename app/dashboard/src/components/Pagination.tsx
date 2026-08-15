@@ -4,6 +4,7 @@ import {
   ButtonGroup,
   chakra,
   HStack,
+  IconButton,
   Select,
   Text,
 } from "@chakra-ui/react";
@@ -83,9 +84,9 @@ export const Pagination: FC = () => {
   } = useDashboard();
   const { limit: perPage, offset } = filters;
 
-  const page = (offset || 0) / (perPage || 1);
+  const page = Math.floor((offset || 0) / (perPage || 1));
   const noPages = Math.ceil(total / (perPage || 1));
-  const pages = generatePageItems(noPages, page, 7);
+  const pages = generatePageItems(noPages, page, 5);
 
   const changePage = (page: number) => {
     onFilterChange({
@@ -114,6 +115,9 @@ export const Pagination: FC = () => {
       columnGap={{ lg: 4, md: 0 }}
       rowGap={{ md: 0, base: 4 }}
       flexDirection={{ md: "row", base: "column" }}
+      alignItems={{ base: "stretch", md: "center" }}
+      px={{ base: 0, md: 1 }}
+      pb={1}
     >
       <Box order={{ base: 2, md: 1 }}>
         <HStack>
@@ -136,36 +140,38 @@ export const Pagination: FC = () => {
         </HStack>
       </Box>
 
-      <ButtonGroup size="sm" isAttached variant="outline" order={{ base: 1, md: 2 }}>
-        <Button
-          leftIcon={<PrevIcon />}
+      <Box order={{ base: 1, md: 2 }} maxW="full" overflowX="auto" pb={1}>
+      <ButtonGroup size="sm" isAttached variant="outline" whiteSpace="nowrap">
+        <IconButton
+          icon={<PrevIcon />}
+          aria-label={t("previous")}
           onClick={changePage.bind(null, page - 1)}
           isDisabled={page === 0 || noPages === 0}
-        >
-          {t("previous")}
-        </Button>
+        />
         {pages.map((pageIndex) => {
           if (typeof pageIndex === "string")
-            return <Button key={pageIndex}>...</Button>;
+            return <Button key={pageIndex} isDisabled aria-hidden="true">...</Button>;
           return (
             <Button
               key={pageIndex}
               variant={(pageIndex as number) === page ? "solid" : "outline"}
+              colorScheme={(pageIndex as number) === page ? "primary" : "gray"}
               onClick={changePage.bind(null, pageIndex)}
+              aria-current={(pageIndex as number) === page ? "page" : undefined}
             >
               {(pageIndex as number) + 1}
             </Button>
           );
         })}
 
-        <Button
-          rightIcon={<NextIcon />}
+        <IconButton
+          icon={<NextIcon />}
+          aria-label={t("next")}
           onClick={changePage.bind(null, page + 1)}
           isDisabled={page + 1 === noPages || noPages === 0}
-        >
-          {t("next")}
-        </Button>
+        />
       </ButtonGroup>
+      </Box>
     </HStack>
   );
 };

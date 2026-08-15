@@ -118,11 +118,11 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
           </InputRightElement>
         </InputGroup>
       </GridItem>
-      <GridItem colSpan={2} order={{ base: 1, md: 2 }}>
-        <HStack justifyContent="flex-end" alignItems="center" h="full">
+      <GridItem colSpan={{ base: 1, md: 2 }} order={{ base: 1, md: 2 }}>
+        <HStack justifyContent="flex-end" alignItems="center" h="full" w="full">
           <IconButton
             aria-label="refresh users"
-            disabled={loading}
+            isDisabled={loading}
             onClick={refetchUsers}
             size="sm"
             variant="outline"
@@ -157,7 +157,7 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
           flexWrap="wrap"
           fontSize="sm"
         >
-          <Text color="gray.500" fontWeight="medium" whiteSpace="nowrap">
+          <Text color="gray.600" _dark={{ color: "gray.300" }} fontWeight="medium" whiteSpace="nowrap" w={{ base: "full", sm: "auto" }}>
             {t("usersTable.organizeUsers")}
           </Text>
           <Select

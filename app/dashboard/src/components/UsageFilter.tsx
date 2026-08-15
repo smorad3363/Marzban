@@ -184,7 +184,10 @@ export const UsageFilter: FC<UsageFilterProps> = ({
           display="flex"
           borderWidth="1px"
           borderRadius="md"
-          minW={{ base: "320px", md: "400px" }}
+          minW={0}
+          w="full"
+          maxW="400px"
+          overflowX="auto"
         >
           {filterOptions.map((value) => {
             return (
@@ -224,7 +227,9 @@ export const UsageFilter: FC<UsageFilterProps> = ({
           borderRadius="md"
           px={3}
           py={1}
-          minW={{ base: "320px", md: "400px" }}
+          minW={0}
+          w="full"
+          maxW="400px"
           borderWidth="1px"
         >
           <Text w="full" color={startDate ? "unset" : "gray.500"}>
@@ -248,6 +253,9 @@ export const UsageFilter: FC<UsageFilterProps> = ({
         borderWidth="1px"
         position="absolute"
         zIndex="1"
+        maxW="calc(100vw - 32px)"
+        maxH="70vh"
+        overflow="auto"
         backgroundColor="white"
         _dark={{
           backgroundColor: "gray.700",
@@ -264,8 +272,8 @@ export const UsageFilter: FC<UsageFilterProps> = ({
             <TabPanel>
               {customFilterOptions.map((row) => {
                 return (
-                  <VStack key={row.title} alignItems="start" pl={2} pr={2}>
-                    <HStack justifyItems="flex-start" mb={4}>
+                  <VStack key={row.title} alignItems="start" px={2}>
+                    <HStack justifyItems="flex-start" mb={4} flexWrap="wrap">
                       <Text fontSize={fontSize} minW="60px">
                         {t("userDialog." + row.title)}
                       </Text>

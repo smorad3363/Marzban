@@ -8,7 +8,6 @@ import {
   ModalFooter,
   ModalHeader,
   ModalOverlay,
-  Spinner,
   Text,
   useToast,
 } from "@chakra-ui/react";
@@ -67,7 +66,7 @@ export const RevokeSubscriptionModal: FC<RevokeSubscriptionModalProps> = () => {
       <ModalOverlay bg="blackAlpha.300" backdropFilter="blur(10px)" />
       <ModalContent mx="3">
         <ModalHeader pt={6}>
-          <Icon color="blue">
+          <Icon color="primary.500">
             <ResetIcon />
           </Icon>
         </ModalHeader>
@@ -90,15 +89,15 @@ export const RevokeSubscriptionModal: FC<RevokeSubscriptionModalProps> = () => {
           )}
         </ModalBody>
         <ModalFooter display="flex">
-          <Button size="sm" onClick={onClose} mr={3} w="full" variant="outline">
+          <Button size="sm" onClick={onClose} me={3} w="full" variant="outline" isDisabled={loading}>
             {t("cancel")}
           </Button>
           <Button
             size="sm"
             w="full"
-            colorScheme="blue"
+            colorScheme="primary"
             onClick={onReset}
-            leftIcon={loading ? <Spinner size="xs" /> : undefined}
+            isLoading={loading}
           >
             {t("revoke")}
           </Button>

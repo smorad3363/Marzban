@@ -103,13 +103,13 @@ const getErrorMessage = (error: any) =>
 
 type StatProps = { label: string; value: string | number; icon: JSX.Element };
 const AdminStat: FC<StatProps> = ({ label, value, icon }) => (
-  <Card variant="outline" p={5} boxShadow="panel" borderRadius="18px" borderColor="gray.200" _dark={{ borderColor: "whiteAlpha.200" }}>
+  <Card variant="outline" p={5} bg="#111d17" color="gray.100" boxShadow="panel" borderRadius="18px" borderColor="#33483b">
     <HStack justify="space-between">
       <Box>
-        <Text color="gray.500" fontSize="sm" fontWeight="600">{label}</Text>
-        <Text mt={1} fontSize="2xl" fontWeight="750">{value}</Text>
+        <Text color="gray.300" fontSize="sm" fontWeight="600">{label}</Text>
+        <Text color="white" mt={1} fontSize="2xl" fontWeight="750">{value}</Text>
       </Box>
-      <Box color="primary.600" bg="primary.50" _dark={{ bg: "whiteAlpha.100", color: "primary.300" }} p={3} borderRadius="12px">
+      <Box color="primary.300" bg="rgba(72, 213, 139, .12)" borderWidth="1px" borderColor="rgba(72, 213, 139, .24)" p={3} borderRadius="12px">
         {icon}
       </Box>
     </HStack>
@@ -186,15 +186,15 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} size="4xl" scrollBehavior="inside">
-      <ModalOverlay bg="blackAlpha.500" />
-      <ModalContent as="form" onSubmit={submit} borderRadius="14px">
+      <ModalOverlay bg="rgba(0, 0, 0, .72)" backdropFilter="blur(4px)" />
+      <ModalContent as="form" onSubmit={submit} bg="#111d17" color="gray.100" borderWidth="1px" borderColor="#33483b" borderRadius="14px">
         <ModalHeader>{t(isEditing ? "admins.editTitle" : "admins.createTitle")}</ModalHeader>
         <ModalCloseButton />
         <ModalBody pb={7}>
           <Stack spacing={7}>
             <Box>
               <Text fontWeight="700">{t("admins.accountSection")}</Text>
-              <Text color="gray.500" fontSize="sm" mt={1}>{t("admins.accountSectionHelp")}</Text>
+              <Text color="gray.400" fontSize="sm" mt={1}>{t("admins.accountSectionHelp")}</Text>
               <SimpleGrid columns={{ base: 1, md: 2 }} gap={4} mt={4}>
                 <FormControl isRequired={!isEditing}>
                   <FormLabel>{t("admins.username")}</FormLabel>
@@ -218,10 +218,10 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
               </Checkbox>
             </Box>
 
-            <Divider />
+            <Divider borderColor="#33483b" />
             <Box>
               <Text fontWeight="700">{t("admins.limitsSection")}</Text>
-              <Text color="gray.500" fontSize="sm" mt={1}>{t("admins.limitsSectionHelp")}</Text>
+              <Text color="gray.400" fontSize="sm" mt={1}>{t("admins.limitsSectionHelp")}</Text>
               <SimpleGrid columns={{ base: 1, md: 2, xl: 3 }} gap={4} mt={4}>
                 <FormControl>
                   <FormLabel>{t("admins.totalTraffic")}</FormLabel>
@@ -257,16 +257,16 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
               </SimpleGrid>
             </Box>
 
-            <Divider />
+            <Divider borderColor="#33483b" />
             <Box>
               <Text fontWeight="700">{t("admins.permissionsSection")}</Text>
-              <Text color="gray.500" fontSize="sm" mt={1}>{t("admins.permissionsSectionHelp")}</Text>
+              <Text color="gray.400" fontSize="sm" mt={1}>{t("admins.permissionsSectionHelp")}</Text>
               <SimpleGrid columns={{ base: 1, md: 2 }} gap={3} mt={4}>
                 {toggles.map(([key, label, help]) => (
-                  <HStack key={key} justify="space-between" align="start" p={4} borderWidth="1px" borderRadius="10px">
+                  <HStack key={key} justify="space-between" align="start" p={4} bg="#0d1812" borderWidth="1px" borderColor="#33483b" borderRadius="10px">
                     <Box pe={3}>
                       <Text fontSize="sm" fontWeight="650">{t(label)}</Text>
-                      <Text fontSize="xs" color="gray.500" mt={1}>{t(help)}</Text>
+                      <Text fontSize="xs" color="gray.400" mt={1}>{t(help)}</Text>
                     </Box>
                     <Switch colorScheme="primary" isChecked={Boolean(form.policy[key])} onChange={(e) => setPolicy(key, e.target.checked as never)} />
                   </HStack>
@@ -275,9 +275,9 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
             </Box>
           </Stack>
         </ModalBody>
-        <ModalFooter borderTopWidth="1px" gap={3}>
+        <ModalFooter borderTopWidth="1px" borderColor="#33483b" gap={3}>
           <Button variant="ghost" onClick={onClose}>{t("cancel")}</Button>
-          <Button type="submit" colorScheme="primary" isLoading={mutation.isLoading}>{t("save")}</Button>
+          <Button type="submit" colorScheme="primary" color="#07130e" isLoading={mutation.isLoading}>{t("save")}</Button>
         </ModalFooter>
       </ModalContent>
     </Modal>
@@ -340,11 +340,11 @@ export const Admins: FC = () => {
     <AppShell>
         <Stack direction={{ base: "column", md: "row" }} justify="space-between" align={{ md: "end" }} mb={6} gap={4}>
           <Box>
-            <Text color="primary.600" _dark={{ color: "primary.300" }} fontSize="xs" fontWeight="800" letterSpacing="0.13em" textTransform="uppercase">Dashboard</Text>
+            <Text color="primary.300" fontSize="xs" fontWeight="800" letterSpacing="0.13em" textTransform="uppercase">Control laboratory</Text>
             <Text as="h1" fontSize={{ base: "2xl", md: "3xl" }} fontWeight="800" letterSpacing="-0.035em" mt={1}>{t("admins.title")}</Text>
-            <Text color="gray.500" mt={1} maxW="650px">{t("admins.subtitle")}</Text>
+            <Text color="gray.300" mt={1} maxW="650px">{t("admins.subtitle")}</Text>
           </Box>
-          <Button colorScheme="primary" leftIcon={<AddIcon />} onClick={openCreate}>{t("admins.create")}</Button>
+          <Button colorScheme="primary" color="#07130e" leftIcon={<AddIcon />} onClick={openCreate}>{t("admins.create")}</Button>
         </Stack>
 
         <SimpleGrid columns={{ base: 1, sm: 3 }} gap={4} mb={5}>
@@ -353,13 +353,13 @@ export const Admins: FC = () => {
           <AdminStat label={t("admins.restrictedAdmins")} value={restrictedCount} icon={<ShieldCheckIcon width={20} />} />
         </SimpleGrid>
 
-        <Card variant="outline" borderRadius={{ base: "16px", md: "20px" }} borderColor="gray.200" _dark={{ borderColor: "whiteAlpha.200" }} boxShadow="panel" overflow="hidden">
-          <HStack p={4} justify="space-between" borderBottomWidth="1px" flexWrap="wrap" gap={3}>
+        <Card variant="outline" bg="#111d17" color="gray.100" borderRadius={{ base: "16px", md: "20px" }} borderColor="#33483b" boxShadow="panel" overflow="hidden">
+          <HStack p={4} justify="space-between" borderBottomWidth="1px" borderColor="#33483b" flexWrap="wrap" gap={3}>
             <InputGroup maxW={{ base: "full", md: "360px" }}>
-              <InputLeftElement pointerEvents="none"><SearchIcon /></InputLeftElement>
+              <InputLeftElement pointerEvents="none" color="gray.400"><SearchIcon /></InputLeftElement>
               <Input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder={t("admins.search")} />
             </InputGroup>
-            <Button size="sm" variant="outline" onClick={() => query.refetch()} isLoading={query.isFetching}>{t("refresh")}</Button>
+            <Button size="sm" variant="outline" color="gray.200" borderColor="#475f50" _hover={{ bg: "whiteAlpha.100", borderColor: "primary.400" }} onClick={() => query.refetch()} isLoading={query.isFetching}>{t("refresh")}</Button>
           </HStack>
 
           {query.isError && (
@@ -367,9 +367,9 @@ export const Admins: FC = () => {
           )}
 
           {query.isLoading ? (
-            <Stack p={5}>{Array.from({ length: 5 }).map((_, index) => <Skeleton key={index} height="54px" borderRadius="8px" />)}</Stack>
+            <Stack p={5}>{Array.from({ length: 5 }).map((_, index) => <Skeleton key={index} startColor="#16251c" endColor="#24392d" height="54px" borderRadius="8px" />)}</Stack>
           ) : admins.length === 0 ? (
-            <VStack py={16} px={5} spacing={3}><Box p={3} borderRadius="full" bg="gray.100" _dark={{ bg: "whiteAlpha.100" }}><AdminsIcon /></Box><Text fontWeight="700">{t("admins.empty")}</Text><Text color="gray.500" fontSize="sm" textAlign="center">{t(search ? "admins.emptySearch" : "admins.emptyHelp")}</Text></VStack>
+            <VStack py={16} px={5} spacing={3}><Box p={3} color="primary.300" borderRadius="full" bg="rgba(72, 213, 139, .12)"><AdminsIcon /></Box><Text color="white" fontWeight="700">{t("admins.empty")}</Text><Text color="gray.400" fontSize="sm" textAlign="center">{t(search ? "admins.emptySearch" : "admins.emptyHelp")}</Text></VStack>
           ) : (
             <>
               <TableContainer display={{ base: "none", lg: "block" }}>
@@ -377,8 +377,8 @@ export const Admins: FC = () => {
                   <Thead><Tr><Th>{t("admins.admin")}</Th><Th>{t("admins.access")}</Th><Th>{t("admins.usersCount")}</Th><Th>{t("admins.credit")}</Th><Th>{t("admins.operationLimit")}</Th><Th>{t("admins.maxDuration")}</Th><Th>{t("admins.expiryDate")}</Th><Th textAlign="end">{t("admins.actions")}</Th></Tr></Thead>
                   <Tbody>{admins.map((item) => (
                     <Tr key={item.username}>
-                      <Td><Text fontWeight="650">{item.username}</Text><Text fontSize="xs" color="gray.500">{item.telegram_id ? `Telegram: ${item.telegram_id}` : t("admins.noContact")}</Text></Td>
-                      <Td><Badge colorScheme={item.is_sudo ? "purple" : "gray"}>{t(item.is_sudo ? "admins.sudo" : "admins.adminRole")}</Badge></Td>
+                      <Td><Text color="white" fontWeight="650">{item.username}</Text><Text fontSize="xs" color="gray.400">{item.telegram_id ? `Telegram: ${item.telegram_id}` : t("admins.noContact")}</Text></Td>
+                      <Td><Badge bg={item.is_sudo ? "rgba(168, 85, 247, .18)" : "whiteAlpha.100"} color={item.is_sudo ? "purple.200" : "gray.200"} borderWidth="1px" borderColor={item.is_sudo ? "rgba(192, 132, 252, .4)" : "whiteAlpha.200"}>{t(item.is_sudo ? "admins.sudo" : "admins.adminRole")}</Badge></Td>
                       <Td>{item.user_count} / {item.policy.max_users ?? t("unlimited")}</Td>
                       <Td>{item.policy.total_traffic === null ? t("unlimited") : formatBytes(Math.max(item.policy.total_traffic - item.policy.used_traffic, 0))}</Td>
                       <Td>{item.policy.user_limit ?? t("unlimited")}</Td>
@@ -390,11 +390,11 @@ export const Admins: FC = () => {
                 </Table>
               </TableContainer>
 
-              <Stack display={{ base: "flex", lg: "none" }} divider={<Divider />} spacing={0}>
+              <Stack display={{ base: "flex", lg: "none" }} divider={<Divider borderColor="#33483b" />} spacing={0}>
                 {admins.map((item) => (
                   <Box key={item.username} p={4}>
-                    <HStack justify="space-between" align="start"><Box><Text fontWeight="700">{item.username}</Text><Badge mt={1} colorScheme={item.is_sudo ? "purple" : "gray"}>{t(item.is_sudo ? "admins.sudo" : "admins.adminRole")}</Badge></Box><HStack><IconButton aria-label={t("edit")} size="sm" variant="ghost" icon={<EditIcon />} isDisabled={!canEdit(item)} onClick={() => openEdit(item)} /><IconButton aria-label={t("delete")} size="sm" variant="ghost" colorScheme="red" icon={<RemoveIcon />} isDisabled={item.is_sudo} onClick={() => openDelete(item)} /></HStack></HStack>
-                    <SimpleGrid columns={2} gap={3} mt={4} fontSize="sm"><Box><Text color="gray.500" fontSize="xs">{t("admins.usersCount")}</Text><Text mt={1}>{item.user_count} / {item.policy.max_users ?? t("unlimited")}</Text></Box><Box><Text color="gray.500" fontSize="xs">{t("admins.credit")}</Text><Text mt={1}>{item.policy.total_traffic === null ? t("unlimited") : formatBytes(Math.max(item.policy.total_traffic - item.policy.used_traffic, 0))}</Text></Box><Box><Text color="gray.500" fontSize="xs">{t("admins.operationLimit")}</Text><Text mt={1}>{item.policy.user_limit ?? t("unlimited")}</Text></Box><Box><Text color="gray.500" fontSize="xs">{t("admins.maxDuration")}</Text><Text mt={1}>{item.policy.max_user_duration_days ? `${item.policy.max_user_duration_days} ${t("days")}` : t("unlimited")}</Text></Box><Box><Text color="gray.500" fontSize="xs">{t("admins.expiryDate")}</Text><Text mt={1}>{item.policy.expiry_date || t("unlimited")}</Text></Box></SimpleGrid>
+                    <HStack justify="space-between" align="start"><Box><Text color="white" fontWeight="700">{item.username}</Text><Badge mt={1} bg={item.is_sudo ? "rgba(168, 85, 247, .18)" : "whiteAlpha.100"} color={item.is_sudo ? "purple.200" : "gray.200"} borderWidth="1px" borderColor={item.is_sudo ? "rgba(192, 132, 252, .4)" : "whiteAlpha.200"}>{t(item.is_sudo ? "admins.sudo" : "admins.adminRole")}</Badge></Box><HStack><IconButton aria-label={t("edit")} size="sm" variant="ghost" icon={<EditIcon />} isDisabled={!canEdit(item)} onClick={() => openEdit(item)} /><IconButton aria-label={t("delete")} size="sm" variant="ghost" colorScheme="red" icon={<RemoveIcon />} isDisabled={item.is_sudo} onClick={() => openDelete(item)} /></HStack></HStack>
+                    <SimpleGrid columns={2} gap={3} mt={4} fontSize="sm"><Box><Text color="gray.400" fontSize="xs">{t("admins.usersCount")}</Text><Text color="gray.100" mt={1}>{item.user_count} / {item.policy.max_users ?? t("unlimited")}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.credit")}</Text><Text color="gray.100" mt={1}>{item.policy.total_traffic === null ? t("unlimited") : formatBytes(Math.max(item.policy.total_traffic - item.policy.used_traffic, 0))}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.operationLimit")}</Text><Text color="gray.100" mt={1}>{item.policy.user_limit ?? t("unlimited")}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.maxDuration")}</Text><Text color="gray.100" mt={1}>{item.policy.max_user_duration_days ? `${item.policy.max_user_duration_days} ${t("days")}` : t("unlimited")}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.expiryDate")}</Text><Text color="gray.100" mt={1}>{item.policy.expiry_date || t("unlimited")}</Text></Box></SimpleGrid>
                   </Box>
                 ))}
               </Stack>
@@ -402,12 +402,12 @@ export const Admins: FC = () => {
           )}
 
           {total > PAGE_SIZE && (
-            <HStack justify="space-between" p={4} borderTopWidth="1px"><Text fontSize="sm" color="gray.500">{t("admins.page", { current: page + 1, total: Math.ceil(total / PAGE_SIZE) })}</Text><HStack><Button size="sm" variant="outline" isDisabled={page === 0} onClick={() => setPage((value) => value - 1)}>{t("previous")}</Button><Button size="sm" variant="outline" isDisabled={(page + 1) * PAGE_SIZE >= total} onClick={() => setPage((value) => value + 1)}>{t("next")}</Button></HStack></HStack>
+            <HStack justify="space-between" p={4} borderTopWidth="1px" borderColor="#33483b"><Text fontSize="sm" color="gray.400">{t("admins.page", { current: page + 1, total: Math.ceil(total / PAGE_SIZE) })}</Text><HStack><Button size="sm" variant="outline" borderColor="#475f50" isDisabled={page === 0} onClick={() => setPage((value) => value - 1)}>{t("previous")}</Button><Button size="sm" variant="outline" borderColor="#475f50" isDisabled={(page + 1) * PAGE_SIZE >= total} onClick={() => setPage((value) => value + 1)}>{t("next")}</Button></HStack></HStack>
           )}
         </Card>
         <AdminFormModal isOpen={formDisclosure.isOpen} admin={selected} onClose={formDisclosure.onClose} />
         <AlertDialog isOpen={deleteDisclosure.isOpen} leastDestructiveRef={cancelRef} onClose={deleteDisclosure.onClose}>
-          <AlertDialogOverlay><AlertDialogContent borderRadius="12px"><AlertDialogHeader>{t("admins.deleteTitle")}</AlertDialogHeader><AlertDialogBody>{t("admins.deleteConfirm", { username: selected?.username })}</AlertDialogBody><AlertDialogFooter gap={3}><Button ref={cancelRef} onClick={deleteDisclosure.onClose}>{t("cancel")}</Button><Button colorScheme="red" isLoading={removeMutation.isLoading} onClick={() => selected && removeMutation.mutate(selected.username)}>{t("delete")}</Button></AlertDialogFooter></AlertDialogContent></AlertDialogOverlay>
+          <AlertDialogOverlay bg="rgba(0, 0, 0, .72)"><AlertDialogContent bg="#111d17" color="gray.100" borderWidth="1px" borderColor="#33483b" borderRadius="12px"><AlertDialogHeader>{t("admins.deleteTitle")}</AlertDialogHeader><AlertDialogBody>{t("admins.deleteConfirm", { username: selected?.username })}</AlertDialogBody><AlertDialogFooter borderTopWidth="1px" borderColor="#33483b" gap={3}><Button ref={cancelRef} variant="ghost" onClick={deleteDisclosure.onClose}>{t("cancel")}</Button><Button colorScheme="red" isLoading={removeMutation.isLoading} onClick={() => selected && removeMutation.mutate(selected.username)}>{t("delete")}</Button></AlertDialogFooter></AlertDialogContent></AlertDialogOverlay>
         </AlertDialog>
     </AppShell>
   );

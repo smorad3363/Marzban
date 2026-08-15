@@ -27,7 +27,8 @@ export const OnlineStatus: FC<UserStatusProps> = ({lastOnline}) => {
             display="inline-block"
             fontSize="xs"
             fontWeight="medium"
-            ml="2"
+            ms="0"
+            mt="1"
             color="gray.600"
             _dark={{
                 color: "gray.400",

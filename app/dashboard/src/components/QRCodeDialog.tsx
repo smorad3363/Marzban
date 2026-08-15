@@ -10,6 +10,7 @@ import {
   ModalHeader,
   ModalOverlay,
   Text,
+  useBreakpointValue,
   VStack,
 } from "@chakra-ui/react";
 import {
@@ -58,6 +59,7 @@ export const QRCodeDialog: FC = () => {
   const { QRcodeLinks, setQRCode, setSubLink, subscribeUrl } = useDashboard();
   const isOpen = QRcodeLinks !== null;
   const [index, setIndex] = useState(0);
+  const qrSize = useBreakpointValue({ base: 240, sm: 300 }) || 240;
   const { t } = useTranslation();
   const onClose = () => {
     setQRCode(null);
@@ -69,9 +71,9 @@ export const QRCodeDialog: FC = () => {
     : String(subscribeUrl);
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose}>
+    <Modal isOpen={isOpen} onClose={onClose} scrollBehavior="inside">
       <ModalOverlay bg="blackAlpha.300" backdropFilter="blur(10px)" />
-      <ModalContent mx="3" w="fit-content" maxW="3xl">
+      <ModalContent mx="3" w={{ base: "calc(100% - 24px)", lg: "fit-content" }} maxW="3xl">
         <ModalHeader pt={6}>
           <Icon color="primary">
             <QRIcon color="white" />
@@ -84,12 +86,10 @@ export const QRCodeDialog: FC = () => {
               base: "20px",
               lg: "50px",
             }}
-            pr={{
+            pe={{
               lg: "60px",
             }}
-            px={{
-              base: "50px",
-            }}
+            px={{ base: 5, sm: 8 }}
             display="flex"
             justifyContent="center"
             flexDirection={{
@@ -101,7 +101,7 @@ export const QRCodeDialog: FC = () => {
               <VStack>
                 <QRCode
                   mx="auto"
-                  size={300}
+                  size={qrSize}
                   p="2"
                   level={"L"}
                   includeMargin={false}
@@ -113,7 +113,7 @@ export const QRCodeDialog: FC = () => {
                 </Text>
               </VStack>
             )}
-            <Box w="300px">
+            <Box w={`${qrSize}px`} maxW="full">
               <Slider
                 centerPadding="0px"
                 centerMode={true}
@@ -129,7 +129,7 @@ export const QRCodeDialog: FC = () => {
                     display="flex !important"
                     _before={{ content: '""' }}
                     aria-label="next"
-                    mr="-4"
+                    me="-4"
                   >
                     <NextIcon />
                   </IconButton>
@@ -141,7 +141,7 @@ export const QRCodeDialog: FC = () => {
                     display="flex !important"
                     _before={{ content: '""' }}
                     aria-label="prev"
-                    ml="-4"
+                    ms="-4"
                   >
                     <PrevIcon />
                   </IconButton>
@@ -152,7 +152,7 @@ export const QRCodeDialog: FC = () => {
                     <HStack key={i}>
                       <QRCode
                         mx="auto"
-                        size={300}
+                        size={qrSize}
                         p="2"
                         level={"L"}
                         includeMargin={false}

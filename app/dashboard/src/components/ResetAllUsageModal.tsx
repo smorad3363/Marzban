@@ -8,7 +8,6 @@ import {
   ModalFooter,
   ModalHeader,
   ModalOverlay,
-  Spinner,
   Text,
   useToast,
 } from "@chakra-ui/react";
@@ -86,7 +85,7 @@ export const ResetAllUsageModal: FC<DeleteUserModalProps> = () => {
           )}
         </ModalBody>
         <ModalFooter display="flex">
-          <Button size="sm" onClick={onClose} mr={3} w="full" variant="outline">
+          <Button size="sm" onClick={onClose} me={3} w="full" variant="outline" isDisabled={loading}>
             {t("cancel")}
           </Button>
           <Button
@@ -94,7 +93,7 @@ export const ResetAllUsageModal: FC<DeleteUserModalProps> = () => {
             w="full"
             colorScheme="red"
             onClick={onReset}
-            leftIcon={loading ? <Spinner size="xs" /> : undefined}
+            isLoading={loading}
           >
             {t("reset")}
           </Button>

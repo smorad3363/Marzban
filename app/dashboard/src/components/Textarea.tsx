@@ -4,6 +4,7 @@ import {
   FormErrorMessage,
   FormLabel,
   InputGroup,
+  IconButton,
   InputLeftAddon,
   InputRightAddon,
   InputRightElement,
@@ -104,34 +105,28 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
             _focusVisible={{
               outline: "none",
               borderTopColor: "transparent",
-              borderRightColor: "transparent",
+              borderInlineEndColor: "transparent",
               borderBottomColor: "transparent",
             }}
             _disabled={{
               cursor: "not-allowed",
             }}
             {...props}
-            roundedLeft={startAdornment ? "0" : "md"}
-            roundedRight={endAdornment ? "0" : "md"}
+            borderStartRadius={startAdornment ? "0" : "md"}
+            borderEndRadius={endAdornment ? "0" : "md"}
           />
           {endAdornment && (
             <InputRightAddon
-              borderLeftRadius={0}
-              borderRightRadius="6px"
+              borderStartRadius={0}
+              borderEndRadius="6px"
               bg="transparent"
             >
               {endAdornment}
             </InputRightAddon>
           )}
           {clearable && value && value.length && (
-            <InputRightElement
-              borderLeftRadius={0}
-              borderRightRadius="6px"
-              bg="transparent"
-              onClick={clear}
-              cursor="pointer"
-            >
-              <ClearIcon />
+            <InputRightElement borderStartRadius={0} borderEndRadius="6px" bg="transparent">
+              <IconButton size="xs" variant="ghost" aria-label="Clear field" icon={<ClearIcon />} onClick={clear} />
             </InputRightElement>
           )}
         </InputGroup>

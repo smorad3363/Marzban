@@ -19,7 +19,7 @@ declare module "i18next" {
 const syncDocumentLanguage = (language: string) => {
     const normalizedLanguage = language.toLowerCase();
     document.documentElement.lang = normalizedLanguage;
-    document.documentElement.dir = normalizedLanguage === "fa" ? "rtl" : "ltr";
+    document.documentElement.dir = normalizedLanguage.startsWith("fa") ? "rtl" : "ltr";
 };
 
 i18n

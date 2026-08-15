@@ -267,7 +267,7 @@ const CoreSettingModalContent: FC = () => {
               variant="ghost"
               position="absolute"
               top="2"
-              right="4"
+              insetEnd="4"
               onClick={handleFullScreen}
             >
               {!isFullScreen ? <FullScreenIcon /> : <ExitFullScreenIcon />}
@@ -385,9 +385,9 @@ export const CoreSettingsModal: FC = () => {
   const { t } = useTranslation();
 
   return (
-    <Modal isOpen={isEditingCore} onClose={onClose} size="3xl">
+    <Modal isOpen={isEditingCore} onClose={onClose} size="3xl" scrollBehavior="inside">
       <ModalOverlay bg="blackAlpha.300" backdropFilter="blur(10px)" />
-      <ModalContent mx="3" w="full">
+      <ModalContent mx="3" w="calc(100% - 24px)">
         <ModalHeader pt={6}>
           <HStack gap={2}>
             <Icon color="primary">

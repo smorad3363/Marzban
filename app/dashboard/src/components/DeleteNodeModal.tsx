@@ -76,7 +76,7 @@ export const DeleteNodeModal: FC<DeleteUserModalProps> = ({
           )}
         </ModalBody>
         <ModalFooter display="flex">
-          <Button size="sm" onClick={onClose} mr={3} w="full" variant="outline">
+          <Button size="sm" onClick={onClose} me={3} w="full" variant="outline">
             {t("cancel")}
           </Button>
           <Button

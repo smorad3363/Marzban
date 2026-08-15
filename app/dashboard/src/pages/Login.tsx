@@ -2,20 +2,20 @@ import {
   Alert,
   AlertDescription,
   AlertIcon,
+  Badge,
   Box,
   Button,
   Flex,
   FormControl,
   Grid,
   HStack,
-  Image,
+  SimpleGrid,
   Text,
   VStack,
 } from "@chakra-ui/react";
-import { ArrowRightOnRectangleIcon } from "@heroicons/react/24/outline";
+import { ArrowRightOnRectangleIcon, BeakerIcon, ShieldCheckIcon } from "@heroicons/react/24/outline";
 import { zodResolver } from "@hookform/resolvers/zod";
-import brandIcon from "assets/brand/secure-network-icon.png";
-import networkHero from "assets/brand/secure-network-hero.png";
+import { BrandMark } from "components/BrandMark";
 import { Footer } from "components/Footer";
 import { Input } from "components/Input";
 import { Language } from "components/Language";
@@ -32,17 +32,21 @@ const schema = z.object({
   password: z.string().min(1, "login.fieldRequired"),
 });
 
+const LabTile: FC<{ number: string; symbol: string; label: string }> = ({ number, symbol, label }) => (
+  <Box border="1px solid" borderColor="rgba(92, 221, 149, 0.26)" bg="rgba(12, 31, 20, 0.72)" p={4} minH="116px">
+    <Text fontFamily="mono" fontSize="xs" color="primary.300">{number}</Text>
+    <Text fontFamily="mono" fontSize="4xl" fontWeight="700" lineHeight="1" mt={2}>{symbol}</Text>
+    <Text fontSize="xs" color="gray.400" mt={3} textTransform="uppercase" letterSpacing="0.12em">{label}</Text>
+  </Box>
+);
+
 export const Login: FC = () => {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
   const { t } = useTranslation();
   const location = useLocation();
-  const {
-    register,
-    formState: { errors },
-    handleSubmit,
-  } = useForm({ resolver: zodResolver(schema) });
+  const { register, formState: { errors }, handleSubmit } = useForm({ resolver: zodResolver(schema) });
 
   useEffect(() => {
     removeAuthToken();
@@ -66,44 +70,14 @@ export const Login: FC = () => {
   };
 
   return (
-    <Grid
-      minH="100vh"
-      templateColumns={{ base: "1fr", lg: "minmax(420px, 0.78fr) 1.22fr" }}
-      bg="white"
-      _dark={{ bg: "#08111f" }}
-    >
-      <Flex
-        direction="column"
-        minH="100vh"
-        px={{ base: 6, md: 12 }}
-        py={{ base: 6, md: 8 }}
-        borderRight={{ lg: "1px solid" }}
-        borderColor={{ lg: "gray.200" }}
-        _dark={{ borderColor: "whiteAlpha.200" }}
-      >
+    <Grid minH="100vh" templateColumns={{ base: "1fr", lg: "minmax(420px, .82fr) 1.18fr" }} bg="#f3f6f2" _dark={{ bg: "#09130e" }}>
+      <Flex direction="column" minH="100vh" minW={0} px={{ base: 6, md: 12 }} py={{ base: 6, md: 8 }} borderEnd={{ lg: "1px solid" }} borderColor={{ lg: "gray.200" }} _dark={{ borderColor: "rgba(91,132,108,.32)" }}>
         <HStack justifyContent="space-between" w="full">
           <HStack spacing={3}>
-            <Image
-              src={brandIcon}
-              alt="Secure network gateway"
-              boxSize="42px"
-              borderRadius="13px"
-              objectFit="cover"
-              boxShadow="0 10px 30px rgba(8, 145, 178, 0.22)"
-            />
+            <BrandMark aria-hidden="true" boxSize="44px" filter="drop-shadow(0 9px 22px rgba(34,197,94,.2))" />
             <Box>
-              <Text
-                fontSize="xs"
-                fontWeight="800"
-                letterSpacing="0.16em"
-                color="primary.600"
-                _dark={{ color: "primary.300" }}
-              >
-                NETWORK CONSOLE
-              </Text>
-              <Text fontSize="xs" color="gray.500">
-                Secure control plane
-              </Text>
+              <Text fontFamily="mono" fontSize="xs" fontWeight="700" letterSpacing="0.14em" color="primary.600" _dark={{ color: "primary.300" }}>HEISENBERG PANEL</Text>
+              <Text fontSize="xs" color="gray.500">Private control laboratory</Text>
             </Box>
           </HStack>
           <Language />
@@ -111,59 +85,19 @@ export const Login: FC = () => {
 
         <Flex flex="1" align="center" justify="center" py={12}>
           <Box w="full" maxW="390px">
-            <VStack alignItems="flex-start" w="full" spacing={2}>
-              <Text
-                fontSize={{ base: "3xl", md: "4xl" }}
-                lineHeight="1.08"
-                letterSpacing="-0.035em"
-                fontWeight="750"
-              >
-                {t("login.loginYourAccount")}
-              </Text>
-              <Text color="gray.600" _dark={{ color: "gray.400" }} maxW="34ch">
-                {t("login.welcomeBack")}
-              </Text>
+            <Badge colorScheme="green" variant="subtle" px={2.5} py={1} borderRadius="4px" fontFamily="mono" letterSpacing=".08em">AUTHORIZED PERSONNEL</Badge>
+            <VStack alignItems="flex-start" w="full" spacing={2} mt={5}>
+              <Text as="h1" fontSize={{ base: "3xl", md: "4xl" }} lineHeight="1.08" letterSpacing="-0.035em" fontWeight="700">{t("login.loginYourAccount")}</Text>
+              <Text color="gray.600" _dark={{ color: "gray.400" }} maxW="36ch">{t("login.welcomeBack")}</Text>
             </VStack>
 
             <Box w="full" pt="7">
               <form onSubmit={handleSubmit(login)}>
                 <VStack rowGap={3}>
-                  <FormControl>
-                    <Input
-                      w="full"
-                      label={t("username")}
-                      placeholder={t("username")}
-                      {...register("username")}
-                      error={t(errors?.username?.message as string)}
-                    />
-                  </FormControl>
-                  <FormControl>
-                    <Input
-                      w="full"
-                      label={t("password")}
-                      type="password"
-                      placeholder={t("password")}
-                      {...register("password")}
-                      error={t(errors?.password?.message as string)}
-                    />
-                  </FormControl>
-                  {error && (
-                    <Alert status="error" rounded="md">
-                      <AlertIcon />
-                      <AlertDescription>{error}</AlertDescription>
-                    </Alert>
-                  )}
-                  <Button
-                    isLoading={loading}
-                    type="submit"
-                    w="full"
-                    colorScheme="primary"
-                    mt={2}
-                    h="44px"
-                    rightIcon={<ArrowRightOnRectangleIcon width="18px" />}
-                  >
-                    {t("login")}
-                  </Button>
+                  <FormControl><Input w="full" label={t("username")} placeholder={t("username")} autoComplete="username" {...register("username")} error={t(errors?.username?.message as string)} /></FormControl>
+                  <FormControl><Input w="full" label={t("password")} type="password" placeholder={t("password")} autoComplete="current-password" {...register("password")} error={t(errors?.password?.message as string)} /></FormControl>
+                  {error && <Alert status="error" rounded="md"><AlertIcon /><AlertDescription>{error}</AlertDescription></Alert>}
+                  <Button isLoading={loading} type="submit" w="full" colorScheme="primary" mt={2} h="44px" rightIcon={<ArrowRightOnRectangleIcon width="18px" aria-hidden="true" />}>{t("login")}</Button>
                 </VStack>
               </form>
             </Box>
@@ -172,40 +106,46 @@ export const Login: FC = () => {
         <Footer />
       </Flex>
 
-      <Box
-        display={{ base: "none", lg: "block" }}
-        position="relative"
-        overflow="hidden"
-        bg="#07111f"
-      >
-        <Image
-          src={networkHero}
-          alt="Encrypted network routing"
+      <Box display={{ base: "none", lg: "block" }} position="relative" overflow="hidden" bg="#07130e" color="white">
+        <Box
+          aria-hidden="true"
           position="absolute"
-          inset={0}
-          w="full"
-          h="full"
-          objectFit="cover"
+          inset="0"
+          bgImage="url('/statics/images/rv-operations-login-blurred.png')"
+          bgSize="cover"
+          bgPosition="72% center"
+          bgRepeat="no-repeat"
+          filter="saturate(.8) contrast(1.06)"
+          transform="scale(1.01)"
         />
         <Box
+          aria-hidden="true"
           position="absolute"
           inset={0}
-          bgGradient="linear(to-t, rgba(4, 11, 24, 0.92) 0%, transparent 52%, rgba(4, 11, 24, 0.2) 100%)"
+          bgGradient="linear(to-r, rgba(7,19,14,.94) 0%, rgba(7,19,14,.82) 38%, rgba(7,19,14,.34) 72%, rgba(7,19,14,.18) 100%), linear(to-b, rgba(7,19,14,.12), rgba(7,19,14,.72))"
         />
-        <Box position="absolute" left={12} right={12} bottom={12} color="white">
-          <Text
-            fontSize="xs"
-            fontWeight="800"
-            letterSpacing="0.18em"
-            color="cyan.200"
-            mb={3}
-          >
-            ENCRYPTED OPERATIONS
-          </Text>
-          <Text fontSize="3xl" fontWeight="650" letterSpacing="-0.025em">
-            Every route visible. Every edge controlled.
-          </Text>
-        </Box>
+        <Box aria-hidden="true" position="absolute" inset={0} className="lab-grid" opacity=".2" />
+        <Flex position="relative" minH="100vh" direction="column" justify="space-between" p={{ lg: 10, xl: 14 }}>
+          <HStack justify="space-between" fontFamily="mono" fontSize="xs" color="primary.200" letterSpacing=".12em">
+            <HStack><Box boxSize="7px" borderRadius="full" bg="primary.300" boxShadow="0 0 14px #48d58b" /><Text>SYSTEM STABLE</Text></HStack>
+            <Text>LAB // 02</Text>
+          </HStack>
+
+          <Box maxW="680px">
+            <SimpleGrid columns={3} gap={3} maxW="500px" mb={10}>
+              <LabTile number="2" symbol="He" label="Control" />
+              <LabTile number="16" symbol="S" label="Secure" />
+              <LabTile number="78" symbol="Pt" label="Precise" />
+            </SimpleGrid>
+            <Text as="h2" fontFamily="mono" fontSize={{ lg: "4xl", xl: "5xl" }} fontWeight="700" lineHeight="1.08" letterSpacing="-.045em">Precision is the formula.<br /><Text as="span" color="primary.300">Control is the result.</Text></Text>
+            <Text color="gray.400" mt={5} maxW="48ch">A private operations surface built for exact decisions, clear signals and controlled access.</Text>
+          </Box>
+
+          <HStack spacing={6} color="gray.400" fontSize="xs">
+            <HStack><ShieldCheckIcon width="17px" aria-hidden="true" /><Text>Protected access</Text></HStack>
+            <HStack><BeakerIcon width="17px" aria-hidden="true" /><Text>Controlled environment</Text></HStack>
+          </HStack>
+        </Flex>
       </Box>
     </Grid>
   );

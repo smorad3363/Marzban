@@ -5,52 +5,31 @@ import {
   Flex,
   HStack,
   IconButton,
-  Image,
-  Menu,
-  MenuButton,
-  MenuItem,
-  MenuList,
+  SimpleGrid,
   Spacer,
   Stack,
   Text,
-  useColorMode,
 } from "@chakra-ui/react";
 import {
   ArrowLeftOnRectangleIcon,
-  Bars3Icon,
   ChartPieIcon,
   Cog6ToothIcon,
   DocumentMinusIcon,
   LinkIcon,
-  MoonIcon,
   SquaresPlusIcon,
-  SunIcon,
   UserGroupIcon,
   UsersIcon,
 } from "@heroicons/react/24/outline";
-import brandIcon from "assets/brand/secure-network-icon.png";
 import { useDashboard } from "contexts/DashboardContext";
-import { FC, ReactNode } from "react";
+import useGetUser from "hooks/useGetUser";
+import { FC, ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
-import { updateThemeColor } from "utils/themeColor";
+import { BrandMark } from "./BrandMark";
 import { Language } from "./Language";
-import useGetUser from "hooks/useGetUser";
 
-type HeaderProps = {
-  actions?: ReactNode;
-};
-const iconProps = {
-  baseStyle: {
-    w: 4,
-    h: 4,
-  },
-};
-
-const DarkIcon = chakra(MoonIcon, iconProps);
-const LightIcon = chakra(SunIcon, iconProps);
+const iconProps = { baseStyle: { w: 4, h: 4, flexShrink: 0 } };
 const CoreSettingsIcon = chakra(Cog6ToothIcon, iconProps);
-const SettingsIcon = chakra(Bars3Icon, iconProps);
 const LogoutIcon = chakra(ArrowLeftOnRectangleIcon, iconProps);
 const HostsIcon = chakra(LinkIcon, iconProps);
 const NodesIcon = chakra(SquaresPlusIcon, iconProps);
@@ -58,222 +37,122 @@ const NodesUsageIcon = chakra(ChartPieIcon, iconProps);
 const ResetUsageIcon = chakra(DocumentMinusIcon, iconProps);
 const UsersNavIcon = chakra(UsersIcon, iconProps);
 const AdminsNavIcon = chakra(UserGroupIcon, iconProps);
-export const Header: FC<HeaderProps> = ({ actions }) => {
+
+type ActionButtonProps = {
+  icon: ReactElement;
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+};
+
+const ActionButton: FC<ActionButtonProps> = ({ icon, label, onClick, danger }) => (
+  <Button
+    size="sm"
+    variant="ghost"
+    leftIcon={icon}
+    justifyContent="flex-start"
+    minW={0}
+    w="full"
+    color={danger ? "red.200" : "gray.200"}
+    fontWeight="500"
+    _hover={{ bg: danger ? "rgba(239, 68, 68, .14)" : "whiteAlpha.100", color: danger ? "red.100" : "white" }}
+    _active={{ bg: danger ? "rgba(239, 68, 68, .2)" : "whiteAlpha.200" }}
+    onClick={onClick}
+  >
+    <Text as="span" noOfLines={1}>{label}</Text>
+  </Button>
+);
+
+export const Header: FC = () => {
   const { userData, getUserIsSuccess, getUserIsPending } = useGetUser();
-
-  const isSudo = () => {
-    if (!getUserIsPending && getUserIsSuccess) {
-      return userData.is_sudo;
-    }
-    return false;
-  };
-
-  const {
-    onEditingHosts,
-    onResetAllUsage,
-    onEditingNodes,
-    onShowingNodesUsage,
-  } = useDashboard();
+  const isSudo = !getUserIsPending && getUserIsSuccess && userData.is_sudo;
+  const { onEditingHosts, onResetAllUsage, onEditingNodes, onShowingNodesUsage } = useDashboard();
   const { t } = useTranslation();
   const location = useLocation();
   const isAdminsPage = location.pathname.startsWith("/admins");
-  const { colorMode, toggleColorMode } = useColorMode();
   return (
     <Flex
       as="aside"
-      w={{ base: "full", lg: "252px" }}
-      minW={{ lg: "252px" }}
+      w={{ base: "full", lg: "272px" }}
+      minW={{ lg: "272px" }}
       minH={{ lg: "100vh" }}
       h={{ lg: "100vh" }}
       position={{ base: "relative", lg: "sticky" }}
       top="0"
       zIndex="sticky"
       direction="column"
-      bg="whiteAlpha.900"
-      _dark={{ bg: "rgba(8, 17, 31, 0.94)", borderColor: "whiteAlpha.200" }}
+      bg="rgba(7, 19, 14, 0.97)"
+      color="white"
       borderEndWidth={{ lg: "1px" }}
       borderBottomWidth={{ base: "1px", lg: "0" }}
-      borderColor="gray.200"
-      backdropFilter="blur(18px)"
+      borderColor="rgba(91, 132, 108, 0.32)"
+      backdropFilter="blur(16px)"
       px={{ base: 4, lg: 4 }}
       py={{ base: 3, lg: 5 }}
-      __css={{
-        "& .menuList": {
-          direction: "ltr",
-        },
-      }}
     >
-      <HStack justify="space-between" align="center">
+      <HStack justify="space-between" align="center" gap={3}>
         <HStack spacing={3} minW={0}>
-          <Image
-            src={brandIcon}
-            alt="Network console"
-            boxSize={{ base: "38px", lg: "46px" }}
-            borderRadius="14px"
-            objectFit="cover"
-            boxShadow="0 10px 30px rgba(37, 99, 235, 0.2)"
-          />
+          <BrandMark aria-hidden="true" boxSize={{ base: "38px", lg: "46px" }} filter="drop-shadow(0 8px 20px rgba(34, 197, 94, 0.22))" />
           <Box minW={0}>
-            <Text fontSize="xs" fontWeight="800" letterSpacing="0.13em" color="primary.600" _dark={{ color: "primary.300" }}>
-              MARZBAN
-            </Text>
-            <Text fontSize="xs" color="gray.500" mt="1px">
-              Control center
-            </Text>
+            <Text fontFamily="mono" fontSize="xs" fontWeight="700" letterSpacing="0.13em" color="primary.300" noOfLines={1}>HEISENBERG</Text>
+            <Text fontSize="xs" color="gray.400" mt="1px" noOfLines={1}>Control laboratory</Text>
           </Box>
         </HStack>
-        <HStack display={{ base: "flex", lg: "none" }} spacing={2}>
-          <Menu>
-            <MenuButton as={IconButton} size="sm" variant="ghost" icon={<SettingsIcon />} aria-label="settings" />
-            <MenuList minW="190px" zIndex={99999} className="menuList">
-              {isSudo() && (
-                <>
-                  <MenuItem icon={<CoreSettingsIcon />} onClick={() => useDashboard.setState({ isEditingCore: true })}>
-                    {t("core.title")}
-                  </MenuItem>
-                  <MenuItem icon={<HostsIcon />} onClick={onEditingHosts.bind(null, true)}>
-                    {t("header.hostSettings")}
-                  </MenuItem>
-                  <MenuItem icon={<NodesIcon />} onClick={onEditingNodes.bind(null, true)}>
-                    {t("header.nodeSettings")}
-                  </MenuItem>
-                  <MenuItem icon={<NodesUsageIcon />} onClick={onShowingNodesUsage.bind(null, true)}>
-                    {t("header.nodesUsage")}
-                  </MenuItem>
-                  <MenuItem icon={<ResetUsageIcon />} onClick={onResetAllUsage.bind(null, true)}>
-                    {t("resetAllUsage")}
-                  </MenuItem>
-                </>
-              )}
-              <Link to="/login">
-                <MenuItem icon={<LogoutIcon />}>{t("header.logout")}</MenuItem>
-              </Link>
-            </MenuList>
-          </Menu>
+        <HStack display={{ base: "flex", lg: "none" }} spacing={1} flexShrink={0}>
           <Language />
-          <IconButton
-            size="sm"
-            variant="ghost"
-            aria-label="switch theme"
-            onClick={() => {
-              updateThemeColor(colorMode == "dark" ? "light" : "dark");
-              toggleColorMode();
-            }}
-          >
-            {colorMode === "light" ? <DarkIcon /> : <LightIcon />}
-          </IconButton>
+          <IconButton as={Link} to="/login/" size="sm" variant="ghost" color="red.200" aria-label={t("header.logout")} icon={<LogoutIcon />} />
         </HStack>
       </HStack>
 
-      <Stack
-        as="nav"
-        direction={{ base: "row", lg: "column" }}
-        spacing={{ base: 2, lg: 1 }}
-        mt={{ base: 3, lg: 9 }}
-        overflowX={{ base: "auto", lg: "visible" }}
-      >
-          <Button as={Link} to="/" size="md" variant={!isAdminsPage ? "solid" : "ghost"} colorScheme={!isAdminsPage ? "primary" : "gray"} leftIcon={<UsersNavIcon />} justifyContent="flex-start" minW={{ base: "max-content", lg: "full" }}>
-            {t("users")}
-          </Button>
-          {isSudo() && (
-            <Button as={Link} to="/admins/" size="md" variant={isAdminsPage ? "solid" : "ghost"} colorScheme={isAdminsPage ? "primary" : "gray"} leftIcon={<AdminsNavIcon />} justifyContent="flex-start" minW={{ base: "max-content", lg: "full" }}>
-              {t("admins.nav")}
-            </Button>
-          )}
-      </Stack>
+      <Text display={{ base: "none", lg: "block" }} mt={8} mb={2} px={2} fontSize="xs" color="gray.500" fontFamily="mono" letterSpacing=".1em" textTransform="uppercase">Navigation</Text>
+      <SimpleGrid as="nav" aria-label="Primary navigation" columns={{ base: isSudo ? 2 : 1, lg: 1 }} spacing={2} mt={{ base: 4, lg: 0 }}>
+        <Button
+          as={Link}
+          to="/"
+          size="md"
+          variant={!isAdminsPage ? "solid" : "ghost"}
+          colorScheme={!isAdminsPage ? "primary" : "gray"}
+          color={!isAdminsPage ? "#07130e" : "gray.200"}
+          _hover={!isAdminsPage ? undefined : { bg: "whiteAlpha.100", color: "white" }}
+          leftIcon={<UsersNavIcon />}
+          justifyContent="flex-start"
+          aria-current={!isAdminsPage ? "page" : undefined}
+        >{t("users")}</Button>
+        {isSudo && (
+          <Button
+            as={Link}
+            to="/admins/"
+            size="md"
+            variant={isAdminsPage ? "solid" : "ghost"}
+            colorScheme={isAdminsPage ? "primary" : "gray"}
+            color={isAdminsPage ? "#07130e" : "gray.200"}
+            _hover={isAdminsPage ? undefined : { bg: "whiteAlpha.100", color: "white" }}
+            leftIcon={<AdminsNavIcon />}
+            justifyContent="flex-start"
+            aria-current={isAdminsPage ? "page" : undefined}
+          >{t("admins.nav")}</Button>
+        )}
+      </SimpleGrid>
+
+      {isSudo && (
+        <Box mt={{ base: 4, lg: 7 }} pt={{ base: 4, lg: 0 }} borderTopWidth={{ base: "1px", lg: "0" }} borderColor="whiteAlpha.200">
+          <Text mb={2} px={2} fontSize="xs" color="gray.500" fontFamily="mono" letterSpacing=".1em" textTransform="uppercase">{t("core.configuration")}</Text>
+          <SimpleGrid columns={{ base: 2, sm: 3, lg: 1 }} spacing={1}>
+            <ActionButton icon={<CoreSettingsIcon />} label={t("core.title")} onClick={() => useDashboard.setState({ isEditingCore: true })} />
+            <ActionButton icon={<HostsIcon />} label={t("header.hostSettings")} onClick={() => onEditingHosts(true)} />
+            <ActionButton icon={<NodesIcon />} label={t("header.nodeSettings")} onClick={() => onEditingNodes(true)} />
+            <ActionButton icon={<NodesUsageIcon />} label={t("header.nodesUsage")} onClick={() => onShowingNodesUsage(true)} />
+            <ActionButton icon={<ResetUsageIcon />} label={t("resetAllUsage")} onClick={() => onResetAllUsage(true)} danger />
+          </SimpleGrid>
+        </Box>
+      )}
 
       <Spacer display={{ base: "none", lg: "block" }} />
-      {actions}
-      <Box display={{ base: "none", lg: "block" }} mt={6} pt={4} borderTopWidth="1px" borderColor="gray.200" _dark={{ borderColor: "whiteAlpha.200" }}>
-        <Text fontSize="xs" color="gray.500" mb={3} px={1} noOfLines={1}>
-          {userData?.username || "Administrator"}
-        </Text>
-        <HStack alignItems="center" spacing={2}>
-          <Menu>
-            <MenuButton
-              as={IconButton}
-              size="sm"
-              variant="outline"
-              icon={
-                <>
-                  <SettingsIcon />
-                </>
-              }
-              position="relative"
-            ></MenuButton>
-            <MenuList minW="170px" zIndex={99999} className="menuList">
-              {isSudo() && (
-                <>
-                  <MenuItem
-                    maxW="170px"
-                    fontSize="sm"
-                    icon={<HostsIcon />}
-                    onClick={onEditingHosts.bind(null, true)}
-                  >
-                    {t("header.hostSettings")}
-                  </MenuItem>
-                  <MenuItem
-                    maxW="170px"
-                    fontSize="sm"
-                    icon={<NodesIcon />}
-                    onClick={onEditingNodes.bind(null, true)}
-                  >
-                    {t("header.nodeSettings")}
-                  </MenuItem>
-                  <MenuItem
-                    maxW="170px"
-                    fontSize="sm"
-                    icon={<NodesUsageIcon />}
-                    onClick={onShowingNodesUsage.bind(null, true)}
-                  >
-                    {t("header.nodesUsage")}
-                  </MenuItem>
-                  <MenuItem
-                    maxW="170px"
-                    fontSize="sm"
-                    icon={<ResetUsageIcon />}
-                    onClick={onResetAllUsage.bind(null, true)}
-                  >
-                    {t("resetAllUsage")}
-                  </MenuItem>
-                </>
-              )}
-              <Link to="/login">
-                <MenuItem maxW="170px" fontSize="sm" icon={<LogoutIcon />}>
-                  {t("header.logout")}
-                </MenuItem>
-              </Link>
-            </MenuList>
-          </Menu>
-
-          {isSudo() && (
-            <IconButton
-              size="sm"
-              variant="outline"
-              aria-label="core settings"
-              onClick={() => {
-                useDashboard.setState({ isEditingCore: true });
-              }}
-            >
-              <CoreSettingsIcon />
-            </IconButton>
-          )}
-
-          <Language />
-
-          <IconButton
-            size="sm"
-            variant="outline"
-            aria-label="switch theme"
-            onClick={() => {
-              updateThemeColor(colorMode == "dark" ? "light" : "dark");
-              toggleColorMode();
-            }}
-          >
-            {colorMode === "light" ? <DarkIcon /> : <LightIcon />}
-          </IconButton>
-        </HStack>
-      </Box>
+      <Stack display={{ base: "none", lg: "flex" }} mt={6} pt={4} borderTopWidth="1px" borderColor="whiteAlpha.200" spacing={2}>
+        <Text fontSize="xs" color="gray.400" px={2} noOfLines={1}>{userData?.username || "Administrator"}</Text>
+        <Language />
+        <Button as={Link} to="/login/" size="sm" variant="ghost" color="red.200" leftIcon={<LogoutIcon />} justifyContent="flex-start" _hover={{ bg: "rgba(239, 68, 68, .14)", color: "red.100" }}>{t("header.logout")}</Button>
+      </Stack>
     </Flex>
   );
 };

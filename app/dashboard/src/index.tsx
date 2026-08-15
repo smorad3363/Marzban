@@ -1,4 +1,4 @@
-import { ChakraProvider, localStorageManager } from "@chakra-ui/react";
+import { ChakraProvider } from "@chakra-ui/react";
 import dayjs from "dayjs";
 import Duration from "dayjs/plugin/duration";
 import LocalizedFormat from "dayjs/plugin/localizedFormat";
@@ -21,7 +21,9 @@ dayjs.extend(utc);
 dayjs.extend(RelativeTime);
 dayjs.extend(Duration);
 
-updateThemeColor(localStorageManager.get() || "light");
+localStorage.setItem("chakra-ui-color-mode", "dark");
+document.documentElement.style.colorScheme = "dark";
+updateThemeColor("dark");
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

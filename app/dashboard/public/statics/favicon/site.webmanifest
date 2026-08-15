@@ -1,19 +1,14 @@
 {
-    "name": "Network Console",
-    "short_name": "Net Console",
+    "name": "Heisenberg Panel",
+    "short_name": "Heisenberg",
     "icons": [
         {
-            "src": "/statics/favicon/android-chrome-192x192.png",
-            "sizes": "192x192",
-            "type": "image/png"
-        },
-        {
-            "src": "/statics/favicon/android-chrome-512x512.png",
-            "sizes": "512x512",
-            "type": "image/png"
+            "src": "/statics/favicon/heisenberg-mark.svg",
+            "sizes": "any",
+            "type": "image/svg+xml"
         }
     ],
-    "theme_color": "#07111f",
-    "background_color": "#07111f",
+    "theme_color": "#07130e",
+    "background_color": "#07130e",
     "display": "standalone"
 }

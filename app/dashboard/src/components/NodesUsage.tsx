@@ -72,9 +72,9 @@ export const NodesUsage: FC<NodesUsageProps> = () => {
   const disabled = loading;
 
   return (
-    <Modal isOpen={isShowingNodesUsage} onClose={onClose} size="2xl">
+    <Modal isOpen={isShowingNodesUsage} onClose={onClose} size="2xl" scrollBehavior="inside">
       <ModalOverlay bg="blackAlpha.300" backdropFilter="blur(10px)" />
-      <ModalContent mx="3" w="full">
+      <ModalContent mx="3" w="calc(100% - 24px)">
         <ModalHeader pt={6}>
           <HStack gap={2}>
             <Icon color="primary">
@@ -85,7 +85,7 @@ export const NodesUsage: FC<NodesUsageProps> = () => {
             </Text>
           </HStack>
         </ModalHeader>
-        <ModalCloseButton mt={3} disabled={disabled} />
+        <ModalCloseButton mt={3} isDisabled={disabled} />
         <ModalBody>
           <VStack gap={4}>
             <UsageFilter
@@ -101,7 +101,7 @@ export const NodesUsage: FC<NodesUsageProps> = () => {
                   options={usage.options}
                   series={usage.series}
                   type="donut"
-                  height="500px"
+                  height="320px"
                 />
               </Suspense>
             </Box>

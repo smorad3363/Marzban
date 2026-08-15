@@ -1,16 +1,12 @@
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=Manrope:wght@400;500;600;700;800&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@400;500;600;700&family=Vazirmatn:wght@400;500;600;700&display=swap");
 
 body {
   background-image:
-    radial-gradient(circle at 92% 0%, rgba(59, 130, 246, 0.1), transparent 31rem),
-    radial-gradient(circle at 15% 100%, rgba(14, 165, 233, 0.055), transparent 28rem);
-  background-attachment: fixed;
-}
-
-.chakra-ui-dark body {
-  background-image:
-    radial-gradient(circle at 92% 0%, rgba(37, 99, 235, 0.16), transparent 33rem),
-    radial-gradient(circle at 10% 100%, rgba(14, 165, 233, 0.08), transparent 30rem);
+    linear-gradient(rgba(73, 214, 139, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(73, 214, 139, 0.025) 1px, transparent 1px),
+    radial-gradient(circle at 92% 0%, rgba(34, 185, 101, 0.15), transparent 33rem),
+    radial-gradient(circle at 10% 100%, rgba(166, 201, 87, 0.055), transparent 30rem);
+  background-size: 28px 28px, 28px 28px, auto, auto;
 }
 
 html {
@@ -22,9 +18,50 @@ body,
   min-height: 100vh;
 }
 
+html[lang="fa"] body,
+html[lang="fa"] button,
+html[lang="fa"] input,
+html[lang="fa"] select,
+html[lang="fa"] textarea {
+  font-family: "Vazirmatn", "Fira Sans", sans-serif;
+}
+
+.chakra-ui-dark .chakra-select option {
+  color: #f1f5f2;
+  background: #111d17;
+}
+
 * {
   scrollbar-color: rgba(100, 116, 139, 0.45) transparent;
   scrollbar-width: thin;
+}
+
+button,
+a,
+[role="button"] {
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+:focus-visible {
+  outline: 2px solid #48d58b !important;
+  outline-offset: 2px;
+}
+
+.lab-shell::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(120deg, transparent 0 72%, rgba(34, 185, 101, 0.025) 72% 73%, transparent 73%);
+  z-index: -1;
+}
+
+.lab-grid {
+  background-image:
+    linear-gradient(rgba(72, 213, 139, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(72, 213, 139, 0.08) 1px, transparent 1px);
+  background-size: 32px 32px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -72,21 +109,21 @@ body,
 
 table thead {
   th:first-of-type {
-    border-top-left-radius: 8px;
+    border-start-start-radius: 8px;
   }
 
   th:last-of-type {
-    border-top-right-radius: 8px;
+    border-start-end-radius: 8px;
   }
 }
 
 .last-row {
   td:first-of-type {
-    border-bottom-left-radius: 8px;
+    border-end-start-radius: 8px;
   }
 
   td:last-of-type {
-    border-bottom-right-radius: 8px;
+    border-end-end-radius: 8px;
   }
 }
 

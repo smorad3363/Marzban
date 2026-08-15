@@ -316,7 +316,7 @@ const AccordionInbound: FC<AccordionInboundType> = ({
                                 <PopoverCloseButton />
                                 <PopoverBody>
                                   <Box fontSize="xs">
-                                    <Text pr="20px">
+                                    <Text pe="20px">
                                       {t("hostsDialog.desc")}
                                     </Text>
                                     <Text>
@@ -440,7 +440,7 @@ const AccordionInbound: FC<AccordionInboundType> = ({
                               <PopoverCloseButton />
                               <PopoverBody>
                                 <Box fontSize="xs">
-                                  <Text pr="20px">{t("hostsDialog.desc")}</Text>
+                                  <Text pe="20px">{t("hostsDialog.desc")}</Text>
                                   <Text>
                                     <Badge>
                                       {"{"}SERVER_IP{"}"}
@@ -553,10 +553,10 @@ const AccordionInbound: FC<AccordionInboundType> = ({
                             fontSize="xs"
                             color="gray.600"
                             _dark={{ color: "gray.500" }}
-                            pl={1}
+                            ps={1}
                           >
                             {t("hostsDialog.advancedOptions")}
-                            <AccordionIcon fontSize="sm" ml={1} />
+                            <AccordionIcon fontSize="sm" ms={1} />
                           </Text>
 
                           <Container flex="1" px="0" display={"contents"}>
@@ -656,7 +656,7 @@ const AccordionInbound: FC<AccordionInboundType> = ({
                                   <PopoverContent p={2}>
                                     <PopoverArrow />
                                     <PopoverCloseButton />
-                                    <Text fontSize="xs" pr={5}>
+                                    <Text fontSize="xs" pe={5}>
                                       {t("hostsDialog.port.info")}
                                     </Text>
                                   </PopoverContent>
@@ -696,7 +696,7 @@ const AccordionInbound: FC<AccordionInboundType> = ({
                                   <PopoverContent p={2}>
                                     <PopoverArrow />
                                     <PopoverCloseButton />
-                                    <Text fontSize="xs" pr={5}>
+                                    <Text fontSize="xs" pe={5}>
                                       {t("hostsDialog.sni.info")}
                                     </Text>
                                     <Text fontSize="xs" mt="2">
@@ -756,7 +756,7 @@ const AccordionInbound: FC<AccordionInboundType> = ({
                                   <PopoverContent p={2}>
                                     <PopoverArrow />
                                     <PopoverCloseButton />
-                                    <Text fontSize="xs" pr={5}>
+                                    <Text fontSize="xs" pe={5}>
                                       {t("hostsDialog.host.info")}
                                     </Text>
                                     <Text fontSize="xs" mt="2">
@@ -820,7 +820,7 @@ const AccordionInbound: FC<AccordionInboundType> = ({
                                   <PopoverContent p={2}>
                                     <PopoverArrow />
                                     <PopoverCloseButton />
-                                    <Text fontSize="xs" pr={5}>
+                                    <Text fontSize="xs" pe={5}>
                                       {t("hostsDialog.path.info")}
                                     </Text>
                                   </PopoverContent>
@@ -862,7 +862,7 @@ const AccordionInbound: FC<AccordionInboundType> = ({
                                   <PopoverContent p={2}>
                                     <PopoverArrow />
                                     <PopoverCloseButton />
-                                    <Text fontSize="xs" pr={5}>
+                                    <Text fontSize="xs" pe={5}>
                                       {t("hostsDialog.security.info")}
                                     </Text>
                                   </PopoverContent>
@@ -965,19 +965,19 @@ const AccordionInbound: FC<AccordionInboundType> = ({
                                   <PopoverContent p={2}>
                                     <PopoverArrow />
                                     <PopoverCloseButton />
-                                    <Text fontSize="xs" pr={5}>
+                                    <Text fontSize="xs" pe={5}>
                                       {t("hostsDialog.fragment.info")}
                                     </Text>
-                                    <Text fontSize="xs" pr={5} pt={2} pb={1}>
+                                    <Text fontSize="xs" pe={5} pt={2} pb={1}>
                                       {t("hostsDialog.fragment.info.examples")}
                                     </Text>
-                                    <Text fontSize="xs" pr={5}>
+                                    <Text fontSize="xs" pe={5}>
                                       100-200,10-20,tlshello
                                     </Text>
-                                    <Text fontSize="xs" pr={5}>
+                                    <Text fontSize="xs" pe={5}>
                                       100-200,10-20,1-3
                                     </Text>
-                                    <Text fontSize="xs" pr={5} pt="3">
+                                    <Text fontSize="xs" pe={5} pt="3">
                                       {t("hostsDialog.fragment.info.attention")}
                                     </Text>
                                   </PopoverContent>
@@ -1029,19 +1029,19 @@ const AccordionInbound: FC<AccordionInboundType> = ({
                                   <PopoverContent p={2}>
                                     <PopoverArrow />
                                     <PopoverCloseButton />
-                                    <Text fontSize="xs" pr={5}>
+                                    <Text fontSize="xs" pe={5}>
                                       {t("hostsDialog.noise.info")}
                                     </Text>
-                                    <Text fontSize="xs" pr={5} pt={2} pb={1}>
+                                    <Text fontSize="xs" pe={5} pt={2} pb={1}>
                                       {t("hostsDialog.noise.info.examples")}
                                     </Text>
-                                    <Text fontSize="xs" pr={5}>
+                                    <Text fontSize="xs" pe={5}>
                                       rand:10-20,10-20
                                     </Text>
-                                    <Text fontSize="xs" pr={5}>
+                                    <Text fontSize="xs" pe={5}>
                                       rand:10-20,10-20&base64:7nQBAAABAAAAAAAABnQtcmluZwZtc2VkZ2UDbmV0AAABAAE=,10-25
                                     </Text>
-                                    <Text fontSize="xs" pr={5} pt="3">
+                                    <Text fontSize="xs" pe={5} pt="3">
                                       {t("hostsDialog.noise.info.attention")}
                                     </Text>
                                   </PopoverContent>
@@ -1268,16 +1268,16 @@ export const HostsDialog: FC = () => {
   };
 
   return (
-    <Modal isOpen={isEditingHosts} onClose={onClose}>
+    <Modal isOpen={isEditingHosts} onClose={onClose} scrollBehavior="inside">
       <ModalOverlay bg="blackAlpha.300" backdropFilter="blur(10px)" />
-      <ModalContent mx="3" w="fit-content" maxW="3xl">
+      <ModalContent mx="3" w={{ base: "calc(100% - 24px)", md: "fit-content" }} maxW="3xl">
         <ModalHeader pt={6}>
           <Icon color="primary">
             <ModalIcon color="white" />
           </Icon>
         </ModalHeader>
         <ModalCloseButton mt={3} />
-        <ModalBody w="440px" pb={3} pt={3}>
+        <ModalBody w={{ base: "full", md: "440px" }} maxW="full" pb={3} pt={3}>
           <FormProvider {...form}>
             <form onSubmit={form.handleSubmit(handleFormSubmit)}>
               <Text mb={3} opacity={0.8} fontSize="sm">

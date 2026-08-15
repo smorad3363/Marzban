@@ -214,7 +214,7 @@ const RadioCard: FC<
             h="2"
             bg="yellow.500"
             top="-1"
-            right="-1"
+            insetEnd="-1"
             rounded="full"
             zIndex={999}
           />
@@ -273,7 +273,7 @@ const RadioCard: FC<
             className="checked"
             color="primary.200"
             position="absolute"
-            right="3"
+            insetEnd="3"
             top="3"
             w="auto"
             p={0}
@@ -315,8 +315,7 @@ const RadioCard: FC<
           borderStyle="solid"
           borderWidth="1px"
           borderRadius="md"
-          pl={3}
-          pr={3}
+          px={3}
           pt={1.5}
           _dark={{ bg: "gray.700" }}
         >
@@ -352,8 +351,7 @@ const RadioCard: FC<
                   fontSize="xs"
                   size="sm"
                   borderRadius="6px"
-                  pl={2}
-                  pr={2}
+                  px={2}
                   placeholder={t("userDialog.generatedByDefault")}
                   {...form.register("proxies.vmess.id")}
                 />
@@ -370,8 +368,7 @@ const RadioCard: FC<
                   fontSize="xs"
                   size="sm"
                   borderRadius="6px"
-                  pl={2}
-                  pr={2}
+                  px={2}
                   placeholder={t("userDialog.generatedByDefault")}
                   {...form.register("proxies.vless.id")}
                 />
@@ -405,8 +402,7 @@ const RadioCard: FC<
                   fontSize="xs"
                   size="sm"
                   borderRadius="6px"
-                  pl={2}
-                  pr={2}
+                  px={2}
                   placeholder={t("userDialog.generatedByDefault")}
                   {...form.register("proxies.trojan.password")}
                 />
@@ -423,8 +419,7 @@ const RadioCard: FC<
                   fontSize="xs"
                   size="sm"
                   borderRadius="6px"
-                  pl={2}
-                  pr={2}
+                  px={2}
                   placeholder={t("userDialog.generatedByDefault")}
                   {...form.register("proxies.shadowsocks.password")}
                 />

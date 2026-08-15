@@ -1,32 +1,36 @@
 import { extendTheme } from "@chakra-ui/react";
 export const theme = extendTheme({
+  config: {
+    initialColorMode: "dark",
+    useSystemColorMode: false,
+  },
   shadows: {
-    outline: "0 0 0 3px rgba(37, 99, 235, 0.2)",
-    panel: "0 1px 2px rgba(15, 23, 42, 0.03), 0 12px 32px rgba(15, 23, 42, 0.055)",
-    elevated: "0 18px 48px rgba(15, 23, 42, 0.12)",
+    outline: "0 0 0 3px rgba(34, 197, 94, 0.24)",
+    panel: "0 1px 2px rgba(0, 0, 0, 0.32), 0 14px 34px rgba(0, 0, 0, 0.24)",
+    elevated: "0 22px 54px rgba(0, 0, 0, 0.42)",
   },
   fonts: {
-    heading: `Manrope, Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif`,
-    body: `Manrope, Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif`,
-    mono: `IBM Plex Mono, SFMono-Regular, Consolas, monospace`,
+    heading: `Fira Sans, Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif`,
+    body: `Fira Sans, Inter, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif`,
+    mono: `Fira Code, IBM Plex Mono, Consolas, monospace`,
   },
   colors: {
-    "light-border": "#dfe5ef",
+    "light-border": "#33483b",
     surface: {
-      light: "#ffffff",
-      dark: "#0d1728",
+      light: "#111d17",
+      dark: "#111d17",
     },
     primary: {
-      50: "#eff6ff",
-      100: "#dbeafe",
-      200: "#bfdbfe",
-      300: "#93c5fd",
-      400: "#60a5fa",
-      500: "#3b82f6",
-      600: "#2563eb",
-      700: "#1d4ed8",
-      800: "#1e40af",
-      900: "#1e3a8a",
+      50: "#eafbf1",
+      100: "#c9f4da",
+      200: "#9ce9ba",
+      300: "#67d994",
+      400: "#3fc978",
+      500: "#22b965",
+      600: "#168e4c",
+      700: "#126f3e",
+      800: "#115833",
+      900: "#0d482b",
     },
     gray: {
       750: "#172235",
@@ -35,10 +39,11 @@ export const theme = extendTheme({
   styles: {
     global: {
       body: {
-        bg: "#f5f7fb",
-        color: "#172033",
+        bg: "#09130e",
+        color: "gray.100",
+        lineHeight: "1.5",
         _dark: {
-          bg: "#07101d",
+          bg: "#09130e",
           color: "gray.100",
         },
       },
@@ -51,7 +56,7 @@ export const theme = extendTheme({
   components: {
     Button: {
       baseStyle: {
-        borderRadius: "10px",
+        borderRadius: "8px",
         fontWeight: "650",
         transitionProperty: "background-color, border-color, color",
         transitionDuration: "120ms",
@@ -63,16 +68,30 @@ export const theme = extendTheme({
     Card: {
       baseStyle: {
         container: {
-          bg: "white",
-          borderColor: "light-border",
-          _dark: { bg: "#0d1929", borderColor: "gray.600" },
+          bg: "#111d17",
+          color: "gray.100",
+          borderColor: "#33483b",
+          _dark: { bg: "#111d17", borderColor: "#33483b" },
         },
+      },
+    },
+    Modal: {
+      baseStyle: {
+        dialog: {
+          bg: "#111d17",
+          color: "gray.100",
+          borderWidth: "1px",
+          borderColor: "#33483b",
+          _dark: { bg: "#111d17", borderColor: "#33483b" },
+        },
+        header: { borderColor: "#33483b", _dark: { borderColor: "#33483b" } },
+        footer: { borderColor: "#33483b", _dark: { borderColor: "#33483b" } },
       },
     },
     Alert: {
       baseStyle: {
         container: {
-          borderRadius: "10px",
+          borderRadius: "8px",
           fontSize: "sm",
         },
       },
@@ -80,11 +99,14 @@ export const theme = extendTheme({
     Select: {
       baseStyle: {
         field: {
+          bg: "#111d17",
+          color: "gray.100",
+          borderColor: "#475f50",
+          borderRadius: "6px",
           _dark: {
-            borderColor: "gray.600",
-            borderRadius: "6px",
-          },
-          _light: {
+            bg: "#111d17",
+            color: "gray.100",
+            borderColor: "#475f50",
             borderRadius: "6px",
           },
         },
@@ -93,6 +115,7 @@ export const theme = extendTheme({
     FormHelperText: {
       baseStyle: {
         fontSize: "xs",
+        color: "gray.400",
       },
     },
     FormLabel: {
@@ -100,6 +123,7 @@ export const theme = extendTheme({
         fontSize: "sm",
         fontWeight: "medium",
         mb: "1",
+        color: "gray.300",
         _dark: { color: "gray.300" },
       },
     },
@@ -115,7 +139,9 @@ export const theme = extendTheme({
         },
         field: {
           borderRadius: "10px",
-          bg: "white",
+          bg: "whiteAlpha.50",
+          color: "gray.100",
+          borderColor: "gray.600",
           _focusVisible: {
             boxShadow: "none",
             borderColor: "primary.200",
@@ -142,45 +168,46 @@ export const theme = extendTheme({
           borderSpacing: 0,
         },
         thead: {
-          borderBottomColor: "light-border",
+          borderBottomColor: "#33483b",
         },
         th: {
-          background: "#f8fafc",
-          color: "gray.500",
+          background: "#16251c",
+          color: "gray.300",
           fontSize: "xs",
           letterSpacing: "0.04em",
-          borderColor: "light-border !important",
-          borderBottomColor: "light-border !important",
+          borderColor: "#33483b !important",
+          borderBottomColor: "#33483b !important",
           borderTop: "1px solid ",
-          borderTopColor: "light-border !important",
+          borderTopColor: "#33483b !important",
           _first: {
-            borderLeft: "1px solid",
-            borderColor: "light-border !important",
+            borderInlineStart: "1px solid",
+            borderColor: "#33483b !important",
           },
           _last: {
-            borderRight: "1px solid",
-            borderColor: "light-border !important",
+            borderInlineEnd: "1px solid",
+            borderColor: "#33483b !important",
           },
           _dark: {
             borderColor: "gray.600 !important",
-            background: "gray.750",
+            background: "#16251c",
           },
         },
         td: {
           transition: "background-color .12s ease-out",
           py: 4,
-          borderColor: "light-border",
-          borderBottomColor: "light-border !important",
+          color: "gray.100",
+          borderColor: "#33483b",
+          borderBottomColor: "#33483b !important",
           _first: {
-            borderLeft: "1px solid",
-            borderColor: "light-border",
+            borderInlineStart: "1px solid",
+            borderColor: "#33483b",
             _dark: {
               borderColor: "gray.600",
             },
           },
           _last: {
-            borderRight: "1px solid",
-            borderColor: "light-border",
+            borderInlineEnd: "1px solid",
+            borderColor: "#33483b",
             _dark: {
               borderColor: "gray.600",
             },
@@ -195,11 +222,11 @@ export const theme = extendTheme({
             cursor: "pointer",
             _hover: {
               "& > td": {
-                  bg: "primary.50",
+                  bg: "#16251c",
               },
               _dark: {
                 "& > td": {
-                  bg: "gray.750",
+                  bg: "#16251c",
                 },
               },
             },
@@ -207,10 +234,10 @@ export const theme = extendTheme({
           _last: {
             "& > td": {
               _first: {
-                borderBottomLeftRadius: "8px",
+                borderEndStartRadius: "8px",
               },
               _last: {
-                borderBottomRightRadius: "8px",
+                borderEndEndRadius: "8px",
               },
             },
           },
