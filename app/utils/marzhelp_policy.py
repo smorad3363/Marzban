@@ -70,6 +70,24 @@ def _validate_data_limit(settings: MarzhelpAdminSettings, data_limit: int | None
         )
 
 
+def _validate_user_count(db: Session, settings: MarzhelpAdminSettings) -> None:
+    """Reject creation when admin already owns maximum allowed users."""
+
+    if settings.max_users is None:
+        return
+    current_users = (
+        db.query(func.count(User.id))
+        .filter(User.admin_id == settings.admin_id)
+        .scalar()
+        or 0
+    )
+    if int(current_users) >= int(settings.max_users):
+        raise MarzhelpPolicyError(
+            "user_count_limit_reached",
+            f"MarzHelp: admin cannot own more than {settings.max_users} users",
+        )
+
+
 def _validate_expiration(
     settings: MarzhelpAdminSettings,
     expire: int | None,
@@ -223,6 +241,8 @@ def validate_create(db: Session, admin_id: int | None, user: Any) -> MarzhelpAdm
         raise MarzhelpPolicyError(
             "creation_forbidden", "MarzHelp: user creation is disabled for this admin"
         )
+
+    _validate_user_count(db, settings)
 
     data_limit = _effective_data_limit(user.data_limit)
     expire = _effective_expire(user.expire)

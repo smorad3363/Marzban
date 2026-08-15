@@ -150,6 +150,7 @@ class MarzhelpAdminPolicy(BaseModel):
     used_traffic: int = Field(default=0, ge=0)
     expiry_date: Optional[date] = None
     user_limit: Optional[int] = Field(default=None, ge=0)
+    max_users: Optional[int] = Field(default=None, ge=1)
     max_user_duration_days: Optional[int] = Field(default=None, ge=1)
     calculate_volume: Literal["used_traffic", "created_traffic"] = "used_traffic"
     prevent_user_creation: bool = False
@@ -161,6 +162,7 @@ class MarzhelpAdminPolicy(BaseModel):
 
 
 class ManagedAdmin(Admin):
+    user_count: int = 0
     policy: MarzhelpAdminPolicy
 
 

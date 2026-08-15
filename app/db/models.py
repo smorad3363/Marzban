@@ -83,6 +83,8 @@ class MarzhelpAdminSettings(Base):
     status = Column(JSON, nullable=True)
     # Remaining successful create/renew operations. NULL means unrestricted.
     user_limit = Column(BigInteger, nullable=True)
+    # Maximum number of existing users owned by this admin. NULL means unrestricted.
+    max_users = Column(BigInteger, nullable=True)
     max_user_duration_days = Column(Integer, nullable=True)
     hashed_password_before = Column(String(255), nullable=True)
     last_expiry_notification = Column(DateTime, nullable=True)
@@ -191,7 +193,7 @@ class User(Base):
     )
     usage_logs = relationship("UserUsageResetLogs", back_populates="user")  # maybe rename it to reset_usage_logs?
     expire = Column(Integer, nullable=True)
-    admin_id = Column(Integer, ForeignKey("admins.id"))
+    admin_id = Column(Integer, ForeignKey("admins.id"), index=True)
     admin = relationship("Admin", back_populates="users")
     sub_revoked_at = Column(DateTime, nullable=True, default=None)
     sub_updated_at = Column(DateTime, nullable=True, default=None)

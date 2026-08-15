@@ -64,6 +64,25 @@ def test_delete_refund_formula(used, expected):
     assert policy.calculate_delete_refund(50 * GB, used) == expected
 
 
+def test_existing_user_count_limit_blocks_create_and_delete_frees_slot(session):
+    admin, _ = add_admin(session, max_users=2)
+    session.add_all(
+        [
+            User(username="counted-one", admin_id=admin.id, status=UserStatus.active),
+            User(username="counted-two", admin_id=admin.id, status=UserStatus.disabled),
+        ]
+    )
+    session.commit()
+
+    with pytest.raises(policy.MarzhelpPolicyError) as exc:
+        policy.validate_create(session, admin.id, plan())
+    assert exc.value.code == "user_count_limit_reached"
+
+    session.delete(session.query(User).filter(User.username == "counted-two").one())
+    session.commit()
+    assert policy.validate_create(session, admin.id, plan()) is not None
+
+
 def test_delete_is_idempotent_and_records_actual_usage(session):
     admin, _ = add_admin(session)
     user = User(

@@ -54,6 +54,14 @@ def test_fresh_and_existing_migration_preserve_data(tmp_path, monkeypatch):
     marker = dict(connection.execute("SELECT key, value FROM marzhelp_metadata"))
     assert marker["source_id"] == "smorad3363-marzban"
     assert marker["schema_version"] == "1"
+    settings_columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(marzhelp_admin_settings)")
+    }
+    assert "max_users" in settings_columns
+    user_indexes = {
+        row[1] for row in connection.execute("PRAGMA index_list(users)")
+    }
+    assert "ix_users_admin_id" in user_indexes
     connection.close()
 
 
@@ -84,3 +92,14 @@ def test_sqlite_backup_contains_and_restores_marzhelp_data(tmp_path):
     backup_script = Path("scripts/marzban.sh").read_text(encoding="utf-8")
     assert 'cp "$sqlite_file" "$temp_dir/db_backup.sqlite"' in backup_script
     assert 'mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" marzban' in backup_script
+
+
+def test_installer_targets_master_and_latest_mysql_image():
+    installer = Path("scripts/marzban.sh").read_text(encoding="utf-8")
+
+    assert 'MARZBAN_GITHUB_REPO="${MARZBAN_GITHUB_REPO:-smorad3363/Marzban}"' in installer
+    assert 'MARZBAN_GITHUB_BRANCH="${MARZBAN_GITHUB_BRANCH:-master}"' in installer
+    assert 'MARZBAN_DOCKER_IMAGE="${MARZBAN_DOCKER_IMAGE:-ghcr.io/smorad3363/marzban}"' in installer
+    assert 'marzban_version="latest"' in installer
+    assert 'elif [ "$database_type" == "mysql" ]; then' in installer
+    assert 'image: $(marzban_docker_image "${marzban_version}")' in installer

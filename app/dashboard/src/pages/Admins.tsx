@@ -80,6 +80,7 @@ const emptyPolicy = (): AdminPolicy => ({
   used_traffic: 0,
   expiry_date: null,
   user_limit: null,
+  max_users: null,
   max_user_duration_days: null,
   calculate_volume: "used_traffic",
   prevent_user_creation: false,
@@ -130,7 +131,14 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
   const isEditing = Boolean(admin);
 
   useEffect(() => {
-    setForm(admin ? { ...admin, password: "", policy: { ...admin.policy } } : emptyAdmin());
+    setForm(admin ? {
+      username: admin.username,
+      password: "",
+      is_sudo: admin.is_sudo,
+      telegram_id: admin.telegram_id,
+      discord_webhook: admin.discord_webhook,
+      policy: { ...admin.policy },
+    } : emptyAdmin());
   }, [admin, isOpen]);
 
   const mutation = useMutation(
@@ -225,6 +233,11 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
                   <FormLabel>{t("admins.operationLimit")}</FormLabel>
                   <Input type="number" min={0} value={form.policy.user_limit ?? ""} onChange={(e) => setPolicy("user_limit", nullableNumber(e))} />
                   <FormHelperText>{t("admins.operationLimitHelp")}</FormHelperText>
+                </FormControl>
+                <FormControl>
+                  <FormLabel>{t("admins.maxUsers")}</FormLabel>
+                  <Input type="number" min={1} value={form.policy.max_users ?? ""} onChange={(e) => setPolicy("max_users", nullableNumber(e))} />
+                  <FormHelperText>{t("admins.maxUsersHelp")}</FormHelperText>
                 </FormControl>
                 <FormControl>
                   <FormLabel>{t("admins.maxDuration")}</FormLabel>
@@ -363,11 +376,12 @@ export const Admins: FC = () => {
             <>
               <TableContainer display={{ base: "none", lg: "block" }}>
                 <Table size="sm">
-                  <Thead><Tr><Th>{t("admins.admin")}</Th><Th>{t("admins.access")}</Th><Th>{t("admins.credit")}</Th><Th>{t("admins.operationLimit")}</Th><Th>{t("admins.maxDuration")}</Th><Th>{t("admins.expiryDate")}</Th><Th textAlign="end">{t("admins.actions")}</Th></Tr></Thead>
+                  <Thead><Tr><Th>{t("admins.admin")}</Th><Th>{t("admins.access")}</Th><Th>{t("admins.usersCount")}</Th><Th>{t("admins.credit")}</Th><Th>{t("admins.operationLimit")}</Th><Th>{t("admins.maxDuration")}</Th><Th>{t("admins.expiryDate")}</Th><Th textAlign="end">{t("admins.actions")}</Th></Tr></Thead>
                   <Tbody>{admins.map((item) => (
                     <Tr key={item.username}>
                       <Td><Text fontWeight="650">{item.username}</Text><Text fontSize="xs" color="gray.500">{item.telegram_id ? `Telegram: ${item.telegram_id}` : t("admins.noContact")}</Text></Td>
                       <Td><Badge colorScheme={item.is_sudo ? "purple" : "gray"}>{t(item.is_sudo ? "admins.sudo" : "admins.adminRole")}</Badge></Td>
+                      <Td>{item.user_count} / {item.policy.max_users ?? t("unlimited")}</Td>
                       <Td>{item.policy.total_traffic === null ? t("unlimited") : formatBytes(Math.max(item.policy.total_traffic - item.policy.used_traffic, 0))}</Td>
                       <Td>{item.policy.user_limit ?? t("unlimited")}</Td>
                       <Td>{item.policy.max_user_duration_days ? `${item.policy.max_user_duration_days} ${t("days")}` : t("unlimited")}</Td>
@@ -382,7 +396,7 @@ export const Admins: FC = () => {
                 {admins.map((item) => (
                   <Box key={item.username} p={4}>
                     <HStack justify="space-between" align="start"><Box><Text fontWeight="700">{item.username}</Text><Badge mt={1} colorScheme={item.is_sudo ? "purple" : "gray"}>{t(item.is_sudo ? "admins.sudo" : "admins.adminRole")}</Badge></Box><HStack><IconButton aria-label={t("edit")} size="sm" variant="ghost" icon={<EditIcon />} isDisabled={!canEdit(item)} onClick={() => openEdit(item)} /><IconButton aria-label={t("delete")} size="sm" variant="ghost" colorScheme="red" icon={<RemoveIcon />} isDisabled={item.is_sudo} onClick={() => openDelete(item)} /></HStack></HStack>
-                    <SimpleGrid columns={2} gap={3} mt={4} fontSize="sm"><Box><Text color="gray.500" fontSize="xs">{t("admins.credit")}</Text><Text mt={1}>{item.policy.total_traffic === null ? t("unlimited") : formatBytes(Math.max(item.policy.total_traffic - item.policy.used_traffic, 0))}</Text></Box><Box><Text color="gray.500" fontSize="xs">{t("admins.operationLimit")}</Text><Text mt={1}>{item.policy.user_limit ?? t("unlimited")}</Text></Box><Box><Text color="gray.500" fontSize="xs">{t("admins.maxDuration")}</Text><Text mt={1}>{item.policy.max_user_duration_days ? `${item.policy.max_user_duration_days} ${t("days")}` : t("unlimited")}</Text></Box><Box><Text color="gray.500" fontSize="xs">{t("admins.expiryDate")}</Text><Text mt={1}>{item.policy.expiry_date || t("unlimited")}</Text></Box></SimpleGrid>
+                    <SimpleGrid columns={2} gap={3} mt={4} fontSize="sm"><Box><Text color="gray.500" fontSize="xs">{t("admins.usersCount")}</Text><Text mt={1}>{item.user_count} / {item.policy.max_users ?? t("unlimited")}</Text></Box><Box><Text color="gray.500" fontSize="xs">{t("admins.credit")}</Text><Text mt={1}>{item.policy.total_traffic === null ? t("unlimited") : formatBytes(Math.max(item.policy.total_traffic - item.policy.used_traffic, 0))}</Text></Box><Box><Text color="gray.500" fontSize="xs">{t("admins.operationLimit")}</Text><Text mt={1}>{item.policy.user_limit ?? t("unlimited")}</Text></Box><Box><Text color="gray.500" fontSize="xs">{t("admins.maxDuration")}</Text><Text mt={1}>{item.policy.max_user_duration_days ? `${item.policy.max_user_duration_days} ${t("days")}` : t("unlimited")}</Text></Box><Box><Text color="gray.500" fontSize="xs">{t("admins.expiryDate")}</Text><Text mt={1}>{item.policy.expiry_date || t("unlimited")}</Text></Box></SimpleGrid>
                   </Box>
                 ))}
               </Stack>

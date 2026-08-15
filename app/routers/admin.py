@@ -2,12 +2,13 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 
 from app import xray
 from app.db import Session, crud, get_db
 from app.dependencies import get_admin_by_username, validate_admin
-from app.db.models import MarzhelpAdminSettings
+from app.db.models import MarzhelpAdminSettings, User
 from app.models.admin import (
     Admin,
     AdminCreate,
@@ -26,7 +27,7 @@ from config import LOGIN_NOTIFY_WHITE_LIST
 router = APIRouter(tags=["Admin"], prefix="/api", responses={401: responses._401})
 
 
-def managed_admin_response(dbadmin, settings=None) -> ManagedAdmin:
+def managed_admin_response(dbadmin, settings=None, user_count: int = 0) -> ManagedAdmin:
     policy = (
         MarzhelpAdminPolicy.model_validate(settings)
         if settings is not None
@@ -38,6 +39,7 @@ def managed_admin_response(dbadmin, settings=None) -> ManagedAdmin:
         telegram_id=dbadmin.telegram_id,
         discord_webhook=dbadmin.discord_webhook,
         users_usage=dbadmin.users_usage,
+        user_count=user_count,
         policy=policy,
     )
 
@@ -187,8 +189,23 @@ def get_managed_admins(
         if dbadmins
         else {}
     )
+    user_counts = (
+        dict(
+            db.query(User.admin_id, func.count(User.id))
+            .filter(User.admin_id.in_([item.id for item in dbadmins]))
+            .group_by(User.admin_id)
+            .all()
+        )
+        if dbadmins
+        else {}
+    )
     return ManagedAdminList(
-        admins=[managed_admin_response(item, settings_by_admin.get(item.id)) for item in dbadmins],
+        admins=[
+            managed_admin_response(
+                item, settings_by_admin.get(item.id), user_counts.get(item.id, 0)
+            )
+            for item in dbadmins
+        ],
         total=total,
         offset=offset,
         limit=limit,
@@ -217,7 +234,7 @@ def create_managed_admin(
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="Admin already exists")
-    return managed_admin_response(dbadmin, settings)
+    return managed_admin_response(dbadmin, settings, 0)
 
 
 @router.put(
@@ -245,7 +262,8 @@ def modify_managed_admin(
     db.commit()
     db.refresh(dbadmin)
     db.refresh(settings)
-    return managed_admin_response(dbadmin, settings)
+    user_count = db.query(func.count(User.id)).filter(User.admin_id == dbadmin.id).scalar() or 0
+    return managed_admin_response(dbadmin, settings, user_count)
 
 
 @router.post("/admin/{username}/users/disable", responses={403: responses._403, 404: responses._404})

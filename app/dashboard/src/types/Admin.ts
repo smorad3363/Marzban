@@ -3,6 +3,7 @@ export type AdminPolicy = {
   used_traffic: number;
   expiry_date: string | null;
   user_limit: number | null;
+  max_users: number | null;
   max_user_duration_days: number | null;
   calculate_volume: "used_traffic" | "created_traffic";
   prevent_user_creation: boolean;
@@ -18,6 +19,7 @@ export type ManagedAdmin = {
   telegram_id: number | null;
   discord_webhook: string | null;
   users_usage: number | null;
+  user_count: number;
   policy: AdminPolicy;
 };
 
@@ -28,6 +30,6 @@ export type ManagedAdminList = {
   limit: number;
 };
 
-export type ManagedAdminPayload = Omit<ManagedAdmin, "users_usage"> & {
+export type ManagedAdminPayload = Omit<ManagedAdmin, "users_usage" | "user_count"> & {
   password?: string;
 };

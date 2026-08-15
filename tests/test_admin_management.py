@@ -34,6 +34,7 @@ def test_create_admin_with_policy_in_one_transaction(session):
         MarzhelpAdminPolicy(
             total_traffic=100 * 1024**3,
             user_limit=20,
+            max_users=12,
             max_user_duration_days=31,
             prevent_unlimited_traffic=True,
         ),
@@ -43,6 +44,7 @@ def test_create_admin_with_policy_in_one_transaction(session):
 
     assert admin.username == "reseller"
     assert policy.user_limit == 20
+    assert policy.max_users == 12
     assert policy.max_user_duration_days == 31
     assert policy.prevent_unlimited_traffic is True
 
@@ -86,5 +88,7 @@ def test_management_list_is_stable_and_counted(session):
 def test_policy_rejects_negative_or_unknown_volume_rules():
     with pytest.raises(ValidationError):
         MarzhelpAdminPolicy(user_limit=-1)
+    with pytest.raises(ValidationError):
+        MarzhelpAdminPolicy(max_users=0)
     with pytest.raises(ValidationError):
         MarzhelpAdminPolicy(calculate_volume="invalid")
