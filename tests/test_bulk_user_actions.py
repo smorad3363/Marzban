@@ -1,3 +1,5 @@
+from inspect import signature
+
 import pytest
 from pydantic import ValidationError
 from sqlalchemy import create_engine
@@ -6,11 +8,13 @@ from sqlalchemy.orm import sessionmaker
 from app.db import crud
 from app.db.base import Base
 from app.db.models import Admin, User
+from app.models.admin import Admin as APIAdmin
 from app.models.user import (
     BulkUserActionRequest,
     BulkUserOperation,
     UserStatus,
 )
+from app.routers.user import delete_expired_users, get_expired_users
 
 
 @pytest.fixture()
@@ -47,6 +51,12 @@ def test_bulk_amount_is_required_only_for_numeric_operations():
 def test_bulk_request_rejects_empty_selection():
     with pytest.raises(ValidationError):
         BulkUserActionRequest(usernames=[], operation=BulkUserOperation.delete)
+
+
+def test_expired_cleanup_routes_require_sudo_admin():
+    for handler in (get_expired_users, delete_expired_users):
+        dependency = signature(handler).parameters["admin"].default.dependency
+        assert dependency.__func__ is APIAdmin.check_sudo_admin.__func__
 
 
 def test_users_can_be_sorted_by_owner_admin(session):

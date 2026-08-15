@@ -651,7 +651,7 @@ def get_expired_users(
     expired_after: Optional[datetime] = Query(None, example="2024-01-01T00:00:00"),
     expired_before: Optional[datetime] = Query(None, example="2024-01-31T23:59:59"),
     db: Session = Depends(get_db),
-    admin: Admin = Depends(Admin.get_current),
+    admin: Admin = Depends(Admin.check_sudo_admin),
 ):
     """
     Get users who have expired within the specified date range.
@@ -675,7 +675,7 @@ def delete_expired_users(
     expired_after: Optional[datetime] = Query(None, example="2024-01-01T00:00:00"),
     expired_before: Optional[datetime] = Query(None, example="2024-01-31T23:59:59"),
     db: Session = Depends(get_db),
-    admin: Admin = Depends(Admin.get_current),
+    admin: Admin = Depends(Admin.check_sudo_admin),
 ):
     """
     Delete users who have expired within the specified date range.

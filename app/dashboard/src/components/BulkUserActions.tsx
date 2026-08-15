@@ -39,6 +39,7 @@ import {
   XMarkIcon,
 } from "@heroicons/react/24/outline";
 import { useDashboard } from "contexts/DashboardContext";
+import useGetUser from "hooks/useGetUser";
 import { FC, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { fetch } from "service/http";
@@ -432,6 +433,7 @@ export const BulkUserActions: FC<BulkUserActionsProps> = ({
   const cleanupDialog = useDisclosure();
   const [action, setAction] = useState<ActionDefinition | null>(null);
   const { refetchUsers } = useDashboard();
+  const { userData } = useGetUser();
   const usernames = users.map((user) => user.username);
 
   const openAction = (definition: ActionDefinition) => {
@@ -489,17 +491,19 @@ export const BulkUserActions: FC<BulkUserActionsProps> = ({
         </HStack>
 
         <HStack spacing={2} flexWrap="wrap" justify="flex-end">
-          <Button
-            size="sm"
-            variant="outline"
-            color="red.200"
-            borderColor="red.800"
-            leftIcon={<TrashIcon width="17px" aria-hidden="true" />}
-            onClick={cleanupDialog.onOpen}
-            _hover={{ bg: "rgba(239, 68, 68, .1)", borderColor: "red.600" }}
-          >
-            {t("usersTable.cleanupExpired")}
-          </Button>
+          {userData.is_sudo && (
+            <Button
+              size="sm"
+              variant="outline"
+              color="red.200"
+              borderColor="red.800"
+              leftIcon={<TrashIcon width="17px" aria-hidden="true" />}
+              onClick={cleanupDialog.onOpen}
+              _hover={{ bg: "rgba(239, 68, 68, .1)", borderColor: "red.600" }}
+            >
+              {t("usersTable.cleanupExpired")}
+            </Button>
+          )}
 
           {users.length > 0 && (
             <Menu placement="bottom-end">
@@ -585,11 +589,13 @@ export const BulkUserActions: FC<BulkUserActionsProps> = ({
         onClose={actionDialog.onClose}
         onSuccess={success}
       />
-      <ExpiredCleanupDialog
-        isOpen={cleanupDialog.isOpen}
-        onClose={cleanupDialog.onClose}
-        onSuccess={success}
-      />
+      {userData.is_sudo && (
+        <ExpiredCleanupDialog
+          isOpen={cleanupDialog.isOpen}
+          onClose={cleanupDialog.onClose}
+          onSuccess={success}
+        />
+      )}
     </>
   );
 };
