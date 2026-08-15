@@ -33,7 +33,12 @@ from app.db.models import (
     UserTemplate,
     UserUsageResetLogs,
 )
-from app.models.admin import AdminCreate, AdminModify, AdminPartialModify
+from app.models.admin import (
+    AdminCreate,
+    AdminModify,
+    AdminPartialModify,
+    MarzhelpAdminPolicy,
+)
 from app.models.node import (NodeCreate, NodeModify, NodeStatus,
                              NodeUsageResponse, NodeWatchdogSettingsUpdate)
 from app.models.proxy import ProxyHost as ProxyHostModify
@@ -949,7 +954,7 @@ def get_admin(db: Session, username: str) -> Admin:
     return db.query(Admin).filter(Admin.username == username).first()
 
 
-def create_admin(db: Session, admin: AdminCreate) -> Admin:
+def create_admin(db: Session, admin: AdminCreate, commit: bool = True) -> Admin:
     """
     Creates a new admin in the database.
 
@@ -968,12 +973,17 @@ def create_admin(db: Session, admin: AdminCreate) -> Admin:
         discord_webhook=admin.discord_webhook if admin.discord_webhook else None
     )
     db.add(dbadmin)
-    db.commit()
-    db.refresh(dbadmin)
+    if commit:
+        db.commit()
+        db.refresh(dbadmin)
+    else:
+        db.flush()
     return dbadmin
 
 
-def update_admin(db: Session, dbadmin: Admin, modified_admin: AdminModify) -> Admin:
+def update_admin(
+    db: Session, dbadmin: Admin, modified_admin: AdminModify, commit: bool = True
+) -> Admin:
     """
     Updates an admin's details.
 
@@ -985,19 +995,42 @@ def update_admin(db: Session, dbadmin: Admin, modified_admin: AdminModify) -> Ad
     Returns:
         Admin: The updated admin object.
     """
-    if modified_admin.is_sudo:
-        dbadmin.is_sudo = modified_admin.is_sudo
+    dbadmin.is_sudo = modified_admin.is_sudo
     if modified_admin.password is not None and dbadmin.hashed_password != modified_admin.hashed_password:
         dbadmin.hashed_password = modified_admin.hashed_password
         dbadmin.password_reset_at = datetime.utcnow()
-    if modified_admin.telegram_id:
-        dbadmin.telegram_id = modified_admin.telegram_id
-    if modified_admin.discord_webhook:
-        dbadmin.discord_webhook = modified_admin.discord_webhook
+    dbadmin.telegram_id = modified_admin.telegram_id
+    dbadmin.discord_webhook = modified_admin.discord_webhook
 
-    db.commit()
-    db.refresh(dbadmin)
+    if commit:
+        db.commit()
+        db.refresh(dbadmin)
+    else:
+        db.flush()
     return dbadmin
+
+
+def upsert_marzhelp_admin_policy(
+    db: Session,
+    admin_id: int,
+    policy: MarzhelpAdminPolicy,
+    commit: bool = True,
+) -> MarzhelpAdminSettings:
+    """Create or replace the dashboard-editable MarzHelp policy fields."""
+    settings = db.get(MarzhelpAdminSettings, admin_id)
+    if settings is None:
+        settings = MarzhelpAdminSettings(admin_id=admin_id)
+        db.add(settings)
+
+    for field, value in policy.model_dump().items():
+        setattr(settings, field, value)
+
+    if commit:
+        db.commit()
+        db.refresh(settings)
+    else:
+        db.flush()
+    return settings
 
 
 def partial_update_admin(db: Session, dbadmin: Admin, modified_admin: AdminPartialModify) -> Admin:
@@ -1095,7 +1128,7 @@ def get_admins(db: Session,
     Returns:
         List[Admin]: A list of admin objects.
     """
-    query = db.query(Admin)
+    query = db.query(Admin).order_by(Admin.username.asc())
     if username:
         query = query.filter(Admin.username.ilike(f'%{username}%'))
     if offset:
@@ -1103,6 +1136,20 @@ def get_admins(db: Session,
     if limit:
         query = query.limit(limit)
     return query.all()
+
+
+def get_admins_with_count(
+    db: Session,
+    offset: int = 0,
+    limit: int = 20,
+    username: Optional[str] = None,
+) -> Tuple[List[Admin], int]:
+    query = db.query(Admin)
+    if username:
+        query = query.filter(Admin.username.ilike(f"%{username}%"))
+    total = query.count()
+    admins = query.order_by(Admin.username.asc()).offset(offset).limit(limit).all()
+    return admins, total
 
 
 def reset_admin_usage(db: Session, dbadmin: Admin) -> int:

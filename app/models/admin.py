@@ -1,9 +1,10 @@
-from typing import Optional
+from datetime import date
+from typing import Literal, Optional
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from passlib.context import CryptContext
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.db import Session, crud, get_db
 from app.utils.jwt import get_admin_payload
@@ -140,3 +141,39 @@ class AdminInDB(Admin):
 class AdminValidationResult(BaseModel):
     username: str
     is_sudo: bool
+
+
+class MarzhelpAdminPolicy(BaseModel):
+    """Editable MarzHelp limits exposed to sudo admins in the dashboard."""
+
+    total_traffic: Optional[int] = Field(default=None, ge=0)
+    used_traffic: int = Field(default=0, ge=0)
+    expiry_date: Optional[date] = None
+    user_limit: Optional[int] = Field(default=None, ge=0)
+    max_user_duration_days: Optional[int] = Field(default=None, ge=1)
+    calculate_volume: Literal["used_traffic", "created_traffic"] = "used_traffic"
+    prevent_user_creation: bool = False
+    prevent_user_deletion: bool = False
+    prevent_user_reset: bool = False
+    prevent_revoke_subscription: bool = False
+    prevent_unlimited_traffic: bool = False
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ManagedAdmin(Admin):
+    policy: MarzhelpAdminPolicy
+
+
+class ManagedAdminList(BaseModel):
+    admins: list[ManagedAdmin]
+    total: int
+    offset: int
+    limit: int
+
+
+class ManagedAdminCreate(AdminCreate):
+    policy: MarzhelpAdminPolicy = Field(default_factory=MarzhelpAdminPolicy)
+
+
+class ManagedAdminModify(AdminModify):
+    policy: MarzhelpAdminPolicy

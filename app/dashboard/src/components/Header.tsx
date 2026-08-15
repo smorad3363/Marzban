@@ -1,5 +1,6 @@
 import {
   Box,
+  Button,
   chakra,
   HStack,
   IconButton,
@@ -8,6 +9,7 @@ import {
   MenuButton,
   MenuItem,
   MenuList,
+  Stack,
   Text,
   useColorMode,
 } from "@chakra-ui/react";
@@ -21,12 +23,14 @@ import {
   MoonIcon,
   SquaresPlusIcon,
   SunIcon,
+  UserGroupIcon,
+  UsersIcon,
 } from "@heroicons/react/24/outline";
 import brandIcon from "assets/brand/secure-network-icon.png";
 import { useDashboard } from "contexts/DashboardContext";
 import { FC, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { updateThemeColor } from "utils/themeColor";
 import { Language } from "./Language";
 import useGetUser from "hooks/useGetUser";
@@ -50,6 +54,8 @@ const HostsIcon = chakra(LinkIcon, iconProps);
 const NodesIcon = chakra(SquaresPlusIcon, iconProps);
 const NodesUsageIcon = chakra(ChartPieIcon, iconProps);
 const ResetUsageIcon = chakra(DocumentMinusIcon, iconProps);
+const UsersNavIcon = chakra(UsersIcon, iconProps);
+const AdminsNavIcon = chakra(UserGroupIcon, iconProps);
 export const Header: FC<HeaderProps> = ({ actions }) => {
   const { userData, getUserIsSuccess, getUserIsPending } = useGetUser();
 
@@ -67,10 +73,14 @@ export const Header: FC<HeaderProps> = ({ actions }) => {
     onShowingNodesUsage,
   } = useDashboard();
   const { t } = useTranslation();
+  const location = useLocation();
+  const isAdminsPage = location.pathname.startsWith("/admins");
   const { colorMode, toggleColorMode } = useColorMode();
   return (
-    <HStack
-      gap={2}
+    <Stack
+      direction={{ base: "column", lg: "row" }}
+      gap={{ base: 4, lg: 6 }}
+      align={{ base: "stretch", lg: "center" }}
       justifyContent="space-between"
       __css={{
         "& .menuList": {
@@ -99,11 +109,22 @@ export const Header: FC<HeaderProps> = ({ actions }) => {
             NETWORK CONTROL
           </Text>
           <Text as="h1" fontWeight="700" fontSize={{ base: "lg", md: "2xl" }}>
-            {t("users")}
+            {t(isAdminsPage ? "admins.title" : "users")}
           </Text>
         </Box>
       </HStack>
-      <Box overflow="auto" css={{ direction: "rtl" }}>
+      <HStack justify={{ base: "space-between", lg: "flex-end" }} minW={0}>
+        <HStack p="3px" bg="blackAlpha.50" _dark={{ bg: "whiteAlpha.100" }} borderRadius="9px" borderWidth="1px" spacing={1}>
+          <Button as={Link} to="/" size="sm" variant={!isAdminsPage ? "solid" : "ghost"} colorScheme={!isAdminsPage ? "primary" : "gray"} leftIcon={<UsersNavIcon />}>
+            {t("users")}
+          </Button>
+          {isSudo() && (
+            <Button as={Link} to="/admins/" size="sm" variant={isAdminsPage ? "solid" : "ghost"} colorScheme={isAdminsPage ? "primary" : "gray"} leftIcon={<AdminsNavIcon />}>
+              {t("admins.nav")}
+            </Button>
+          )}
+        </HStack>
+        <Box overflow="auto" css={{ direction: "rtl" }}>
         <HStack alignItems="center">
           <Menu>
             <MenuButton
@@ -189,7 +210,8 @@ export const Header: FC<HeaderProps> = ({ actions }) => {
             {colorMode === "light" ? <DarkIcon /> : <LightIcon />}
           </IconButton>
         </HStack>
-      </Box>
-    </HStack>
+        </Box>
+      </HStack>
+    </Stack>
   );
 };

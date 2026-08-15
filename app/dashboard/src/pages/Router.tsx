@@ -2,6 +2,7 @@ import { createHashRouter } from "react-router-dom";
 import { fetch } from "../service/http";
 import { getAuthToken } from "../utils/authStorage";
 import { Dashboard } from "./Dashboard";
+import { Admins } from "./Admins";
 import { Login } from "./Login";
 const fetchAdminLoader = () => {
     return fetch("/admin", {
@@ -20,5 +21,11 @@ export const router = createHashRouter([
     {
         path: "/login/",
         element: <Login />,
+    },
+    {
+        path: "/admins/",
+        element: <Admins />,
+        errorElement: <Login />,
+        loader: fetchAdminLoader,
     },
 ]);

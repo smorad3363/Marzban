@@ -7,12 +7,39 @@ from sqlalchemy.exc import IntegrityError
 from app import xray
 from app.db import Session, crud, get_db
 from app.dependencies import get_admin_by_username, validate_admin
-from app.models.admin import Admin, AdminCreate, AdminModify, Token
+from app.db.models import MarzhelpAdminSettings
+from app.models.admin import (
+    Admin,
+    AdminCreate,
+    AdminModify,
+    ManagedAdmin,
+    ManagedAdminCreate,
+    ManagedAdminList,
+    ManagedAdminModify,
+    MarzhelpAdminPolicy,
+    Token,
+)
 from app.utils import report, responses
 from app.utils.jwt import create_admin_token
 from config import LOGIN_NOTIFY_WHITE_LIST
 
 router = APIRouter(tags=["Admin"], prefix="/api", responses={401: responses._401})
+
+
+def managed_admin_response(dbadmin, settings=None) -> ManagedAdmin:
+    policy = (
+        MarzhelpAdminPolicy.model_validate(settings)
+        if settings is not None
+        else MarzhelpAdminPolicy()
+    )
+    return ManagedAdmin(
+        username=dbadmin.username,
+        is_sudo=dbadmin.is_sudo,
+        telegram_id=dbadmin.telegram_id,
+        discord_webhook=dbadmin.discord_webhook,
+        users_usage=dbadmin.users_usage,
+        policy=policy,
+    )
 
 
 def get_client_ip(request: Request) -> str:
@@ -132,6 +159,93 @@ def get_admins(
 ):
     """Fetch a list of admins with optional filters for pagination and username."""
     return crud.get_admins(db, offset, limit, username)
+
+
+@router.get(
+    "/admin-management",
+    response_model=ManagedAdminList,
+    responses={403: responses._403},
+)
+def get_managed_admins(
+    offset: int = 0,
+    limit: int = 20,
+    username: Optional[str] = None,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.check_sudo_admin),
+):
+    """Return a stable, paginated view of admins and their MarzHelp limits."""
+    limit = max(1, min(limit, 100))
+    offset = max(offset, 0)
+    dbadmins, total = crud.get_admins_with_count(db, offset, limit, username)
+    settings_by_admin = (
+        {
+            row.admin_id: row
+            for row in db.query(MarzhelpAdminSettings)
+            .filter(MarzhelpAdminSettings.admin_id.in_([item.id for item in dbadmins]))
+            .all()
+        }
+        if dbadmins
+        else {}
+    )
+    return ManagedAdminList(
+        admins=[managed_admin_response(item, settings_by_admin.get(item.id)) for item in dbadmins],
+        total=total,
+        offset=offset,
+        limit=limit,
+    )
+
+
+@router.post(
+    "/admin-management",
+    response_model=ManagedAdmin,
+    responses={403: responses._403, 409: responses._409},
+)
+def create_managed_admin(
+    new_admin: ManagedAdminCreate,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.check_sudo_admin),
+):
+    """Create an admin and its MarzHelp policy in one transaction."""
+    try:
+        dbadmin = crud.create_admin(db, new_admin, commit=False)
+        settings = crud.upsert_marzhelp_admin_policy(
+            db, dbadmin.id, new_admin.policy, commit=False
+        )
+        db.commit()
+        db.refresh(dbadmin)
+        db.refresh(settings)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Admin already exists")
+    return managed_admin_response(dbadmin, settings)
+
+
+@router.put(
+    "/admin-management/{username}",
+    response_model=ManagedAdmin,
+    responses={403: responses._403, 404: responses._404},
+)
+def modify_managed_admin(
+    modified_admin: ManagedAdminModify,
+    dbadmin: Admin = Depends(get_admin_by_username),
+    db: Session = Depends(get_db),
+    current_admin: Admin = Depends(Admin.check_sudo_admin),
+):
+    """Update an admin account and its MarzHelp policy atomically."""
+    if (dbadmin.username != current_admin.username) and dbadmin.is_sudo:
+        raise HTTPException(
+            status_code=403,
+            detail="You're not allowed to edit another sudoer's account. Use marzban-cli instead.",
+        )
+
+    dbadmin = crud.update_admin(db, dbadmin, modified_admin, commit=False)
+    settings = crud.upsert_marzhelp_admin_policy(
+        db, dbadmin.id, modified_admin.policy, commit=False
+    )
+    db.commit()
+    db.refresh(dbadmin)
+    db.refresh(settings)
+    return managed_admin_response(dbadmin, settings)
 
 
 @router.post("/admin/{username}/users/disable", responses={403: responses._403, 404: responses._404})

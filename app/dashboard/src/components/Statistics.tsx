@@ -51,11 +51,11 @@ const StatisticCard: FC<PropsWithChildren<StatisticCardProps>> = ({
 }) => {
   return (
     <Card
-      p={6}
+      p={{ base: 4, md: 5 }}
       borderWidth="1px"
       borderColor="light-border"
-      bg="#F9FAFB"
-      _dark={{ borderColor: "gray.600", bg: "gray.750" }}
+      bg="white"
+      _dark={{ borderColor: "gray.600", bg: "#0d1929" }}
       borderStyle="solid"
       boxShadow="none"
       borderRadius="12px"
@@ -65,37 +65,7 @@ const StatisticCard: FC<PropsWithChildren<StatisticCardProps>> = ({
       flexDirection="row"
     >
       <HStack alignItems="center" columnGap="4">
-        <Box
-          p="2"
-          position="relative"
-          color="white"
-          _before={{
-            content: `""`,
-            position: "absolute",
-            top: 0,
-            left: 0,
-            bg: "primary.400",
-            display: "block",
-            w: "full",
-            h: "full",
-            borderRadius: "5px",
-            opacity: ".5",
-            z: "1",
-          }}
-          _after={{
-            content: `""`,
-            position: "absolute",
-            top: "-5px",
-            left: "-5px",
-            bg: "primary.400",
-            display: "block",
-            w: "calc(100% + 10px)",
-            h: "calc(100% + 10px)",
-            borderRadius: "8px",
-            opacity: ".4",
-            z: "1",
-          }}
-        >
+        <Box p="2.5" position="relative" color="primary.700" bg="primary.50" _dark={{ color: "primary.300", bg: "whiteAlpha.100" }} borderRadius="9px">
           {icon}
         </Box>
         <Text
@@ -110,7 +80,7 @@ const StatisticCard: FC<PropsWithChildren<StatisticCardProps>> = ({
           {title}
         </Text>
       </HStack>
-      <Box fontSize="3xl" fontWeight="semibold" mt="2">
+      <Box fontSize={{ base: "2xl", xl: "3xl" }} fontWeight="700" mt="2">
         {content}
       </Box>
     </Card>

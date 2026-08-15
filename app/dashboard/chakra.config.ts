@@ -41,6 +41,23 @@ export const theme = extendTheme({
     },
   },
   components: {
+    Button: {
+      baseStyle: {
+        borderRadius: "8px",
+        fontWeight: "650",
+        transitionProperty: "background-color, border-color, color",
+        transitionDuration: "120ms",
+      },
+    },
+    Card: {
+      baseStyle: {
+        container: {
+          bg: "white",
+          borderColor: "light-border",
+          _dark: { bg: "#0d1929", borderColor: "gray.600" },
+        },
+      },
+    },
     Alert: {
       baseStyle: {
         container: {
