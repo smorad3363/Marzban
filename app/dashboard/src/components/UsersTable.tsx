@@ -1,22 +1,28 @@
 import {
+  Badge,
   Box,
+  BoxProps,
   Button,
   Card,
   chakra,
+  CircularProgress,
+  CircularProgressLabel,
+  Collapse,
+  Divider,
   HStack,
   IconButton,
-  Progress,
+  Popover,
+  PopoverArrow,
+  PopoverBody,
+  PopoverCloseButton,
+  PopoverContent,
+  PopoverHeader,
+  PopoverTrigger,
+  Portal,
+  SimpleGrid,
   Stack,
-  Table,
-  TableContainer,
-  TableProps,
-  Tbody,
-  Td,
   Text,
-  Th,
-  Thead,
   Tooltip,
-  Tr,
   VStack,
 } from "@chakra-ui/react";
 import {
@@ -28,16 +34,14 @@ import {
   QrCodeIcon,
 } from "@heroicons/react/24/outline";
 import { ReactComponent as AddFileIcon } from "assets/add_file.svg";
-import classNames from "classnames";
 import { resetStrategy, statusColors } from "constants/UserSettings";
 import { useDashboard } from "contexts/DashboardContext";
-import { FC, useEffect, useState } from "react";
+import { FC, ReactNode, useEffect, useState } from "react";
 import CopyToClipboard from "react-copy-to-clipboard";
 import { useTranslation } from "react-i18next";
 import { User } from "types/User";
 import { formatBytes } from "utils/formatByte";
 import { OnlineBadge } from "./OnlineBadge";
-import { OnlineStatus } from "./OnlineStatus";
 import { Pagination } from "./Pagination";
 import { StatusBadge } from "./StatusBadge";
 
@@ -48,7 +52,7 @@ const CopiedIcon = chakra(CheckIcon, iconProps);
 const SubscriptionLinkIcon = chakra(LinkIcon, iconProps);
 const QRIcon = chakra(QrCodeIcon, iconProps);
 const EditIcon = chakra(PencilIcon, iconProps);
-const SortIcon = chakra(ChevronDownIcon, { baseStyle: { w: 3.5, h: 3.5 } });
+const DetailsIcon = chakra(ChevronDownIcon, { baseStyle: { w: 4, h: 4 } });
 
 type UsageMeterProps = {
   used: number;
@@ -56,7 +60,6 @@ type UsageMeterProps = {
   dataLimitResetStrategy: string | null;
   totalUsedTraffic: number;
   colorScheme?: string;
-  compact?: boolean;
 };
 
 const getResetStrategy = (strategy: string): string => {
@@ -70,13 +73,17 @@ const UsageMeter: FC<UsageMeterProps> = ({
   dataLimitResetStrategy,
   totalUsedTraffic,
   colorScheme = "primary",
-  compact,
 }) => {
   const { t, i18n } = useTranslation();
   const direction = i18n.dir();
   const isUnlimited = total === 0 || total === null;
   const percent = isUnlimited ? 100 : Math.min((used / Math.max(total, 1)) * 100, 100);
   const isReached = !isUnlimited && percent >= 100;
+  const ringColor = isReached
+    ? "red.400"
+    : colorScheme === "primary"
+      ? "gold.400"
+      : `${colorScheme}.400`;
   const limitText = isUnlimited
     ? "∞"
     : formatBytes(total) +
@@ -85,60 +92,161 @@ const UsageMeter: FC<UsageMeterProps> = ({
         : "");
 
   return (
-    <Stack spacing={compact ? 1 : 2} minW={0} dir={direction}>
-      {!compact && (
-        <Progress
-          value={percent}
-          size="xs"
-          colorScheme={isReached ? "red" : colorScheme}
-          borderRadius="full"
-          opacity={isUnlimited ? 0.45 : 1}
-          aria-label={`${formatBytes(used)} / ${limitText}`}
-        />
-      )}
-      <HStack justify="space-between" align="start" gap={3} color="gray.600" _dark={{ color: "gray.300" }} fontSize="xs" fontFamily="mono">
-        <Text dir="ltr" textAlign="start" overflowWrap="anywhere" sx={{ unicodeBidi: "isolate" }}>{formatBytes(used)} / <Text as="span" fontFamily="mono">{limitText}</Text></Text>
-        {!compact && <Text flexShrink={0}>{t("usersTable.total")}: <Text as="span" dir="ltr" display="inline-block" sx={{ unicodeBidi: "isolate" }}>{formatBytes(totalUsedTraffic)}</Text></Text>}
+    <HStack spacing={3} minW={0} dir={direction}>
+      <CircularProgress
+        value={percent}
+        size="58px"
+        thickness="8px"
+        color={ringColor}
+        trackColor="whiteAlpha.100"
+        opacity={isUnlimited ? 0.78 : 1}
+        aria-label={`${formatBytes(used)} / ${limitText}`}
+        flexShrink={0}
+      >
+        <CircularProgressLabel
+          dir="ltr"
+          fontFamily="mono"
+          fontSize="xs"
+          fontWeight="700"
+          color={isReached ? "red.300" : "gold.200"}
+        >
+          {isUnlimited ? "∞" : `${Math.round(percent)}%`}
+        </CircularProgressLabel>
+      </CircularProgress>
+      <Stack spacing={0.5} minW={0}>
+        <MetaLabel>{t("usersTable.dataUsage")}</MetaLabel>
+        <Text dir="ltr" textAlign="start" fontSize="sm" fontFamily="mono" noOfLines={1} sx={{ unicodeBidi: "isolate" }}>
+          {formatBytes(used)} / {limitText}
+        </Text>
+        <Text color="gray.400" fontSize="xs" noOfLines={1}>
+          {t("usersTable.total")}: <Text as="span" dir="ltr" display="inline-block" fontFamily="mono" sx={{ unicodeBidi: "isolate" }}>{formatBytes(totalUsedTraffic)}</Text>
+        </Text>
+      </Stack>
+    </HStack>
+  );
+};
+
+const formatDateTime = (value: string | null | undefined, locale: string) => {
+  if (!value) return "—";
+  const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/.test(value) ? value : `${value}Z`;
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
+};
+
+const formatTimestamp = (value: number | null | undefined, locale: string) => {
+  if (!value) return "—";
+  return new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(
+    new Date(value * 1000)
+  );
+};
+
+const MetaLabel: FC<{ children: ReactNode }> = ({ children }) => (
+  <Text color="gray.400" fontSize="xs" fontWeight="600" lineHeight="1.6">
+    {children}
+  </Text>
+);
+
+const NextPlanSummary: FC<{ user: User }> = ({ user }) => {
+  const { t, i18n } = useTranslation();
+  const plan = user.next_plan;
+  if (!plan) {
+    return <Text color="gray.500" fontSize="sm">{t("usersTable.noNextPlan")}</Text>;
+  }
+
+  const limit = !plan.data_limit
+    ? t("unlimited")
+    : formatBytes(plan.data_limit);
+
+  return (
+    <Stack spacing={1.5} minW={0}>
+      <HStack spacing={2} flexWrap="wrap">
+        <Badge colorScheme="gold" variant="subtle" textTransform="none" fontFamily="mono">
+          {limit}
+        </Badge>
+        <Text fontSize="xs" color="gray.300" dir="ltr" sx={{ unicodeBidi: "isolate" }}>
+          {formatTimestamp(plan.expire, i18n.language)}
+        </Text>
       </HStack>
+      <Text fontSize="xs" color="gray.400" lineHeight="1.6">
+        {plan.add_remaining_traffic
+          ? t("usersTable.keepRemainingTraffic")
+          : t("usersTable.replaceRemainingTraffic")}
+        {" · "}
+        {plan.fire_on_either
+          ? t("usersTable.activateOnEither")
+          : t("usersTable.activateOnBoth")}
+      </Text>
     </Stack>
   );
 };
 
-type SortLabelProps = {
-  label: string;
-  column: string;
-  sort: string;
-  onSort: (column: string) => void;
-};
+const ResetHistory: FC<{ user: User }> = ({ user }) => {
+  const { t, i18n } = useTranslation();
+  const history = [...(user.reset_history || [])].sort(
+    (a, b) => new Date(b.reset_at).getTime() - new Date(a.reset_at).getTime()
+  );
 
-const SortLabel: FC<SortLabelProps> = ({ label, column, sort, onSort }) => {
-  const active = sort.includes(column);
+  if (history.length === 0) {
+    return <Text color="gray.500" fontSize="xs">{t("usersTable.noResetHistory")}</Text>;
+  }
+
   return (
-    <Button
-      size="xs"
-      variant="unstyled"
-      display="inline-flex"
-      alignItems="center"
-      gap={1.5}
-      minH="32px"
-      color="inherit"
-      fontSize="inherit"
-      fontWeight="inherit"
-      textTransform="inherit"
-      letterSpacing="inherit"
-      onClick={() => onSort(column)}
-      aria-label={`${label}: sort`}
-    >
-      {label}
-      {active && <SortIcon aria-hidden="true" transform={sort.startsWith("-") ? undefined : "rotate(180deg)"} />}
-    </Button>
+    <Popover isLazy placement="auto" strategy="fixed">
+      <PopoverTrigger>
+        <Button
+          variant="link"
+          colorScheme="gold"
+          size="sm"
+          minH="36px"
+          fontSize="xs"
+          onClick={(event) => event.stopPropagation()}
+        >
+          {t("usersTable.resetCount", { count: history.length })}
+        </Button>
+      </PopoverTrigger>
+      <Portal>
+        <PopoverContent
+          dir={i18n.dir()}
+          bg="#111d17"
+          color="gray.100"
+          borderColor="#475f50"
+          maxW={{ base: "calc(100vw - 24px)", sm: "360px" }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <PopoverArrow bg="#111d17" />
+          <PopoverCloseButton />
+          <PopoverHeader fontWeight="700" borderColor="#33483b" pe={10}>
+            {t("usersTable.resetHistory")}
+          </PopoverHeader>
+          <PopoverBody maxH="280px" overflowY="auto" p={0}>
+            {history.map((item, index) => (
+              <Box key={`${item.reset_at}-${index}`} px={4} py={3}>
+                <HStack justify="space-between" align="start" gap={4}>
+                  <Text fontSize="sm" fontFamily="mono" dir="ltr" sx={{ unicodeBidi: "isolate" }}>
+                    {formatBytes(item.used_traffic)}
+                  </Text>
+                  <Text fontSize="xs" color="gray.400" textAlign="end">
+                    {formatDateTime(item.reset_at, i18n.language)}
+                  </Text>
+                </HStack>
+                {index < history.length - 1 && <Divider mt={3} borderColor="#33483b" />}
+              </Box>
+            ))}
+          </PopoverBody>
+        </PopoverContent>
+      </Portal>
+    </Popover>
   );
 };
 
 type ActionButtonsProps = { user: User };
 
 const ActionButtons: FC<ActionButtonsProps> = ({ user }) => {
-  const { setQRCode, setSubLink, onEditingUser } = useDashboard();
+  const { setQRCode, setSubLink } = useDashboard();
   const { t, i18n } = useTranslation();
   const isRtl = i18n.dir() === "rtl";
   const proxyLinks = user.links.join("\r\n");
@@ -153,8 +261,11 @@ const ActionButtons: FC<ActionButtonsProps> = ({ user }) => {
   const buttonStyle = {
     variant: "ghost",
     size: "sm",
-    color: "gray.600",
-    _dark: { color: "gray.200", _hover: { bg: "whiteAlpha.100", color: "white" } },
+    minW: "44px",
+    h: "44px",
+    color: "gray.300",
+    _hover: { bg: "gold.900", color: "gold.200" },
+    _focusVisible: { boxShadow: "0 0 0 2px var(--chakra-colors-gold-400)" },
   } as const;
 
   return (
@@ -187,10 +298,174 @@ const ActionButtons: FC<ActionButtonsProps> = ({ user }) => {
           }}
         />
       </Tooltip>
-      <Tooltip label={t("userDialog.editUser")} placement="top">
-        <IconButton {...buttonStyle} aria-label={t("userDialog.editUser")} icon={<EditIcon />} onClick={() => onEditingUser(user)} />
-      </Tooltip>
     </HStack>
+  );
+};
+
+type UserCardProps = {
+  user: User;
+  expanded: boolean;
+  onToggle: () => void;
+  onOpen: () => void;
+};
+
+const UserCard: FC<UserCardProps> = ({ user, expanded, onToggle, onOpen }) => {
+  const { t, i18n } = useTranslation();
+  const owner = user.admin?.username || "—";
+
+  return (
+    <Card
+      as="article"
+      variant="outline"
+      minW={0}
+      maxW="full"
+      overflow="hidden"
+      position="relative"
+      borderRadius="14px"
+      borderColor={expanded ? "gold.700" : "#33483b"}
+      boxShadow={expanded ? "0 14px 36px rgba(0, 0, 0, 0.28)" : "none"}
+      transition="border-color 180ms ease, box-shadow 180ms ease"
+      _hover={{ borderColor: "gold.600", boxShadow: "0 12px 30px rgba(0, 0, 0, 0.24)" }}
+    >
+      <Box
+        aria-hidden="true"
+        position="absolute"
+        top={0}
+        insetInline={0}
+        h="2px"
+        bgGradient="linear(to-r, transparent, gold.400, transparent)"
+        opacity={expanded ? 1 : 0.58}
+      />
+
+      <Box
+        as="button"
+        type="button"
+        w="full"
+        minW={0}
+        p={{ base: 3.5, md: 4 }}
+        pt={{ base: 4, md: 4.5 }}
+        textAlign="start"
+        cursor="pointer"
+        onClick={onOpen}
+        aria-label={`${t("userDialog.editUser")}: ${user.username}`}
+        _hover={{ bg: "whiteAlpha.50" }}
+        _focusVisible={{ outline: "2px solid", outlineColor: "gold.400", outlineOffset: "-2px" }}
+        transition="background-color 160ms ease"
+      >
+        <Stack spacing={3.5} minW={0}>
+          <HStack justify="space-between" align="start" gap={3} minW={0}>
+            <Box minW={0} flex="1">
+              <HStack spacing={2} minW={0}>
+                <OnlineBadge lastOnline={user.online_at} />
+                <Text
+                  dir="ltr"
+                  textAlign="start"
+                  fontFamily="mono"
+                  fontSize="sm"
+                  fontWeight="700"
+                  noOfLines={1}
+                  minW={0}
+                  sx={{ unicodeBidi: "isolate" }}
+                >
+                  {user.username}
+                </Text>
+              </HStack>
+              <Text mt={1.5} color="gray.400" fontSize="xs" noOfLines={1}>
+                {t("usersTable.owner")}: <Text as="span" color="gold.200" dir="ltr" sx={{ unicodeBidi: "isolate" }}>{owner}</Text>
+              </Text>
+            </Box>
+            <StatusBadge compact expiryDate={user.expire} status={user.status} />
+          </HStack>
+
+          <UsageMeter
+            used={user.used_traffic}
+            total={user.data_limit}
+            totalUsedTraffic={user.lifetime_used_traffic}
+            dataLimitResetStrategy={user.data_limit_reset_strategy}
+            colorScheme={statusColors[user.status].bandWidthColor}
+          />
+        </Stack>
+      </Box>
+
+      <HStack
+        justify="space-between"
+        align="center"
+        gap={2}
+        px={3}
+        py={2}
+        borderTopWidth="1px"
+        borderColor="#33483b"
+        bg="blackAlpha.100"
+      >
+        <ActionButtons user={user} />
+        <HStack spacing={1} flexShrink={0}>
+          <Tooltip label={t("userDialog.editUser")} placement="top">
+            <IconButton
+              aria-label={t("userDialog.editUser")}
+              icon={<EditIcon />}
+              variant="ghost"
+              color="gold.200"
+              minW="44px"
+              h="44px"
+              onClick={onOpen}
+              _hover={{ bg: "gold.900" }}
+            />
+          </Tooltip>
+          <Button
+            variant="ghost"
+            minH="44px"
+            px={2.5}
+            color="gray.300"
+            fontSize="xs"
+            rightIcon={
+              <DetailsIcon
+                aria-hidden="true"
+                transform={expanded ? "rotate(180deg)" : undefined}
+                transition="transform 180ms ease"
+              />
+            }
+            aria-expanded={expanded}
+            onClick={onToggle}
+            _hover={{ bg: "gold.900", color: "gold.100" }}
+          >
+            {expanded ? t("usersTable.hideDetails") : t("usersTable.showDetails")}
+          </Button>
+        </HStack>
+      </HStack>
+
+      <Collapse in={expanded} animateOpacity>
+        <Box px={4} py={4} borderTopWidth="1px" borderColor="gold.900" bg="blackAlpha.200">
+          <SimpleGrid columns={{ base: 1, sm: 2 }} gap={4} minW={0}>
+            <Box minW={0}>
+              <MetaLabel>{t("usersTable.owner")}</MetaLabel>
+              <Text mt={1} fontSize="sm" dir="ltr" textAlign="start" overflowWrap="anywhere" sx={{ unicodeBidi: "isolate" }}>{owner}</Text>
+            </Box>
+            <Box minW={0}>
+              <MetaLabel>{t("usersTable.createdAt")}</MetaLabel>
+              <Text mt={1} fontSize="sm" lineHeight="1.7">{formatDateTime(user.created_at, i18n.language)}</Text>
+            </Box>
+            <Box minW={0}>
+              <MetaLabel>{t("usersTable.subscriptionUpdatedAt")}</MetaLabel>
+              <Text mt={1} fontSize="sm" lineHeight="1.7">{formatDateTime(user.sub_updated_at, i18n.language)}</Text>
+            </Box>
+            <Box minW={0}>
+              <MetaLabel>{t("usersTable.lastUserAgent")}</MetaLabel>
+              <Text mt={1} fontSize="sm" dir="ltr" textAlign="start" overflowWrap="anywhere" sx={{ unicodeBidi: "isolate" }}>
+                {user.sub_last_user_agent || "—"}
+              </Text>
+            </Box>
+            <Box minW={0}>
+              <MetaLabel>{t("usersTable.nextPlan")}</MetaLabel>
+              <Box mt={1}><NextPlanSummary user={user} /></Box>
+            </Box>
+            <Box minW={0}>
+              <MetaLabel>{t("usersTable.resetHistory")}</MetaLabel>
+              <ResetHistory user={user} />
+            </Box>
+          </SimpleGrid>
+        </Box>
+      </Collapse>
+    </Card>
   );
 };
 
@@ -221,117 +496,54 @@ const EmptySection: FC<{ isFiltered: boolean }> = ({ isFiltered }) => {
   );
 };
 
-type UsersTableProps = TableProps;
+type UsersTableProps = BoxProps;
 
 export const UsersTable: FC<UsersTableProps> = (props) => {
   const {
     filters,
     users: { users },
     onEditingUser,
-    onFilterChange,
   } = useDashboard();
-  const { t, i18n } = useTranslation();
+  const { i18n } = useTranslation();
   const direction = i18n.dir();
   const isFiltered = Boolean(filters.search || filters.status);
-
-  const handleSort = (column: string) => {
-    let newSort = filters.sort;
-    if (newSort.includes(column)) {
-      newSort = newSort.startsWith("-") ? "-created_at" : `-${column}`;
-    } else {
-      newSort = column;
-    }
-    onFilterChange({ sort: newSort });
-  };
+  const [expandedUser, setExpandedUser] = useState<string | null>(null);
 
   return (
-    <Box id="users-table" dir={direction} borderTopWidth="1px" borderColor="gray.200" _dark={{ borderColor: "#33483b" }} minW={0}>
+    <Box
+      {...props}
+      id="users-table"
+      dir={direction}
+      w="full"
+      maxW="full"
+      minW={0}
+      overflowX="hidden"
+      borderTopWidth="1px"
+      borderColor="gray.200"
+      _dark={{ borderColor: "#33483b" }}
+    >
       {users.length === 0 ? (
         <EmptySection isFiltered={isFiltered} />
       ) : (
-        <>
-          <Stack display={{ base: "flex", md: "none" }} spacing={3} py={4}>
-            {users.map((user) => (
-              <Card key={user.username} variant="outline" p={4} borderRadius="10px" borderColor="gray.200" _dark={{ borderColor: "#33483b" }} boxShadow="none">
-                <Stack spacing={4}>
-                  <HStack justify="space-between" align="start" gap={3}>
-                    <Box minW={0}>
-                      <HStack spacing={2} minW={0}>
-                        <OnlineBadge lastOnline={user.online_at} />
-                        <Text dir="ltr" textAlign="start" fontWeight="600" overflowWrap="anywhere" minW={0} sx={{ unicodeBidi: "isolate" }}>{user.username}</Text>
-                      </HStack>
-                      <OnlineStatus lastOnline={user.online_at} />
-                    </Box>
-                    <StatusBadge compact expiryDate={user.expire} status={user.status} />
-                  </HStack>
-                  <UsageMeter
-                    used={user.used_traffic}
-                    total={user.data_limit}
-                    totalUsedTraffic={user.lifetime_used_traffic}
-                    dataLimitResetStrategy={user.data_limit_reset_strategy}
-                    colorScheme={statusColors[user.status].bandWidthColor}
-                  />
-                  <Box borderTopWidth="1px" borderColor="gray.200" _dark={{ borderColor: "#33483b" }} pt={2}>
-                    <ActionButtons user={user} />
-                  </Box>
-                </Stack>
-              </Card>
-            ))}
-          </Stack>
-
-          <TableContainer dir={direction} display={{ base: "none", md: "block" }} overflowX="auto" py={4} sx={{ scrollbarGutter: "stable" }}>
-            <Table size="sm" w="full" minW="820px" tableLayout="fixed" {...props}>
-              <Thead>
-                <Tr>
-                  <Th scope="col" w="22%" whiteSpace="normal" aria-sort={filters.sort.includes("username") ? (filters.sort.startsWith("-") ? "descending" : "ascending") : "none"}>
-                    <SortLabel label={t("username")} column="username" sort={filters.sort} onSort={handleSort} />
-                  </Th>
-                  <Th scope="col" w="26%" whiteSpace="normal">
-                    <HStack gap={2} flexWrap="wrap">
-                      <Text>{t("usersTable.status")}</Text>
-                      <Text color="gray.400">/</Text>
-                      <SortLabel label={t("usersTable.expiration")} column="expire" sort={filters.sort} onSort={handleSort} />
-                    </HStack>
-                  </Th>
-                  <Th scope="col" w="32%" whiteSpace="normal" aria-sort={filters.sort.includes("used_traffic") ? (filters.sort.startsWith("-") ? "descending" : "ascending") : "none"}>
-                    <SortLabel label={t("usersTable.dataUsage")} column="used_traffic" sort={filters.sort} onSort={handleSort} />
-                  </Th>
-                  <Th scope="col" w="20%" whiteSpace="normal" textAlign="end">{t("admins.actions")}</Th>
-                </Tr>
-              </Thead>
-              <Tbody>
-                {users.map((user, index) => (
-                  <Tr
-                    key={user.username}
-                    className={classNames("interactive", { "last-row": index === users.length - 1 })}
-                    onClick={() => onEditingUser(user)}
-                  >
-                    <Td>
-                      <HStack align="start" spacing={2} minW={0}>
-                        <OnlineBadge lastOnline={user.online_at} />
-                        <Box minW={0}>
-                          <Text dir="ltr" textAlign="start" fontWeight="600" overflowWrap="anywhere" sx={{ unicodeBidi: "isolate" }}>{user.username}</Text>
-                          <OnlineStatus lastOnline={user.online_at} />
-                        </Box>
-                      </HStack>
-                    </Td>
-                    <Td><StatusBadge expiryDate={user.expire} status={user.status} /></Td>
-                    <Td>
-                      <UsageMeter
-                        used={user.used_traffic}
-                        total={user.data_limit}
-                        totalUsedTraffic={user.lifetime_used_traffic}
-                        dataLimitResetStrategy={user.data_limit_reset_strategy}
-                        colorScheme={statusColors[user.status].bandWidthColor}
-                      />
-                    </Td>
-                    <Td><ActionButtons user={user} /></Td>
-                  </Tr>
-                ))}
-              </Tbody>
-            </Table>
-          </TableContainer>
-        </>
+        <SimpleGrid
+          columns={{ base: 1, md: 2, xl: 3 }}
+          gap={{ base: 3, md: 4 }}
+          w="full"
+          maxW="full"
+          minW={0}
+          py={4}
+          alignItems="start"
+        >
+          {users.map((user) => (
+            <UserCard
+              key={user.username}
+              user={user}
+              expanded={expandedUser === user.username}
+              onToggle={() => setExpandedUser((current) => current === user.username ? null : user.username)}
+              onOpen={() => onEditingUser(user)}
+            />
+          ))}
+        </SimpleGrid>
       )}
       <Pagination />
     </Box>

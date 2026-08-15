@@ -35,6 +35,19 @@ export type DataLimitResetStrategy =
 export type UserInbounds = {
   [key: string]: string[];
 };
+
+export type NextPlan = {
+  data_limit: number | null;
+  expire: number | null;
+  add_remaining_traffic: boolean;
+  fire_on_either: boolean;
+};
+
+export type UsageReset = {
+  used_traffic: number;
+  reset_at: string;
+};
+
 export type User = {
   proxies: ProxyType;
   expire: number | null;
@@ -49,7 +62,16 @@ export type User = {
   subscription_url: string;
   inbounds: UserInbounds;
   note: string;
-  online_at: string;
+  online_at: string | null;
+  created_at: string;
+  sub_updated_at: string | null;
+  sub_last_user_agent: string | null;
+  admin: {
+    username: string;
+  } | null;
+  next_plan: NextPlan | null;
+  reset_history: UsageReset[];
+  concurrent_user_limit?: number | null;
 };
 
 export type UserCreate = Pick<

@@ -52,11 +52,11 @@ const InboundCard: FC<
     <Box as="label">
       <input {...inputProps} />
       <Box
-        w="fll"
+        w="full"
         position="relative"
         {...htmlProps}
         cursor="pointer"
-        borderRadius="sm"
+        borderRadius="8px"
         border="1px solid"
         borderColor={"gray.200"}
         _dark={{
@@ -67,14 +67,14 @@ const InboundCard: FC<
         justifyContent="space-between"
         overflow="hidden"
         _checked={{
-          bg: "gray.50",
+          bg: "gold.50",
           outline: "2px",
           boxShadow: "outline",
-          outlineColor: "primary.500",
+          outlineColor: "gold.400",
           borderColor: "transparent",
           fontWeight: "medium",
           _dark: {
-            bg: "gray.750",
+            bg: "gold.900",
             borderColor: "transparent",
           },
           "& p": {
@@ -188,7 +188,7 @@ const RadioCard: FC<
   return (
     <AccordionItem
       isDisabled={!protocolHasInbound}
-      borderRadius="md"
+      borderRadius="10px"
       borderStyle="solid"
       border="1px"
       borderColor="gray.200"
@@ -198,11 +198,8 @@ const RadioCard: FC<
         bg: shouldBeDisabled ? "#364154" : "transparent",
       }}
       _checked={{
-        bg: "gray.50",
-        outline: "2px",
-        boxShadow: "outline",
-        outlineColor: "primary.500",
-        borderColor: "transparent",
+        bg: "gold.900",
+        borderColor: "gold.600",
       }}
       {...getCheckboxProps()}
     >
@@ -221,16 +218,18 @@ const RadioCard: FC<
         )}
         <input {...inputProps} />
         <Box
-          w="fll"
+          w="full"
           position="relative"
           {...htmlProps}
           borderRadius="md"
           cursor={shouldBeDisabled ? "not-allowed" : "pointer"}
           _checked={{
             fontWeight: "medium",
+            bg: "gold.50",
+            borderColor: "gold.300",
             _dark: {
-              bg: "gray.750",
-              borderColor: "transparent",
+              bg: "gold.900",
+              borderColor: "gold.700",
             },
             "& > svg": {
               opacity: 1,
@@ -261,6 +260,7 @@ const RadioCard: FC<
           }}
           textTransform="capitalize"
           px={3}
+          pe={inputProps.checked && protocolHasInbound ? 14 : 3}
           py={2}
           fontWeight="medium"
           {...getCheckboxProps()}
@@ -271,7 +271,7 @@ const RadioCard: FC<
             }
             as="span"
             className="checked"
-            color="primary.200"
+            color="gold.200"
             position="absolute"
             insetEnd="3"
             top="3"
@@ -279,13 +279,16 @@ const RadioCard: FC<
             p={0}
             onClick={toggleAccordion}
           >
-            <IconButton size="sm" aria-label="inbound settings">
+            <IconButton size="sm" variant="ghost" color="gold.200" aria-label="inbound settings">
               <SettingsIcon />
             </IconButton>
           </AccordionButton>
 
           <Text
             fontSize="sm"
+            dir="ltr"
+            textAlign="start"
+            lineHeight="1.7"
             color={shouldBeDisabled ? "gray.400" : "gray.700"}
             _dark={{ color: shouldBeDisabled ? "gray.500" : "gray.300" }}
             {...getLabelProps()}
@@ -297,6 +300,8 @@ const RadioCard: FC<
             color={shouldBeDisabled ? "gray.400" : "gray.600"}
             _dark={{ color: shouldBeDisabled ? "gray.500" : "gray.400" }}
             fontSize="xs"
+            lineHeight="1.8"
+            overflowWrap="anywhere"
           >
             {description}
           </Text>
@@ -307,7 +312,7 @@ const RadioCard: FC<
         pb={3}
         roundedBottom="5px"
         pt={3}
-        _dark={{ bg: inputProps.checked && "gray.750" }}
+        _dark={{ bg: inputProps.checked && "rgba(45, 36, 19, .42)" }}
       >
         <VStack
           w="full"
@@ -343,7 +348,7 @@ const RadioCard: FC<
           </VStack>
           {title === "vmess" && isSelected && (
             <VStack alignItems="flex-start" w="full">
-              <FormControl height="66px">
+              <FormControl>
                 <Text fontSize="sm" pb={1}>
                   ID
                 </Text>
@@ -360,7 +365,7 @@ const RadioCard: FC<
           )}
           {title === "vless" && isSelected && (
             <VStack alignItems="flex-start" w="full">
-              <FormControl height="66px">
+              <FormControl>
                 <Text fontSize="sm" pb={1}>
                   ID
                 </Text>
@@ -373,7 +378,7 @@ const RadioCard: FC<
                   {...form.register("proxies.vless.id")}
                 />
               </FormControl>
-              <FormControl height="66px">
+              <FormControl>
                 <Text fontSize="sm" pb={1}>
                   Flow
                 </Text>
@@ -394,7 +399,7 @@ const RadioCard: FC<
           )}
           {title === "trojan" && isSelected && (
             <VStack alignItems="flex-start" w="full">
-              <FormControl height="66px">
+              <FormControl>
                 <Text fontSize="sm" pb={1}>
                   {t("password")}
                 </Text>
@@ -411,7 +416,7 @@ const RadioCard: FC<
           )}
           {title === "shadowsocks" && isSelected && (
             <VStack alignItems="flex-start" w="full">
-              <FormControl height="66px">
+              <FormControl>
                 <Text fontSize="sm" pb={1}>
                   {t("password")}
                 </Text>
@@ -424,7 +429,7 @@ const RadioCard: FC<
                   {...form.register("proxies.shadowsocks.password")}
                 />
               </FormControl>
-              <FormControl height="66px">
+              <FormControl>
                 <Text fontSize="sm" pb={1}>
                   {t("userDialog.method")}
                 </Text>

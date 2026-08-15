@@ -32,6 +32,18 @@ export const theme = extendTheme({
       800: "#115833",
       900: "#0d482b",
     },
+    gold: {
+      50: "#fff9e8",
+      100: "#f8e9b6",
+      200: "#ecd483",
+      300: "#ddbd55",
+      400: "#caa53d",
+      500: "#ad8529",
+      600: "#896720",
+      700: "#684e1c",
+      800: "#493817",
+      900: "#2d2413",
+    },
     gray: {
       750: "#172235",
     },
@@ -46,6 +58,10 @@ export const theme = extendTheme({
           bg: "#09130e",
           color: "gray.100",
         },
+      },
+      'html[lang^="fa"]': {
+        "--chakra-fonts-heading": `Vazirmatn, Fira Sans, sans-serif`,
+        "--chakra-fonts-body": `Vazirmatn, Fira Sans, sans-serif`,
       },
       "::selection": {
         bg: "primary.200",
@@ -111,6 +127,10 @@ export const theme = extendTheme({
           },
         },
       },
+      sizes: {
+        sm: { field: { minH: "44px", fontSize: "sm", px: 3 } },
+        md: { field: { minH: "44px", fontSize: "sm", px: 3 } },
+      },
     },
     FormHelperText: {
       baseStyle: {
@@ -123,6 +143,9 @@ export const theme = extendTheme({
         fontSize: "sm",
         fontWeight: "medium",
         mb: "1",
+        lineHeight: "1.7",
+        whiteSpace: "normal",
+        overflowWrap: "anywhere",
         color: "gray.300",
         _dark: { color: "gray.300" },
       },
@@ -159,6 +182,26 @@ export const theme = extendTheme({
             },
           },
         },
+      },
+      sizes: {
+        sm: {
+          field: { minH: "44px", fontSize: "sm", px: 3 },
+          addon: { minH: "44px", fontSize: "sm", px: 3 },
+        },
+        md: {
+          field: { minH: "44px", fontSize: "sm", px: 3 },
+          addon: { minH: "44px", fontSize: "sm", px: 3 },
+        },
+      },
+    },
+    Textarea: {
+      baseStyle: {
+        bg: "whiteAlpha.50",
+        color: "gray.100",
+        borderColor: "gray.600",
+        lineHeight: "1.8",
+        _placeholder: { color: "gray.500" },
+        _focusVisible: { borderColor: "primary.300", boxShadow: "outline" },
       },
     },
     Table: {

@@ -18,12 +18,33 @@ body,
   min-height: 100vh;
 }
 
-html[lang="fa"] body,
-html[lang="fa"] button,
-html[lang="fa"] input,
-html[lang="fa"] select,
-html[lang="fa"] textarea {
+html[lang^="fa"] body,
+html[lang^="fa"] button,
+html[lang^="fa"] input,
+html[lang^="fa"] select,
+html[lang^="fa"] textarea {
   font-family: "Vazirmatn", "Fira Sans", sans-serif;
+}
+
+html[lang^="fa"] body {
+  font-feature-settings: "kern" 1;
+  text-rendering: optimizeLegibility;
+}
+
+html[lang^="fa"] .chakra-form__helper-text,
+html[lang^="fa"] .chakra-form__error-message {
+  line-height: 1.8;
+}
+
+html[lang^="fa"] .chakra-table th,
+html[lang^="fa"] .chakra-form__label {
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.react-datepicker-wrapper,
+.react-datepicker__input-container {
+  width: 100%;
 }
 
 .chakra-ui-dark .chakra-select option {

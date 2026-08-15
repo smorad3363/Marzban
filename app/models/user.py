@@ -279,6 +279,12 @@ class UserModify(User):
         return status
 
 
+class UserUsageResetResponse(BaseModel):
+    used_traffic: int = Field(validation_alias="used_traffic_at_reset")
+    reset_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
 class UserResponse(User):
     username: str
     status: UserStatus
@@ -289,6 +295,7 @@ class UserResponse(User):
     subscription_url: str = ""
     proxies: dict
     excluded_inbounds: Dict[ProxyTypes, List[str]] = {}
+    reset_history: List[UserUsageResetResponse] = Field(default_factory=list)
 
     admin: Optional[Admin] = None
     model_config = ConfigDict(from_attributes=True)
@@ -333,6 +340,7 @@ class SubscriptionUserResponse(UserResponse):
     note: str | None = Field(None, exclude=True)
     inbounds: Dict[ProxyTypes, List[str]] | None = Field(None, exclude=True)
     auto_delete_in_days: int | None = Field(None, exclude=True)
+    reset_history: List[UserUsageResetResponse] | None = Field(None, exclude=True)
     model_config = ConfigDict(from_attributes=True)
 
 

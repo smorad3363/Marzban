@@ -123,7 +123,7 @@ type FormModalProps = {
 };
 
 const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const toast = useToast();
   const queryClient = useQueryClient();
   const [form, setForm] = useState<ManagedAdminPayload>(emptyAdmin());
@@ -185,28 +185,41 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
   ];
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="4xl" scrollBehavior="inside">
+    <Modal isOpen={isOpen} onClose={onClose} size="5xl" scrollBehavior="inside">
       <ModalOverlay bg="rgba(0, 0, 0, .72)" backdropFilter="blur(4px)" />
-      <ModalContent as="form" onSubmit={submit} bg="#111d17" color="gray.100" borderWidth="1px" borderColor="#33483b" borderRadius="14px">
-        <ModalHeader>{t(isEditing ? "admins.editTitle" : "admins.createTitle")}</ModalHeader>
+      <ModalContent
+        as="form"
+        onSubmit={submit}
+        mx={3}
+        maxH="calc(100dvh - 24px)"
+        overflow="hidden"
+        dir={i18n.dir()}
+        bg="#111d17"
+        color="gray.100"
+        borderWidth="1px"
+        borderColor="#33483b"
+        borderRadius={{ base: "12px", md: "16px" }}
+        boxShadow="elevated"
+      >
+        <ModalHeader pe={14} lineHeight="1.7">{t(isEditing ? "admins.editTitle" : "admins.createTitle")}</ModalHeader>
         <ModalCloseButton />
-        <ModalBody pb={7}>
-          <Stack spacing={7}>
-            <Box>
+        <ModalBody px={{ base: 4, md: 6 }} pb={6} overflowY="auto">
+          <Stack spacing={5}>
+            <Box p={{ base: 4, md: 5 }} bg="#0d1812" borderWidth="1px" borderColor="#33483b" borderRadius="12px">
               <Text fontWeight="700">{t("admins.accountSection")}</Text>
               <Text color="gray.400" fontSize="sm" mt={1}>{t("admins.accountSectionHelp")}</Text>
-              <SimpleGrid columns={{ base: 1, md: 2 }} gap={4} mt={4}>
+              <SimpleGrid columns={{ base: 1, lg: 2 }} gap={5} mt={4}>
                 <FormControl isRequired={!isEditing}>
                   <FormLabel>{t("admins.username")}</FormLabel>
-                  <Input value={form.username} disabled={isEditing} maxLength={34} onChange={(e) => setField("username", e.target.value)} />
+                  <Input value={form.username} disabled={isEditing} maxLength={34} dir="ltr" onChange={(e) => setField("username", e.target.value)} />
                 </FormControl>
                 <FormControl isRequired={!isEditing}>
                   <FormLabel>{t("admins.password")}</FormLabel>
-                  <Input type="password" value={form.password || ""} placeholder={isEditing ? t("admins.passwordKeep") : ""} onChange={(e) => setField("password", e.target.value)} />
+                  <Input type="password" value={form.password || ""} dir="ltr" placeholder={isEditing ? t("admins.passwordKeep") : ""} onChange={(e) => setField("password", e.target.value)} />
                 </FormControl>
                 <FormControl>
                   <FormLabel>{t("admins.telegramId")}</FormLabel>
-                  <Input type="number" value={form.telegram_id ?? ""} onChange={(e) => setField("telegram_id", nullableNumber(e))} />
+                  <Input type="number" value={form.telegram_id ?? ""} dir="ltr" onChange={(e) => setField("telegram_id", nullableNumber(e))} />
                 </FormControl>
                 <FormControl>
                   <FormLabel>{t("admins.discordWebhook")}</FormLabel>
@@ -218,34 +231,33 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
               </Checkbox>
             </Box>
 
-            <Divider borderColor="#33483b" />
-            <Box>
+            <Box p={{ base: 4, md: 5 }} bg="#0d1812" borderWidth="1px" borderColor="#33483b" borderRadius="12px">
               <Text fontWeight="700">{t("admins.limitsSection")}</Text>
               <Text color="gray.400" fontSize="sm" mt={1}>{t("admins.limitsSectionHelp")}</Text>
-              <SimpleGrid columns={{ base: 1, md: 2, xl: 3 }} gap={4} mt={4}>
+              <SimpleGrid columns={{ base: 1, lg: 2 }} gap={5} mt={4}>
                 <FormControl>
                   <FormLabel>{t("admins.totalTraffic")}</FormLabel>
-                  <Input type="number" min={0} step="0.01" value={form.policy.total_traffic === null ? "" : form.policy.total_traffic / GIB} onChange={(e) => setPolicy("total_traffic", e.target.value === "" ? null : Math.round(Number(e.target.value) * GIB))} />
+                  <Input type="number" min={0} step="0.01" dir="ltr" value={form.policy.total_traffic === null ? "" : form.policy.total_traffic / GIB} onChange={(e) => setPolicy("total_traffic", e.target.value === "" ? null : Math.round(Number(e.target.value) * GIB))} />
                   <FormHelperText>{t("admins.blankUnlimited")}</FormHelperText>
                 </FormControl>
                 <FormControl>
                   <FormLabel>{t("admins.operationLimit")}</FormLabel>
-                  <Input type="number" min={0} value={form.policy.user_limit ?? ""} onChange={(e) => setPolicy("user_limit", nullableNumber(e))} />
+                  <Input type="number" min={0} dir="ltr" value={form.policy.user_limit ?? ""} onChange={(e) => setPolicy("user_limit", nullableNumber(e))} />
                   <FormHelperText>{t("admins.operationLimitHelp")}</FormHelperText>
                 </FormControl>
                 <FormControl>
                   <FormLabel>{t("admins.maxUsers")}</FormLabel>
-                  <Input type="number" min={1} value={form.policy.max_users ?? ""} onChange={(e) => setPolicy("max_users", nullableNumber(e))} />
+                  <Input type="number" min={1} dir="ltr" value={form.policy.max_users ?? ""} onChange={(e) => setPolicy("max_users", nullableNumber(e))} />
                   <FormHelperText>{t("admins.maxUsersHelp")}</FormHelperText>
                 </FormControl>
                 <FormControl>
                   <FormLabel>{t("admins.maxDuration")}</FormLabel>
-                  <Input type="number" min={1} value={form.policy.max_user_duration_days ?? ""} onChange={(e) => setPolicy("max_user_duration_days", nullableNumber(e))} />
+                  <Input type="number" min={1} dir="ltr" value={form.policy.max_user_duration_days ?? ""} onChange={(e) => setPolicy("max_user_duration_days", nullableNumber(e))} />
                   <FormHelperText>{t("admins.blankUnlimited")}</FormHelperText>
                 </FormControl>
                 <FormControl>
                   <FormLabel>{t("admins.expiryDate")}</FormLabel>
-                  <Input type="date" value={form.policy.expiry_date || ""} onChange={(e) => setPolicy("expiry_date", e.target.value || null)} />
+                  <Input type="date" dir="ltr" value={form.policy.expiry_date || ""} onChange={(e) => setPolicy("expiry_date", e.target.value || null)} />
                 </FormControl>
                 <FormControl>
                   <FormLabel>{t("admins.volumeMode")}</FormLabel>
@@ -257,27 +269,26 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
               </SimpleGrid>
             </Box>
 
-            <Divider borderColor="#33483b" />
-            <Box>
+            <Box p={{ base: 4, md: 5 }} bg="#0d1812" borderWidth="1px" borderColor="#33483b" borderRadius="12px">
               <Text fontWeight="700">{t("admins.permissionsSection")}</Text>
               <Text color="gray.400" fontSize="sm" mt={1}>{t("admins.permissionsSectionHelp")}</Text>
               <SimpleGrid columns={{ base: 1, md: 2 }} gap={3} mt={4}>
                 {toggles.map(([key, label, help]) => (
-                  <HStack key={key} justify="space-between" align="start" p={4} bg="#0d1812" borderWidth="1px" borderColor="#33483b" borderRadius="10px">
-                    <Box pe={3}>
+                  <HStack key={key} justify="space-between" align="start" p={4} bg="#111d17" borderWidth="1px" borderColor="#33483b" borderRadius="10px" minW={0}>
+                    <Box pe={3} minW={0}>
                       <Text fontSize="sm" fontWeight="650">{t(label)}</Text>
                       <Text fontSize="xs" color="gray.400" mt={1}>{t(help)}</Text>
                     </Box>
-                    <Switch colorScheme="primary" isChecked={Boolean(form.policy[key])} onChange={(e) => setPolicy(key, e.target.checked as never)} />
+                    <Switch flexShrink={0} colorScheme="primary" isChecked={Boolean(form.policy[key])} onChange={(e) => setPolicy(key, e.target.checked as never)} />
                   </HStack>
                 ))}
               </SimpleGrid>
             </Box>
           </Stack>
         </ModalBody>
-        <ModalFooter borderTopWidth="1px" borderColor="#33483b" gap={3}>
-          <Button variant="ghost" onClick={onClose}>{t("cancel")}</Button>
-          <Button type="submit" colorScheme="primary" color="#07130e" isLoading={mutation.isLoading}>{t("save")}</Button>
+        <ModalFooter borderTopWidth="1px" borderColor="#33483b" gap={3} px={{ base: 4, md: 6 }} py={4} flexWrap="wrap">
+          <Button minH="44px" flex={{ base: "1 1 140px", sm: "0 0 auto" }} variant="ghost" onClick={onClose}>{t("cancel")}</Button>
+          <Button minH="44px" flex={{ base: "1 1 180px", sm: "0 0 auto" }} type="submit" colorScheme="primary" color="#07130e" isLoading={mutation.isLoading}>{t("save")}</Button>
         </ModalFooter>
       </ModalContent>
     </Modal>

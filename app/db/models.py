@@ -243,6 +243,14 @@ class User(Base):
         return self.usage_logs[-1].reset_at if self.usage_logs else self.created_at
 
     @property
+    def reset_history(self):
+        return sorted(
+            self.usage_logs,
+            key=lambda log: log.reset_at or datetime.min,
+            reverse=True,
+        )
+
+    @property
     def excluded_inbounds(self):
         _ = {}
         for proxy in self.proxies:

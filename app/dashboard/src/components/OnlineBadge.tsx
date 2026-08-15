@@ -8,7 +8,11 @@ type UserStatusProps = {
 const convertDateFormat = (lastOnline?: string | null): number | null => {
   if (!lastOnline) return null;
 
-  const date = new Date(`${lastOnline}Z`);
+  const normalized = /(?:Z|[+-]\d{2}:?\d{2})$/.test(lastOnline)
+    ? lastOnline
+    : `${lastOnline}Z`;
+  const date = new Date(normalized);
+  if (Number.isNaN(date.getTime())) return null;
   return Math.floor(date.getTime() / 1000);
 };
 

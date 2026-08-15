@@ -1,9 +1,11 @@
 import {
   Alert,
   AlertIcon,
+  Badge,
   Box,
   Button,
   Collapse,
+  Divider,
   Flex,
   FormControl,
   FormErrorMessage,
@@ -21,6 +23,7 @@ import {
   ModalHeader,
   ModalOverlay,
   Select,
+  Stack,
   Switch,
   Text,
   Textarea,
@@ -86,6 +89,26 @@ const UserUsageIcon = chakra(ChartPieIcon, {
   },
 });
 
+const SectionHeader: FC<{ title: string; description: string }> = ({
+  title,
+  description,
+}) => (
+  <Box minW={0}>
+    <Text
+      color="gold.300"
+      fontSize="xs"
+      fontWeight="800"
+      letterSpacing="0.06em"
+      lineHeight="1.8"
+    >
+      {title}
+    </Text>
+    <Text mt={1} color="gray.400" fontSize="xs" lineHeight="1.8" maxW="72ch">
+      {description}
+    </Text>
+  </Box>
+);
+
 export type UserDialogProps = {};
 
 export type FormType = Pick<UserCreate, keyof UserCreate> & {
@@ -104,8 +127,8 @@ const formatUser = (user: User): FormType => {
       ? Number(user.on_hold_expire_duration / (24 * 60 * 60))
       : user.on_hold_expire_duration,
     selected_proxies: Object.keys(user.proxies) as ProxyKeys,
-    concurrent_user_limit: null,
-    owner_admin: "",
+    concurrent_user_limit: user.concurrent_user_limit ?? null,
+    owner_admin: user.admin?.username || "",
   };
 };
 const getDefaultValues = (): FormType => {
@@ -280,7 +303,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
   const adminsQuery = useQuery<ManagedAdmin[], Error>(
     ["assignable-admins"],
     fetchAssignableAdmins,
-    { enabled: isOpen && !isEditing && userData.is_sudo, staleTime: 30000 }
+    { enabled: isOpen && userData.is_sudo, staleTime: 30000 }
   );
 
   useEffect(
@@ -319,13 +342,17 @@ export const UserDialog: FC<UserDialogProps> = () => {
 
   useEffect(() => {
     if (editingUser) {
-      form.reset(formatUser(editingUser));
+      const values = formatUser(editingUser);
+      values.owner_admin = editingUser.admin?.username === userData.username
+        ? ""
+        : editingUser.admin?.username || "";
+      form.reset(values);
 
       fetchUsageWithFilter({
         start: dayjs().utc().subtract(30, "day").format("YYYY-MM-DDTHH:00:00"),
       });
     }
-  }, [editingUser]);
+  }, [editingUser, userData.username]);
 
   const submit = (values: FormType) => {
     setLoading(true);
@@ -340,8 +367,9 @@ export const UserDialog: FC<UserDialogProps> = () => {
       ...rest
     } = values;
 
-    let body: UserCreate = {
+    const body: UserCreate & { concurrent_user_limit: number | null } = {
       ...rest,
+      concurrent_user_limit,
       data_limit: values.data_limit,
       proxies: mergeProxies(selected_proxies, values.proxies),
       data_limit_reset_strategy:
@@ -356,19 +384,29 @@ export const UserDialog: FC<UserDialogProps> = () => {
           : "active",
     };
 
+    const requestedOwner = owner_admin || userData.username;
+    const currentOwner = editingUser?.admin?.username || userData.username;
+    const shouldAssignOwner = userData.is_sudo &&
+      requestedOwner &&
+      requestedOwner !== currentOwner;
+
     const request = methods[method](body).then(async () => {
-      if (!isEditing && owner_admin) {
+      if (shouldAssignOwner) {
         try {
           await fetch(`/user/${encodeURIComponent(values.username)}/set-owner`, {
             method: "PUT",
-            query: { admin_username: owner_admin },
+            query: { admin_username: requestedOwner },
           });
           queryClient.invalidateQueries("admin-management");
-        } catch (assignmentError) {
-          await fetch(`/user/${encodeURIComponent(values.username)}`, {
-            method: "DELETE",
-          }).catch(() => undefined);
+          queryClient.invalidateQueries(["assignable-admins"]);
           useDashboard.getState().refetchUsers();
+        } catch (assignmentError) {
+          if (!isEditing) {
+            await fetch(`/user/${encodeURIComponent(values.username)}`, {
+              method: "DELETE",
+            }).catch(() => undefined);
+            useDashboard.getState().refetchUsers();
+          }
           throw assignmentError;
         }
       }
@@ -446,53 +484,96 @@ export const UserDialog: FC<UserDialogProps> = () => {
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="2xl" scrollBehavior="inside">
-      <ModalOverlay bg="blackAlpha.300" backdropFilter="blur(10px)" />
+    <Modal isOpen={isOpen} onClose={onClose} size="6xl" scrollBehavior="inside">
+      <ModalOverlay bg="rgba(0, 0, 0, .78)" backdropFilter="blur(8px)" />
       <FormProvider {...form}>
-        <ModalContent mx="3">
+        <ModalContent
+          mx="3"
+          maxH="calc(100dvh - 24px)"
+          overflow="hidden"
+          dir={i18n.dir()}
+          w="calc(100vw - 24px)"
+          maxW="1180px"
+          borderRadius={{ base: "12px", md: "18px" }}
+          borderTopWidth="2px"
+          borderTopColor="gold.400"
+          boxShadow="elevated"
+          bg="surface.dark"
+          sx={{
+            "& .chakra-form__label": {
+              lineHeight: "1.9",
+              marginBottom: "6px",
+            },
+          }}
+        >
           <form onSubmit={form.handleSubmit(submit)} style={{ display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
-            <ModalHeader pt={6}>
-              <HStack gap={2}>
-                <Icon color="primary">
+            <ModalHeader
+              px={{ base: 4, md: 6 }}
+              py={{ base: 4, md: 5 }}
+              pe={{ base: 12, md: 14 }}
+              lineHeight="1.7"
+              borderBottomWidth="1px"
+              borderColor="#33483b"
+              bgGradient="linear(to-r, rgba(202,165,61,.08), transparent 48%)"
+            >
+              <HStack gap={3} align="start">
+                <Icon color="gold">
                   {isEditing ? (
                     <EditUserIcon color="white" />
                   ) : (
                     <AddUserIcon color="white" />
                   )}
                 </Icon>
-                <Text fontWeight="semibold" fontSize="lg">
-                  {isEditing
-                    ? t("userDialog.editUserTitle")
-                    : t("createNewUser")}
-                </Text>
+                <Box minW={0} flex="1">
+                  <HStack spacing={2} flexWrap="wrap">
+                    <Text fontWeight="800" fontSize={{ base: "md", sm: "xl" }} lineHeight="1.7">
+                      {isEditing
+                        ? t("userDialog.editUserTitle")
+                        : t("createNewUser")}
+                    </Text>
+                    <Badge colorScheme="gold" variant="subtle" borderRadius="full" px={2.5} textTransform="none">
+                      {isEditing ? t("edit") : t("createUser")}
+                    </Badge>
+                  </HStack>
+                  <Text mt={1} color="gray.400" fontSize="sm" fontWeight="400" lineHeight="1.8">
+                    {isEditing ? t("userDialog.editSubtitle") : t("userDialog.createSubtitle")}
+                  </Text>
+                </Box>
               </HStack>
             </ModalHeader>
             <ModalCloseButton mt={3} isDisabled={disabled} />
-            <ModalBody overflowY="auto">
+            <ModalBody overflowY="auto" overflowX="hidden" px={{ base: 3, sm: 4, md: 6 }} py={{ base: 4, md: 5 }}>
               <Grid
                 templateColumns={{
                   base: "repeat(1, 1fr)",
-                  md: "repeat(2, 1fr)",
+                  xl: "minmax(0, 1.18fr) minmax(340px, .82fr)",
                 }}
-                gap={3}
+                gap={{ base: 4, md: 5 }}
+                alignItems="start"
               >
-                <GridItem>
-                  <VStack justifyContent="space-between">
+                <GridItem minW={0} p={{ base: 4, md: 5 }} bg="#0d1812" borderWidth="1px" borderColor="#33483b" borderRadius="14px" boxShadow="0 10px 28px rgba(0,0,0,.16)">
+                  <VStack justifyContent="space-between" align="stretch" w="full" spacing={5}>
+                    <SectionHeader
+                      title={t("userDialog.identitySection")}
+                      description={t("userDialog.identitySectionHelp")}
+                    />
+                    <Divider borderColor="#33483b" />
                     <Flex
                       flexDirection="column"
                       gridAutoRows="min-content"
                       w="full"
                     >
-                      <Flex flexDirection="row" w="full" gap={2}>
-                        <FormControl mb={"10px"}>
+                      <Stack direction={{ base: "column", md: "row" }} align="start" w="full" gap={4}>
+                        <FormControl mb={3} flex="1" minW={0}>
                           <FormLabel>
                             <Flex gap={2} alignItems={"center"}>
                               {t("username")}
                               {!isEditing && (
                                 <IconButton
-                                  size="xs"
+                                  minW="36px"
+                                  h="36px"
                                   variant="ghost"
-                                  aria-label="Generate username"
+                                  aria-label={t("userDialog.generateUsername")}
                                   icon={<ReloadIcon className={classNames({ "animate-spin": randomUsernameLoading })} />}
                                   onClick={() => {
                                     const randomUsername =
@@ -506,83 +587,63 @@ export const UserDialog: FC<UserDialogProps> = () => {
                               )}
                             </Flex>
                           </FormLabel>
-                          <HStack>
-                            <Input
-                              size="sm"
-                              type="text"
-                              borderRadius="6px"
-                              error={form.formState.errors.username?.message}
-                              disabled={disabled || isEditing}
-                              {...form.register("username")}
-                            />
-                            {isEditing && (
-                              <HStack px={1}>
-                                <Controller
-                                  name="status"
-                                  control={form.control}
-                                  render={({ field }) => {
-                                    return (
-                                      <Tooltip
-                                        placement="top"
-                                        label={"status: " + t(`status.${field.value}`)}
-                                        textTransform="capitalize"
-                                      >
-                                        <Box>
-                                          <Switch
-                                            colorScheme="primary"
-                                            isChecked={field.value === "active"}
-                                            onChange={(e) => {
-                                              if (e.target.checked) {
-                                                field.onChange("active");
-                                              } else {
-                                                field.onChange("disabled");
-                                              }
-                                            }}
-                                          />
-                                        </Box>
-                                      </Tooltip>
-                                    );
-                                  }}
-                                />
-                              </HStack>
-                            )}
-                          </HStack>
+                          <Input
+                            size="sm"
+                            type="text"
+                            dir="ltr"
+                            borderRadius="8px"
+                            error={form.formState.errors.username?.message}
+                            disabled={disabled || isEditing}
+                            {...form.register("username")}
+                          />
                         </FormControl>
-                        {!isEditing && (
-                          <FormControl flex="1">
-                            <FormLabel whiteSpace={"nowrap"}>
-                              {t("userDialog.onHold")}
-                            </FormLabel>
-                            <Controller
-                              name="status"
-                              control={form.control}
-                              render={({ field }) => {
-                                const status = field.value;
-                                return (
-                                  <>
-                                    {status ? (
-                                      <Switch
-                                        colorScheme="primary"
-                                        isChecked={status === "on_hold"}
-                                        onChange={(e) => {
-                                          if (e.target.checked) {
-                                            field.onChange("on_hold");
-                                          } else {
-                                            field.onChange("active");
-                                          }
-                                        }}
-                                      />
-                                    ) : (
-                                      ""
-                                    )}
-                                  </>
-                                );
-                              }}
-                            />
-                          </FormControl>
-                        )}
-                      </Flex>
-                      {!isEditing && userData.is_sudo && (
+                        <FormControl flex={{ base: "1", md: "0 0 210px" }} w={{ base: "full", md: "auto" }}>
+                          <FormLabel whiteSpace="normal" lineHeight="1.7">
+                            {isEditing ? t("usersTable.status") : t("userDialog.onHold")}
+                          </FormLabel>
+                          <Controller
+                            name="status"
+                            control={form.control}
+                            render={({ field }) => {
+                              const checked = isEditing
+                                ? field.value === "active"
+                                : field.value === "on_hold";
+                              const statusLabel = isEditing
+                                ? t(`status.${field.value}`)
+                                : checked
+                                  ? t("userDialog.onHold")
+                                  : t("status.active");
+                              return (
+                                <HStack
+                                  minH="44px"
+                                  px={3}
+                                  justify="space-between"
+                                  borderWidth="1px"
+                                  borderColor="gray.600"
+                                  borderRadius="8px"
+                                  bg="whiteAlpha.50"
+                                >
+                                  <Text fontSize="sm" color="gray.300" noOfLines={1}>{statusLabel}</Text>
+                                  <Switch
+                                    aria-label={isEditing ? t("usersTable.status") : t("userDialog.onHold")}
+                                    colorScheme="primary"
+                                    isChecked={checked}
+                                    isDisabled={disabled}
+                                    onChange={(event) => {
+                                      if (isEditing) {
+                                        field.onChange(event.target.checked ? "active" : "disabled");
+                                      } else {
+                                        field.onChange(event.target.checked ? "on_hold" : "active");
+                                      }
+                                    }}
+                                  />
+                                </HStack>
+                              );
+                            }}
+                          />
+                        </FormControl>
+                      </Stack>
+                      {userData.is_sudo && (
                         <FormControl mb="10px">
                           <FormLabel>{t("userDialog.ownerAdmin")}</FormLabel>
                           <Select
@@ -591,7 +652,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                             {...form.register("owner_admin")}
                           >
                             <option value="">{t("userDialog.currentSudoOwner")}</option>
-                            {adminsQuery.data?.map((admin) => {
+                            {adminsQuery.data?.filter((admin) => !admin.is_sudo).map((admin) => {
                               const isFull = admin.policy.max_users !== null &&
                                 admin.user_count >= admin.policy.max_users;
                               return (
@@ -611,6 +672,11 @@ export const UserDialog: FC<UserDialogProps> = () => {
                           </FormHelperText>
                         </FormControl>
                       )}
+                      <Divider my={2} borderColor="#33483b" />
+                      <SectionHeader
+                        title={t("userDialog.limitsSection")}
+                        description={t("userDialog.limitsSectionHelp")}
+                      />
                       <FormControl mb={"10px"}>
                         <FormLabel>{t("userDialog.dataLimit")}</FormLabel>
                         <Controller
@@ -621,6 +687,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                               <Input
                                 endAdornment="GB"
                                 type="number"
+                                dir="ltr"
                                 size="sm"
                                 borderRadius="6px"
                                 onChange={field.onChange}
@@ -634,7 +701,6 @@ export const UserDialog: FC<UserDialogProps> = () => {
                           }}
                         />
                       </FormControl>
-                      {!isEditing && (
                         <FormControl mb="10px" isInvalid={!!form.formState.errors.concurrent_user_limit}>
                           <FormLabel>{t("userDialog.concurrentUserLimit")}</FormLabel>
                           <Controller
@@ -643,6 +709,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                             render={({ field }) => (
                               <Input
                                 type="number"
+                                dir="ltr"
                                 min={1}
                                 step={1}
                                 size="sm"
@@ -656,13 +723,12 @@ export const UserDialog: FC<UserDialogProps> = () => {
                           />
                           <FormHelperText>{t("userDialog.concurrentUserLimitHelp")}</FormHelperText>
                         </FormControl>
-                      )}
                       <Collapse
                         in={!!(dataLimit && dataLimit > 0)}
                         animateOpacity
                         style={{ width: "100%" }}
                       >
-                        <FormControl height="66px">
+                        <FormControl pb={3}>
                           <FormLabel>
                             {t("userDialog.periodicUsageReset")}
                           </FormLabel>
@@ -675,13 +741,14 @@ export const UserDialog: FC<UserDialogProps> = () => {
                                   size="sm"
                                   {...field}
                                   disabled={disabled}
-                                  bg={disabled ? "gray.100" : "transparent"}
+                                  bg={disabled ? "gray.700" : "whiteAlpha.50"}
                                   _dark={{
-                                    bg: disabled ? "gray.600" : "transparent",
+                                    bg: disabled ? "gray.700" : "whiteAlpha.50",
                                   }}
                                   sx={{
                                     option: {
-                                      backgroundColor: colorMode === "dark" ? "#222C3B" : "white"
+                                      backgroundColor: "#111d17",
+                                      color: "#f1f5f2",
                                     }
                                   }}
                                 >
@@ -717,6 +784,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                                 <Input
                                   endAdornment="Days"
                                   type="number"
+                                  dir="ltr"
                                   size="sm"
                                   borderRadius="6px"
                                   onChange={(on_hold) => {
@@ -816,7 +884,14 @@ export const UserDialog: FC<UserDialogProps> = () => {
                         isInvalid={!!form.formState.errors.note}
                       >
                         <FormLabel>{t("userDialog.note")}</FormLabel>
-                        <Textarea {...form.register("note")} />
+                        <Textarea
+                          minH="104px"
+                          resize="vertical"
+                          bg="whiteAlpha.50"
+                          borderColor="gray.600"
+                          lineHeight="1.8"
+                          {...form.register("note")}
+                        />
                         <FormErrorMessage>
                           {form.formState.errors?.note?.message}
                         </FormErrorMessage>
@@ -833,13 +908,18 @@ export const UserDialog: FC<UserDialogProps> = () => {
                     )}
                   </VStack>
                 </GridItem>
-                <GridItem>
-                  <FormControl
-                    isInvalid={
-                      !!form.formState.errors.selected_proxies?.message
-                    }
-                  >
-                    <FormLabel>{t("userDialog.protocols")}</FormLabel>
+                <GridItem minW={0} p={{ base: 4, md: 5 }} bg="#0d1812" borderWidth="1px" borderColor="#33483b" borderRadius="14px" boxShadow="0 10px 28px rgba(0,0,0,.16)">
+                  <Stack spacing={4} minW={0}>
+                    <SectionHeader
+                      title={t("userDialog.protocols")}
+                      description={t("userDialog.protocolsSectionHelp")}
+                    />
+                    <Divider borderColor="#33483b" />
+                    <FormControl
+                      isInvalid={
+                        !!form.formState.errors.selected_proxies?.message
+                      }
+                    >
                     <Controller
                       control={form.control}
                       name="selected_proxies"
@@ -870,16 +950,17 @@ export const UserDialog: FC<UserDialogProps> = () => {
                         );
                       }}
                     />
-                    <FormErrorMessage>
-                      {t(
-                        form.formState.errors.selected_proxies
-                          ?.message as string
-                      )}
-                    </FormErrorMessage>
-                  </FormControl>
+                      <FormErrorMessage>
+                        {t(
+                          form.formState.errors.selected_proxies
+                            ?.message as string
+                        )}
+                      </FormErrorMessage>
+                    </FormControl>
+                  </Stack>
                 </GridItem>
                 {isEditing && usageVisible && (
-                  <GridItem pt={6} colSpan={{ base: 1, md: 2 }}>
+                  <GridItem pt={2} colSpan={{ base: 1, xl: 2 }} minW={0}>
                     <VStack gap={4}>
                       <UsageFilter
                         defaultValue={usageFilter}
@@ -913,15 +994,13 @@ export const UserDialog: FC<UserDialogProps> = () => {
                 </Alert>
               )}
             </ModalBody>
-            <ModalFooter mt="3">
-              <HStack
-                justifyContent="space-between"
+            <ModalFooter mt={0} px={{ base: 3, sm: 4, md: 6 }} py={4} borderTopWidth="1px" borderColor="#33483b" bg="#0b1710">
+              <Stack
+                justify="space-between"
+                align={{ base: "stretch", md: "center" }}
                 w="full"
-                gap={3}
-                flexDirection={{
-                  base: "column",
-                  sm: "row",
-                }}
+                spacing={4}
+                direction={{ base: "column", md: "row" }}
               >
                 <HStack
                   justifyContent="flex-start"
@@ -936,7 +1015,8 @@ export const UserDialog: FC<UserDialogProps> = () => {
                       <Tooltip label={t("delete")} placement="top">
                         <IconButton
                           aria-label={t("delete")}
-                          size="sm"
+                          minW="44px"
+                          h="44px"
                           colorScheme="red"
                           variant="ghost"
                           onClick={() => {
@@ -950,29 +1030,42 @@ export const UserDialog: FC<UserDialogProps> = () => {
                       <Tooltip label={t("userDialog.usage")} placement="top">
                         <IconButton
                           aria-label={t("userDialog.usage")}
-                          size="sm"
+                          minW="44px"
+                          h="44px"
                           onClick={handleUsageToggle}
                         >
                           <UserUsageIcon />
                         </IconButton>
                       </Tooltip>
-                      <Button onClick={handleResetUsage} size="sm">
+                      <Button onClick={handleResetUsage} size="sm" whiteSpace="normal" minH="44px" variant="outline" borderColor="#475f50">
                         {t("userDialog.resetUsage")}
                       </Button>
-                      <Button onClick={handleRevokeSubscription} size="sm">
+                      <Button onClick={handleRevokeSubscription} size="sm" whiteSpace="normal" minH="44px" variant="outline" borderColor="#475f50">
                         {t("userDialog.revokeSubscription")}
                       </Button>
                     </>
                   )}
                 </HStack>
-                <HStack
+                <Stack
+                  direction={{ base: "column-reverse", sm: "row" }}
                   w="full"
                   maxW={{ md: "50%", base: "full" }}
+                  spacing={2}
                   justify="end"
                 >
                   <Button
+                    type="button"
+                    variant="ghost"
+                    minH="44px"
+                    onClick={onClose}
+                    isDisabled={disabled}
+                    w={{ base: "full", sm: "auto" }}
+                  >
+                    {t("cancel")}
+                  </Button>
+                  <Button
                     type="submit"
-                    size="sm"
+                    size="md"
                     px="8"
                     colorScheme="primary"
                     isLoading={loading}
@@ -981,8 +1074,8 @@ export const UserDialog: FC<UserDialogProps> = () => {
                   >
                     {isEditing ? t("userDialog.editUser") : t("createUser")}
                   </Button>
-                </HStack>
-              </HStack>
+                </Stack>
+              </Stack>
             </ModalFooter>
           </form>
         </ModalContent>

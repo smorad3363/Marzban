@@ -106,6 +106,8 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
             onClick,
             disabled,
             flexGrow: 1,
+            minW: 0,
+            w: "full",
             size,
           }
         : {};
@@ -115,6 +117,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
         <InputGroup
           size={size}
           w="full"
+          minW={0}
           rounded="md"
           _focusWithin={{
             outline: "2px solid",
@@ -139,11 +142,12 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
               onClick={onClick}
               disabled={disabled}
               flexGrow={1}
+              minW={0}
+              w="full"
               _focusVisible={{
                 outline: "none",
-                borderTopColor: "transparent",
-                borderInlineEndColor: "transparent",
-                borderBottomColor: "transparent",
+                borderColor: "primary.300",
+                boxShadow: "none",
               }}
               _disabled={{
                 cursor: "not-allowed",
@@ -166,6 +170,10 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
               borderStartRadius={0}
               borderEndRadius="6px"
               bg="transparent"
+              flexShrink={0}
+              whiteSpace="nowrap"
+              fontFamily="mono"
+              dir="ltr"
             >
               {endAdornment}
             </InputRightAddon>
