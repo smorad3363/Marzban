@@ -1,7 +1,14 @@
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Union
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+)
 from sqlalchemy.exc import IntegrityError
 
 from app import logger, xray
@@ -9,6 +16,9 @@ from app.db import Session, crud, get_db
 from app.dependencies import get_expired_users_list, get_validated_user, validate_dates
 from app.models.admin import Admin
 from app.models.user import (
+    BulkUserActionRequest,
+    BulkUserActionResponse,
+    BulkUserOperation,
     UserCreate,
     UserModify,
     UserResponse,
@@ -17,13 +27,21 @@ from app.models.user import (
     UsersUsagesResponse,
     UserUsagesResponse,
 )
-from app.utils import report, responses
+from app.utils import marzhelp_policy, report, responses
+from app.utils.audit import (
+    AuditLogService,
+    changed_fields,
+    classify_user_change,
+    summarize_targets,
+    user_audit_state,
+)
 
 router = APIRouter(tags=["User"], prefix="/api", responses={401: responses._401})
 
 
 @router.post("/user", response_model=UserResponse, responses={400: responses._400, 409: responses._409})
 def add_user(
+    request: Request,
     new_user: UserCreate,
     bg: BackgroundTasks,
     db: Session = Depends(get_db),
@@ -65,6 +83,17 @@ def add_user(
     bg.add_task(xray.operations.add_user, dbuser=dbuser)
     user = UserResponse.model_validate(dbuser)
     report.user_created(user=user, user_id=dbuser.id, by=admin, user_admin=dbuser.admin)
+    AuditLogService.log(
+        db,
+        admin,
+        "user.create",
+        "user",
+        f'Admin {admin.username} created user {dbuser.username}',
+        target_id=dbuser.id,
+        target_name=dbuser.username,
+        new_value=user_audit_state(dbuser),
+        request=request,
+    )
     logger.info(f'New user "{dbuser.username}" added')
     return user
 
@@ -77,6 +106,7 @@ def get_user(dbuser: UserResponse = Depends(get_validated_user)):
 
 @router.put("/user/{username}", response_model=UserResponse, responses={400: responses._400, 403: responses._403, 404: responses._404})
 def modify_user(
+    request: Request,
     modified_user: UserModify,
     bg: BackgroundTasks,
     db: Session = Depends(get_db),
@@ -108,9 +138,12 @@ def modify_user(
                 detail=f"Protocol {proxy_type} is disabled on your server",
             )
 
+    previous_value = user_audit_state(dbuser)
     old_status = dbuser.status
     dbuser = crud.update_user(db, dbuser, modified_user)
     user = UserResponse.model_validate(dbuser)
+    new_value = user_audit_state(dbuser)
+    audit_action = classify_user_change(previous_value, new_value)
 
     if user.status in [UserStatus.active, UserStatus.on_hold]:
         bg.add_task(xray.operations.update_user, dbuser=dbuser)
@@ -120,6 +153,24 @@ def modify_user(
     bg.add_task(report.user_updated, user=user, user_admin=dbuser.admin, by=admin)
 
     logger.info(f'User "{user.username}" modified')
+    AuditLogService.log(
+        db,
+        admin,
+        audit_action,
+        "user",
+        f'Admin {admin.username} modified user {user.username}',
+        target_id=dbuser.id,
+        target_name=user.username,
+        previous_value=previous_value,
+        new_value=new_value,
+        details={
+            "changed_fields": changed_fields(
+                previous_value,
+                new_value,
+            )
+        },
+        request=request,
+    )
 
     if user.status != old_status:
         bg.add_task(
@@ -139,17 +190,32 @@ def modify_user(
 
 @router.delete("/user/{username}", responses={403: responses._403, 404: responses._404})
 def remove_user(
+    request: Request,
     bg: BackgroundTasks,
     db: Session = Depends(get_db),
     dbuser: UserResponse = Depends(get_validated_user),
     admin: Admin = Depends(Admin.get_current),
 ):
     """Remove a user"""
+    previous_value = user_audit_state(dbuser)
+    user_id = dbuser.id
+    username = dbuser.username
     crud.remove_user(db, dbuser)
     bg.add_task(xray.operations.remove_user, dbuser=dbuser)
 
     bg.add_task(
         report.user_deleted, username=dbuser.username, user_admin=Admin.model_validate(dbuser.admin), by=admin
+    )
+    AuditLogService.log(
+        db,
+        admin,
+        "user.delete",
+        "user",
+        f'Admin {admin.username} deleted user {username}',
+        target_id=user_id,
+        target_name=username,
+        previous_value=previous_value,
+        request=request,
     )
 
     logger.info(f'User "{dbuser.username}" deleted')
@@ -158,12 +224,14 @@ def remove_user(
 
 @router.post("/user/{username}/reset", response_model=UserResponse, responses={403: responses._403, 404: responses._404})
 def reset_user_data_usage(
+    request: Request,
     bg: BackgroundTasks,
     db: Session = Depends(get_db),
     dbuser: UserResponse = Depends(get_validated_user),
     admin: Admin = Depends(Admin.get_current),
 ):
     """Reset user data usage"""
+    previous_value = user_audit_state(dbuser)
     dbuser = crud.reset_user_data_usage(db=db, dbuser=dbuser)
     if dbuser.status in [UserStatus.active, UserStatus.on_hold]:
         bg.add_task(xray.operations.add_user, dbuser=dbuser)
@@ -172,6 +240,18 @@ def reset_user_data_usage(
     bg.add_task(
         report.user_data_usage_reset, user=user, user_admin=dbuser.admin, by=admin
     )
+    AuditLogService.log(
+        db,
+        admin,
+        "user.traffic_reset",
+        "user",
+        f'Admin {admin.username} reset traffic for user {dbuser.username}',
+        target_id=dbuser.id,
+        target_name=dbuser.username,
+        previous_value=previous_value,
+        new_value=user_audit_state(dbuser),
+        request=request,
+    )
 
     logger.info(f'User "{dbuser.username}"\'s usage was reset')
     return dbuser
@@ -179,6 +259,7 @@ def reset_user_data_usage(
 
 @router.post("/user/{username}/revoke_sub", response_model=UserResponse, responses={403: responses._403, 404: responses._404})
 def revoke_user_subscription(
+    request: Request,
     bg: BackgroundTasks,
     db: Session = Depends(get_db),
     dbuser: UserResponse = Depends(get_validated_user),
@@ -192,6 +273,16 @@ def revoke_user_subscription(
     user = UserResponse.model_validate(dbuser)
     bg.add_task(
         report.user_subscription_revoked, user=user, user_admin=dbuser.admin, by=admin
+    )
+    AuditLogService.log(
+        db,
+        admin,
+        "user.subscription_revoke",
+        "user",
+        f'Admin {admin.username} revoked the subscription for user {dbuser.username}',
+        target_id=dbuser.id,
+        target_name=dbuser.username,
+        request=request,
     )
 
     logger.info(f'User "{dbuser.username}" subscription revoked')
@@ -238,18 +329,196 @@ def get_users(
     return {"users": users, "total": count}
 
 
+@router.post(
+    "/users/bulk",
+    response_model=BulkUserActionResponse,
+    responses={
+        400: responses._400,
+        403: responses._403,
+        404: responses._404,
+    },
+)
+def bulk_user_action(
+    request: Request,
+    payload: BulkUserActionRequest,
+    bg: BackgroundTasks,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
+    """Apply one validated operation to a selected set of users."""
+
+    usernames = list(dict.fromkeys(payload.usernames))
+    dbusers = crud.get_users(db=db, usernames=usernames)
+    users_by_username = {user.username: user for user in dbusers}
+    missing = [username for username in usernames if username not in users_by_username]
+    if missing:
+        raise HTTPException(status_code=404, detail={"missing_users": missing})
+
+    if not admin.is_sudo:
+        forbidden = [
+            user.username
+            for user in dbusers
+            if user.admin is None or user.admin.username != admin.username
+        ]
+        if forbidden:
+            raise HTTPException(status_code=403, detail={"forbidden_users": forbidden})
+
+    ordered_users = [users_by_username[username] for username in usernames]
+
+    if payload.operation == BulkUserOperation.delete:
+        crud.remove_users(db, ordered_users)
+        for dbuser in ordered_users:
+            bg.add_task(xray.operations.remove_user, dbuser=dbuser)
+            bg.add_task(
+                report.user_deleted,
+                username=dbuser.username,
+                user_admin=dbuser.admin,
+                by=admin,
+            )
+            logger.info(f'User "{dbuser.username}" deleted by bulk action')
+        AuditLogService.log(
+            db,
+            admin,
+            "bulk.delete",
+            "user",
+            f"Admin {admin.username} deleted {len(usernames)} users in a bulk action",
+            details={
+                "operation": payload.operation,
+                **summarize_targets(usernames),
+            },
+            request=request,
+        )
+        return BulkUserActionResponse(operation=payload.operation, updated=usernames)
+
+    updated = []
+    skipped = []
+    updated_users = []
+
+    try:
+        for dbuser in ordered_users:
+            changes = {}
+
+            if payload.operation == BulkUserOperation.activate:
+                marzhelp_policy.validate_activation(db, dbuser)
+                changes["status"] = UserStatus.active
+            elif payload.operation == BulkUserOperation.deactivate:
+                changes["status"] = UserStatus.disabled
+            elif payload.operation in (
+                BulkUserOperation.add_data,
+                BulkUserOperation.subtract_data,
+            ):
+                if dbuser.data_limit is None:
+                    skipped.append(dbuser.username)
+                    continue
+                delta = payload.amount or 0
+                changes["data_limit"] = (
+                    dbuser.data_limit + delta
+                    if payload.operation == BulkUserOperation.add_data
+                    else max(1, dbuser.data_limit - delta)
+                )
+            elif payload.operation in (
+                BulkUserOperation.add_days,
+                BulkUserOperation.subtract_days,
+            ):
+                if dbuser.expire is None:
+                    skipped.append(dbuser.username)
+                    continue
+                delta = (payload.amount or 0) * 86400
+                changes["expire"] = (
+                    int(dbuser.expire) + delta
+                    if payload.operation == BulkUserOperation.add_days
+                    else max(1, int(dbuser.expire) - delta)
+                )
+
+            next_plan = None
+            if dbuser.next_plan is not None:
+                next_plan = {
+                    "data_limit": dbuser.next_plan.data_limit,
+                    "expire": dbuser.next_plan.expire,
+                    "add_remaining_traffic": dbuser.next_plan.add_remaining_traffic,
+                    "fire_on_either": dbuser.next_plan.fire_on_either,
+                }
+
+            old_status = dbuser.status
+            modified_user = UserModify(next_plan=next_plan, **changes)
+            dbuser = crud.update_user(db, dbuser, modified_user, commit=False)
+            updated.append(dbuser.username)
+            updated_users.append((dbuser, old_status))
+
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    for dbuser, old_status in updated_users:
+        db.refresh(dbuser)
+        user = UserResponse.model_validate(dbuser)
+        if user.status in [UserStatus.active, UserStatus.on_hold]:
+            bg.add_task(xray.operations.update_user, dbuser=dbuser)
+        else:
+            bg.add_task(xray.operations.remove_user, dbuser=dbuser)
+        bg.add_task(report.user_updated, user=user, user_admin=dbuser.admin, by=admin)
+        if user.status != old_status:
+            bg.add_task(
+                report.status_change,
+                username=user.username,
+                status=user.status,
+                user=user,
+                user_admin=dbuser.admin,
+                by=admin,
+            )
+
+    AuditLogService.log(
+        db,
+        admin,
+        f"bulk.{payload.operation.value}",
+        "user",
+        (
+            f"Admin {admin.username} applied {payload.operation.value} "
+            f"to {len(updated)} users"
+        ),
+        details={
+            "operation": payload.operation,
+            "amount": payload.amount,
+            "updated": summarize_targets(updated),
+            "skipped": summarize_targets(skipped),
+        },
+        request=request,
+    )
+    return BulkUserActionResponse(
+        operation=payload.operation,
+        updated=updated,
+        skipped=skipped,
+    )
+
+
 @router.post("/users/reset", responses={403: responses._403, 404: responses._404})
 def reset_users_data_usage(
-    db: Session = Depends(get_db), admin: Admin = Depends(Admin.check_sudo_admin)
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.check_sudo_admin),
 ):
     """Reset all users data usage"""
     dbadmin = crud.get_admin(db, admin.username)
+    usernames = [
+        user.username
+        for user in crud.get_users(db=db, admin=dbadmin)
+    ]
     crud.reset_all_users_data_usage(db=db, admin=dbadmin)
     startup_config = xray.config.include_db_users()
     xray.core.restart(startup_config)
     for node_id, node in list(xray.nodes.items()):
         if node.connected:
             xray.operations.restart_node(node_id, startup_config)
+    AuditLogService.log(
+        db,
+        admin,
+        "bulk.traffic_reset",
+        "user",
+        f"Admin {admin.username} reset traffic for {len(usernames)} users",
+        details=summarize_targets(usernames),
+        request=request,
+    )
     return {"detail": "Users successfully reset."}
 
 
@@ -270,11 +539,14 @@ def get_user_usage(
 
 @router.post("/user/{username}/active-next", response_model=UserResponse, responses={403: responses._403, 404: responses._404})
 def active_next_plan(
+    request: Request,
     bg: BackgroundTasks,
     db: Session = Depends(get_db),
     dbuser: UserResponse = Depends(get_validated_user),
+    admin: Admin = Depends(Admin.get_current),
 ):
     """Reset user by next plan"""
+    previous_value = user_audit_state(dbuser)
     dbuser = crud.reset_user_by_next(db=db, dbuser=dbuser)
 
     if (dbuser is None or dbuser.next_plan is None):
@@ -289,6 +561,18 @@ def active_next_plan(
     user = UserResponse.model_validate(dbuser)
     bg.add_task(
         report.user_data_reset_by_next, user=user, user_admin=dbuser.admin,
+    )
+    AuditLogService.log(
+        db,
+        admin,
+        "user.next_plan_activate",
+        "user",
+        f'Admin {admin.username} activated the next plan for user {dbuser.username}',
+        target_id=dbuser.id,
+        target_name=dbuser.username,
+        previous_value=previous_value,
+        new_value=user_audit_state(dbuser),
+        request=request,
     )
 
     logger.info(f'User "{dbuser.username}"\'s usage was reset by next plan')
@@ -315,6 +599,7 @@ def get_users_usage(
 
 @router.put("/user/{username}/set-owner", response_model=UserResponse)
 def set_owner(
+    request: Request,
     admin_username: str,
     dbuser: UserResponse = Depends(get_validated_user),
     db: Session = Depends(get_db),
@@ -325,8 +610,26 @@ def set_owner(
     if not new_admin:
         raise HTTPException(status_code=404, detail="Admin not found")
 
+    previous_owner = (
+        dbuser.admin.username if dbuser.admin is not None else None
+    )
     dbuser = crud.set_owner(db, dbuser, new_admin)
     user = UserResponse.model_validate(dbuser)
+    AuditLogService.log(
+        db,
+        admin,
+        "user.owner_change",
+        "user",
+        (
+            f"Admin {admin.username} changed owner of user "
+            f"{user.username} to {new_admin.username}"
+        ),
+        target_id=dbuser.id,
+        target_name=user.username,
+        previous_value={"admin": previous_owner},
+        new_value={"admin": new_admin.username},
+        request=request,
+    )
 
     logger.info(f'{user.username}"owner successfully set to{admin.username}')
 
@@ -357,6 +660,7 @@ def get_expired_users(
 
 @router.delete("/users/expired", response_model=List[str])
 def delete_expired_users(
+    request: Request,
     bg: BackgroundTasks,
     expired_after: Optional[datetime] = Query(None, example="2024-01-01T00:00:00"),
     expired_before: Optional[datetime] = Query(None, example="2024-01-31T23:59:59"),
@@ -393,4 +697,20 @@ def delete_expired_users(
             by=admin,
         )
 
+    AuditLogService.log(
+        db,
+        admin,
+        "bulk.delete_expired",
+        "user",
+        (
+            f"Admin {admin.username} deleted {len(removed_users)} "
+            "expired users"
+        ),
+        details={
+            **summarize_targets(removed_users),
+            "expired_after": expired_after,
+            "expired_before": expired_before,
+        },
+        request=request,
+    )
     return removed_users

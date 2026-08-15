@@ -20,7 +20,15 @@ from app.models.admin import (
     MarzhelpAdminPolicy,
     Token,
 )
+from app.models.user import UserStatus
 from app.utils import report, responses
+from app.utils.audit import (
+    AuditLogService,
+    AuditStatus,
+    admin_audit_state,
+    get_client_ip,
+    summarize_targets,
+)
 from app.utils.jwt import create_admin_token
 from config import LOGIN_NOTIFY_WHITE_LIST
 
@@ -44,16 +52,6 @@ def managed_admin_response(dbadmin, settings=None, user_count: int = 0) -> Manag
     )
 
 
-def get_client_ip(request: Request) -> str:
-    """Extract the client's IP address from the request headers or client."""
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-    if request.client:
-        return request.client.host
-    return "Unknown"
-
-
 @router.post("/admin/token", response_model=Token)
 def admin_token(
     request: Request,
@@ -61,11 +59,21 @@ def admin_token(
     db: Session = Depends(get_db),
 ):
     """Authenticate an admin and issue a token."""
-    client_ip = get_client_ip(request)
+    client_ip = get_client_ip(request) or "Unknown"
 
     dbadmin = validate_admin(db, form_data.username, form_data.password)
     if not dbadmin:
         report.login(form_data.username, form_data.password, client_ip, False)
+        AuditLogService.log(
+            db,
+            form_data.username,
+            "auth.login",
+            "admin",
+            f"Failed login attempt for admin {form_data.username}",
+            target_name=form_data.username,
+            request=request,
+            status=AuditStatus.failed,
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
@@ -75,7 +83,36 @@ def admin_token(
     if client_ip not in LOGIN_NOTIFY_WHITE_LIST:
         report.login(form_data.username, "🔒", client_ip, True)
 
+    AuditLogService.log(
+        db,
+        dbadmin,
+        "auth.login",
+        "admin",
+        f"Admin {dbadmin.username} logged in",
+        target_id=dbadmin.id,
+        target_name=dbadmin.username,
+        request=request,
+    )
     return Token(access_token=create_admin_token(form_data.username, dbadmin.is_sudo))
+
+
+@router.post("/admin/logout")
+def admin_logout(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
+    """Record a client-side logout before its token is discarded."""
+    AuditLogService.log(
+        db,
+        admin,
+        "auth.logout",
+        "admin",
+        f"Admin {admin.username} logged out",
+        target_name=admin.username,
+        request=request,
+    )
+    return {"detail": "Logout recorded"}
 
 
 @router.post(
@@ -84,6 +121,7 @@ def admin_token(
     responses={403: responses._403, 409: responses._409},
 )
 def create_admin(
+    request: Request,
     new_admin: AdminCreate,
     db: Session = Depends(get_db),
     admin: Admin = Depends(Admin.check_sudo_admin),
@@ -95,6 +133,17 @@ def create_admin(
         db.rollback()
         raise HTTPException(status_code=409, detail="Admin already exists")
 
+    AuditLogService.log(
+        db,
+        admin,
+        "admin.create",
+        "admin",
+        f"Admin {admin.username} created admin {dbadmin.username}",
+        target_id=dbadmin.id,
+        target_name=dbadmin.username,
+        new_value=admin_audit_state(dbadmin),
+        request=request,
+    )
     return dbadmin
 
 
@@ -104,6 +153,7 @@ def create_admin(
     responses={403: responses._403},
 )
 def modify_admin(
+    request: Request,
     modified_admin: AdminModify,
     dbadmin: Admin = Depends(get_admin_by_username),
     db: Session = Depends(get_db),
@@ -116,7 +166,21 @@ def modify_admin(
             detail="You're not allowed to edit another sudoer's account. Use marzban-cli instead.",
         )
 
+    previous_value = admin_audit_state(dbadmin)
     updated_admin = crud.update_admin(db, dbadmin, modified_admin)
+    AuditLogService.log(
+        db,
+        current_admin,
+        "admin.update",
+        "admin",
+        f"Admin {current_admin.username} updated admin {updated_admin.username}",
+        target_id=updated_admin.id,
+        target_name=updated_admin.username,
+        previous_value=previous_value,
+        new_value=admin_audit_state(updated_admin),
+        details={"password_changed": modified_admin.password is not None},
+        request=request,
+    )
 
     return updated_admin
 
@@ -126,6 +190,7 @@ def modify_admin(
     responses={403: responses._403},
 )
 def remove_admin(
+    request: Request,
     dbadmin: Admin = Depends(get_admin_by_username),
     db: Session = Depends(get_db),
     current_admin: Admin = Depends(Admin.check_sudo_admin),
@@ -137,7 +202,21 @@ def remove_admin(
             detail="You're not allowed to delete sudo accounts. Use marzban-cli instead.",
         )
 
+    target_id = dbadmin.id
+    target_name = dbadmin.username
+    previous_value = admin_audit_state(dbadmin)
     crud.remove_admin(db, dbadmin)
+    AuditLogService.log(
+        db,
+        current_admin,
+        "admin.delete",
+        "admin",
+        f"Admin {current_admin.username} deleted admin {target_name}",
+        target_id=target_id,
+        target_name=target_name,
+        previous_value=previous_value,
+        request=request,
+    )
     return {"detail": "Admin removed successfully"}
 
 
@@ -218,6 +297,7 @@ def get_managed_admins(
     responses={403: responses._403, 409: responses._409},
 )
 def create_managed_admin(
+    request: Request,
     new_admin: ManagedAdminCreate,
     db: Session = Depends(get_db),
     admin: Admin = Depends(Admin.check_sudo_admin),
@@ -234,7 +314,19 @@ def create_managed_admin(
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="Admin already exists")
-    return managed_admin_response(dbadmin, settings, 0)
+    response = managed_admin_response(dbadmin, settings, 0)
+    AuditLogService.log(
+        db,
+        admin,
+        "admin.create",
+        "admin",
+        f"Admin {admin.username} created managed admin {dbadmin.username}",
+        target_id=dbadmin.id,
+        target_name=dbadmin.username,
+        new_value=admin_audit_state(dbadmin, response.policy),
+        request=request,
+    )
+    return response
 
 
 @router.put(
@@ -243,6 +335,7 @@ def create_managed_admin(
     responses={403: responses._403, 404: responses._404},
 )
 def modify_managed_admin(
+    request: Request,
     modified_admin: ManagedAdminModify,
     dbadmin: Admin = Depends(get_admin_by_username),
     db: Session = Depends(get_db),
@@ -255,6 +348,13 @@ def modify_managed_admin(
             detail="You're not allowed to edit another sudoer's account. Use marzban-cli instead.",
         )
 
+    current_settings = db.get(MarzhelpAdminSettings, dbadmin.id)
+    previous_value = admin_audit_state(
+        dbadmin,
+        MarzhelpAdminPolicy.model_validate(current_settings)
+        if current_settings is not None
+        else MarzhelpAdminPolicy(),
+    )
     dbadmin = crud.update_admin(db, dbadmin, modified_admin, commit=False)
     settings = crud.upsert_marzhelp_admin_policy(
         db, dbadmin.id, modified_admin.policy, commit=False
@@ -263,36 +363,92 @@ def modify_managed_admin(
     db.refresh(dbadmin)
     db.refresh(settings)
     user_count = db.query(func.count(User.id)).filter(User.admin_id == dbadmin.id).scalar() or 0
-    return managed_admin_response(dbadmin, settings, user_count)
+    response = managed_admin_response(dbadmin, settings, user_count)
+    AuditLogService.log(
+        db,
+        current_admin,
+        "admin.update",
+        "admin",
+        f"Admin {current_admin.username} updated managed admin {dbadmin.username}",
+        target_id=dbadmin.id,
+        target_name=dbadmin.username,
+        previous_value=previous_value,
+        new_value=admin_audit_state(dbadmin, response.policy),
+        details={"password_changed": modified_admin.password is not None},
+        request=request,
+    )
+    return response
 
 
 @router.post("/admin/{username}/users/disable", responses={403: responses._403, 404: responses._404})
 def disable_all_active_users(
+    request: Request,
     dbadmin: Admin = Depends(get_admin_by_username),
     db: Session = Depends(get_db), admin: Admin = Depends(Admin.check_sudo_admin)
 ):
     """Disable all active users under a specific admin"""
+    usernames = [
+        row[0]
+        for row in db.query(User.username)
+        .filter(
+            User.admin_id == dbadmin.id,
+            User.status.in_((UserStatus.active, UserStatus.on_hold)),
+        )
+        .all()
+    ]
     crud.disable_all_active_users(db=db, admin=dbadmin)
     startup_config = xray.config.include_db_users()
     xray.core.restart(startup_config)
     for node_id, node in list(xray.nodes.items()):
         if node.connected:
             xray.operations.restart_node(node_id, startup_config)
+    AuditLogService.log(
+        db,
+        admin,
+        "bulk.deactivate",
+        "admin_users",
+        f"Admin {admin.username} disabled {len(usernames)} users owned by {dbadmin.username}",
+        target_id=dbadmin.id,
+        target_name=dbadmin.username,
+        details=summarize_targets(usernames),
+        request=request,
+    )
     return {"detail": "Users successfully disabled"}
 
 
 @router.post("/admin/{username}/users/activate", responses={403: responses._403, 404: responses._404})
 def activate_all_disabled_users(
+    request: Request,
     dbadmin: Admin = Depends(get_admin_by_username),
     db: Session = Depends(get_db), admin: Admin = Depends(Admin.check_sudo_admin)
 ):
     """Activate all disabled users under a specific admin"""
+    usernames = [
+        row[0]
+        for row in db.query(User.username)
+        .filter(
+            User.admin_id == dbadmin.id,
+            User.status == UserStatus.disabled,
+        )
+        .all()
+    ]
     crud.activate_all_disabled_users(db=db, admin=dbadmin)
     startup_config = xray.config.include_db_users()
     xray.core.restart(startup_config)
     for node_id, node in list(xray.nodes.items()):
         if node.connected:
             xray.operations.restart_node(node_id, startup_config)
+    AuditLogService.log(
+        db,
+        admin,
+        "bulk.activate",
+        "admin_users",
+        f"Admin {admin.username} activated {len(usernames)} users owned by {dbadmin.username}",
+        target_id=dbadmin.id,
+        target_name=dbadmin.username,
+        details=summarize_targets(usernames),
+        request=request,
+    )
     return {"detail": "Users successfully activated"}
 
 
@@ -302,12 +458,27 @@ def activate_all_disabled_users(
     responses={403: responses._403},
 )
 def reset_admin_usage(
+    request: Request,
     dbadmin: Admin = Depends(get_admin_by_username),
     db: Session = Depends(get_db),
     current_admin: Admin = Depends(Admin.check_sudo_admin)
 ):
     """Resets usage of admin."""
-    return crud.reset_admin_usage(db, dbadmin)
+    previous_value = {"users_usage": dbadmin.users_usage}
+    updated_admin = crud.reset_admin_usage(db, dbadmin)
+    AuditLogService.log(
+        db,
+        current_admin,
+        "admin.usage_reset",
+        "admin",
+        f"Admin {current_admin.username} reset usage for admin {dbadmin.username}",
+        target_id=dbadmin.id,
+        target_name=dbadmin.username,
+        previous_value=previous_value,
+        new_value={"users_usage": updated_admin.users_usage},
+        request=request,
+    )
+    return updated_admin
 
 
 @router.get(

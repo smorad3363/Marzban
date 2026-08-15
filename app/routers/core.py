@@ -3,7 +3,7 @@ import json
 import time
 
 import commentjson
-from fastapi import APIRouter, Depends, HTTPException, WebSocket
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
 from starlette.websockets import WebSocketDisconnect
 
 from app import xray
@@ -11,6 +11,7 @@ from app.db import Session, get_db
 from app.models.admin import Admin
 from app.models.core import CoreStats
 from app.utils import responses
+from app.utils.audit import AuditLogService
 from app.xray import XRayConfig
 from config import XRAY_JSON
 
@@ -86,7 +87,11 @@ def get_core_stats(admin: Admin = Depends(Admin.get_current)):
 
 
 @router.post("/core/restart", responses={403: responses._403})
-def restart_core(admin: Admin = Depends(Admin.check_sudo_admin)):
+def restart_core(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.check_sudo_admin),
+):
     """Restart the core and all connected nodes."""
     startup_config = xray.config.include_db_users()
     xray.core.restart(startup_config)
@@ -95,6 +100,15 @@ def restart_core(admin: Admin = Depends(Admin.check_sudo_admin)):
         if node.connected:
             xray.operations.restart_node(node_id, startup_config)
 
+    AuditLogService.log(
+        db,
+        admin,
+        "core.restart",
+        "core",
+        f"Admin {admin.username} restarted the core and connected nodes",
+        details={"connected_nodes": sum(node.connected for node in xray.nodes.values())},
+        request=request,
+    )
     return {}
 
 
@@ -109,7 +123,10 @@ def get_core_config(admin: Admin = Depends(Admin.check_sudo_admin)) -> dict:
 
 @router.put("/core/config", responses={403: responses._403})
 def modify_core_config(
-    payload: dict, admin: Admin = Depends(Admin.check_sudo_admin)
+    request: Request,
+    payload: dict,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.check_sudo_admin),
 ) -> dict:
     """Modify the core configuration and restart the core."""
     try:
@@ -128,5 +145,18 @@ def modify_core_config(
             xray.operations.restart_node(node_id, startup_config)
 
     xray.hosts.update()
+
+    AuditLogService.log(
+        db,
+        admin,
+        "settings.core_update",
+        "core_config",
+        f"Admin {admin.username} updated the core configuration",
+        details={
+            "top_level_sections": sorted(str(key) for key in payload.keys()),
+            "configuration_values_stored": False,
+        },
+        request=request,
+    )
 
     return payload

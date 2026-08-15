@@ -1,9 +1,7 @@
-name: Build
+name: Release
 
 on:
   push:
-    branches:
-      - master
     tags:
       - "v*"
   workflow_dispatch:
@@ -18,22 +16,28 @@ on:
         default: latest
 
 permissions:
-  contents: read
+  contents: write
   packages: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build-docker-image:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ inputs.git_ref || github.ref }}
 
       - name: Setup nodejs
-        uses: actions/setup-node@v1
+        uses: actions/setup-node@v4
         with:
-          node-version: 16.17.0
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/dashboard/package-lock.json
 
       - name: Install dependencies
         working-directory: ./app/dashboard
@@ -48,24 +52,53 @@ jobs:
         run: cp ./build/index.html ./build/404.html
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        uses: docker/setup-buildx-action@v3
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push
-        uses: docker/build-push-action@v3
+      - name: Generate immutable image tags
+        id: image-tags
+        shell: bash
+        env:
+          IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/marzban
+          REQUESTED_TAG: ${{ inputs.image_tag }}
+        run: |
+          short_sha="${GITHUB_SHA::12}"
+          tags="${IMAGE_NAME}:sha-${short_sha}"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            tags="${tags}"$'\n'"${IMAGE_NAME}:${GITHUB_REF_NAME}"$'\n'"${IMAGE_NAME}:latest"
+          elif [[ -n "${REQUESTED_TAG}" ]]; then
+            tags="${tags}"$'\n'"${IMAGE_NAME}:${REQUESTED_TAG}"
+          fi
+          {
+            echo "tags<<EOF"
+            echo "${tags}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Build and push versioned image
+        uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/marzban:latest
-            ghcr.io/${{ github.repository_owner }}/marzban:${{ inputs.image_tag || github.ref_name }}
+          tags: ${{ steps.image-tags.outputs.tags }}
+
+      - name: Create immutable GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || \
+            gh release create "${GITHUB_REF_NAME}" \
+              --title "Marzban ${GITHUB_REF_NAME}" \
+              --generate-notes \
+              --verify-tag

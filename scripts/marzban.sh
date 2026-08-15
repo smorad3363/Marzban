@@ -1476,6 +1476,42 @@ up_command() {
 }
 
 update_command() {
+    help() {
+        colorized_echo red "Usage: marzban update [--version <version>]"
+        echo ""
+        echo "OPTIONS:"
+        echo "  -v, --version    update to an exact version or immutable sha-* image tag"
+        echo "  -h, --help       display this help message"
+    }
+
+    local requested_version="latest"
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+            -v|--version)
+                if [ -z "${2:-}" ]; then
+                    colorized_echo red "Error: --version requires a value."
+                    exit 1
+                fi
+                requested_version="$2"
+                shift 2
+            ;;
+            -h|--help)
+                help
+                exit 0
+            ;;
+            *)
+                colorized_echo red "Error: Invalid option: $1"
+                help
+                exit 1
+            ;;
+        esac
+    done
+
+    if [[ ! "$requested_version" =~ ^[A-Za-z0-9._-]+$ ]]; then
+        colorized_echo red "Error: Invalid version tag: $requested_version"
+        exit 1
+    fi
+
     check_running_as_root
     # Check if marzban is installed
     if ! is_marzban_installed; then
@@ -1486,14 +1522,28 @@ update_command() {
     detect_compose
     
     update_marzban_script
-    colorized_echo blue "Pulling latest version"
-    update_marzban
+    if ! command -v yq >/dev/null 2>&1; then
+        install_yq
+    fi
+
+    local previous_image
+    local target_image
+    previous_image=$(yq -r '.services.marzban.image' "$COMPOSE_FILE")
+    target_image=$(marzban_docker_image "$requested_version")
+    yq -i ".services.marzban.image = \"${target_image}\"" "$COMPOSE_FILE"
+
+    colorized_echo blue "Pulling Marzban version ${requested_version}"
+    if ! update_marzban; then
+        yq -i ".services.marzban.image = \"${previous_image}\"" "$COMPOSE_FILE"
+        colorized_echo red "Update failed. Restored previous image: ${previous_image}"
+        exit 1
+    fi
     
     colorized_echo blue "Restarting Marzban's services"
     down_marzban
     up_marzban
     
-    colorized_echo blue "Marzban updated successfully"
+    colorized_echo green "Marzban updated successfully to ${requested_version}"
 }
 
 update_marzban_script() {
@@ -1504,6 +1554,18 @@ update_marzban_script() {
 
 update_marzban() {
     $COMPOSE -f $COMPOSE_FILE -p "$APP_NAME" pull
+}
+
+rollback_command() {
+    if [ "$#" -ne 1 ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+        colorized_echo red "Usage: marzban rollback <version>"
+        echo "Example: marzban rollback v4.3.0"
+        [ "$#" -eq 1 ] && exit 0
+        exit 1
+    fi
+
+    colorized_echo yellow "Rolling back the application image to $1. Database migrations are not downgraded."
+    update_command --version "$1"
 }
 
 check_editor() {
@@ -1560,7 +1622,8 @@ usage() {
     colorized_echo yellow "  logs            $(tput sgr0)– Show logs"
     colorized_echo yellow "  cli             $(tput sgr0)– Marzban CLI"
     colorized_echo yellow "  install         $(tput sgr0)– Install Marzban"
-    colorized_echo yellow "  update          $(tput sgr0)– Update to latest version"
+    colorized_echo yellow "  update          $(tput sgr0)– Update to latest or an exact version"
+    colorized_echo yellow "  rollback        $(tput sgr0)– Roll back to an exact version"
     colorized_echo yellow "  uninstall       $(tput sgr0)– Uninstall Marzban"
     colorized_echo yellow "  install-script  $(tput sgr0)– Install Marzban script"
     colorized_echo yellow "  backup          $(tput sgr0)– Manual backup launch"
@@ -1600,6 +1663,8 @@ case "$1" in
         shift; install_command "$@";;
     update)
         shift; update_command "$@";;
+    rollback)
+        shift; rollback_command "$@";;
     uninstall)
         shift; uninstall_command "$@";;
     install-script)

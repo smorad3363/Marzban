@@ -13,6 +13,7 @@ import {
 import {
   ArrowLeftOnRectangleIcon,
   ChartPieIcon,
+  ClipboardDocumentListIcon,
   Cog6ToothIcon,
   DocumentMinusIcon,
   LinkIcon,
@@ -24,7 +25,9 @@ import { useDashboard } from "contexts/DashboardContext";
 import useGetUser from "hooks/useGetUser";
 import { FC, ReactElement } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { fetch } from "service/http";
+import { removeAuthToken } from "utils/authStorage";
 import { BrandMark } from "./BrandMark";
 import { Language } from "./Language";
 
@@ -37,6 +40,7 @@ const NodesUsageIcon = chakra(ChartPieIcon, iconProps);
 const ResetUsageIcon = chakra(DocumentMinusIcon, iconProps);
 const UsersNavIcon = chakra(UsersIcon, iconProps);
 const AdminsNavIcon = chakra(UserGroupIcon, iconProps);
+const AuditNavIcon = chakra(ClipboardDocumentListIcon, iconProps);
 
 type ActionButtonProps = {
   icon: ReactElement;
@@ -69,7 +73,18 @@ export const Header: FC = () => {
   const { onEditingHosts, onResetAllUsage, onEditingNodes, onShowingNodesUsage } = useDashboard();
   const { t } = useTranslation();
   const location = useLocation();
+  const navigate = useNavigate();
   const isAdminsPage = location.pathname.startsWith("/admins");
+  const isAuditPage = location.pathname.startsWith("/audit-logs");
+  const isUsersPage = !isAdminsPage && !isAuditPage;
+  const logout = async () => {
+    try {
+      await fetch("/admin/logout", { method: "POST" });
+    } finally {
+      removeAuthToken();
+      navigate("/login/");
+    }
+  };
   return (
     <Flex
       as="aside"
@@ -100,23 +115,23 @@ export const Header: FC = () => {
         </HStack>
         <HStack display={{ base: "flex", lg: "none" }} spacing={1} flexShrink={0}>
           <Language />
-          <IconButton as={Link} to="/login/" size="sm" variant="ghost" color="red.200" aria-label={t("header.logout")} icon={<LogoutIcon />} />
+          <IconButton onClick={logout} size="sm" variant="ghost" color="red.200" aria-label={t("header.logout")} icon={<LogoutIcon />} />
         </HStack>
       </HStack>
 
       <Text display={{ base: "none", lg: "block" }} mt={8} mb={2} px={2} fontSize="xs" color="gray.500" fontFamily="mono" letterSpacing=".1em" textTransform="uppercase">Navigation</Text>
-      <SimpleGrid as="nav" aria-label="Primary navigation" columns={{ base: isSudo ? 2 : 1, lg: 1 }} spacing={2} mt={{ base: 4, lg: 0 }}>
+      <SimpleGrid as="nav" aria-label="Primary navigation" columns={{ base: isSudo ? 3 : 1, lg: 1 }} spacing={2} mt={{ base: 4, lg: 0 }}>
         <Button
           as={Link}
           to="/"
           size="md"
-          variant={!isAdminsPage ? "solid" : "ghost"}
-          colorScheme={!isAdminsPage ? "primary" : "gray"}
-          color={!isAdminsPage ? "#07130e" : "gray.200"}
-          _hover={!isAdminsPage ? undefined : { bg: "whiteAlpha.100", color: "white" }}
+          variant={isUsersPage ? "solid" : "ghost"}
+          colorScheme={isUsersPage ? "primary" : "gray"}
+          color={isUsersPage ? "#07130e" : "gray.200"}
+          _hover={isUsersPage ? undefined : { bg: "whiteAlpha.100", color: "white" }}
           leftIcon={<UsersNavIcon />}
           justifyContent="flex-start"
-          aria-current={!isAdminsPage ? "page" : undefined}
+          aria-current={isUsersPage ? "page" : undefined}
         >{t("users")}</Button>
         {isSudo && (
           <Button
@@ -131,6 +146,20 @@ export const Header: FC = () => {
             justifyContent="flex-start"
             aria-current={isAdminsPage ? "page" : undefined}
           >{t("admins.nav")}</Button>
+        )}
+        {isSudo && (
+          <Button
+            as={Link}
+            to="/audit-logs/"
+            size="md"
+            variant={isAuditPage ? "solid" : "ghost"}
+            colorScheme={isAuditPage ? "cyan" : "gray"}
+            color={isAuditPage ? "#06161a" : "gray.200"}
+            _hover={isAuditPage ? undefined : { bg: "whiteAlpha.100", color: "white" }}
+            leftIcon={<AuditNavIcon />}
+            justifyContent="flex-start"
+            aria-current={isAuditPage ? "page" : undefined}
+          >{t("audit.nav")}</Button>
         )}
       </SimpleGrid>
 
@@ -151,7 +180,7 @@ export const Header: FC = () => {
       <Stack display={{ base: "none", lg: "flex" }} mt={6} pt={4} borderTopWidth="1px" borderColor="whiteAlpha.200" spacing={2}>
         <Text fontSize="xs" color="gray.400" px={2} noOfLines={1}>{userData?.username || "Administrator"}</Text>
         <Language />
-        <Button as={Link} to="/login/" size="sm" variant="ghost" color="red.200" leftIcon={<LogoutIcon />} justifyContent="flex-start" _hover={{ bg: "rgba(239, 68, 68, .14)", color: "red.100" }}>{t("header.logout")}</Button>
+        <Button onClick={logout} size="sm" variant="ghost" color="red.200" leftIcon={<LogoutIcon />} justifyContent="flex-start" _hover={{ bg: "rgba(239, 68, 68, .14)", color: "red.100" }}>{t("header.logout")}</Button>
       </Stack>
     </Flex>
   );

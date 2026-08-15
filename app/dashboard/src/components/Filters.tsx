@@ -21,9 +21,12 @@ import {
 } from "@heroicons/react/24/outline";
 import classNames from "classnames";
 import { useDashboard } from "contexts/DashboardContext";
+import useGetUser from "hooks/useGetUser";
 import debounce from "lodash.debounce";
 import React, { FC, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQuery } from "react-query";
+import { fetch } from "service/http";
 
 const iconProps = {
   baseStyle: {
@@ -37,6 +40,11 @@ const ClearIcon = chakra(XMarkIcon, iconProps);
 export const ReloadIcon = chakra(ArrowPathIcon, iconProps);
 
 export type FilterProps = {} & BoxProps;
+type AdminOption = { username: string };
+
+const fetchAdminOptions = () =>
+  fetch<AdminOption[]>("/admins", { query: { limit: 1000 } });
+
 const setSearchField = debounce((search: string) => {
   useDashboard.getState().onFilterChange({
     ...useDashboard.getState().filters,
@@ -49,6 +57,12 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
   const { loading, filters, onFilterChange, refetchUsers, onCreateUser } =
     useDashboard();
   const { t } = useTranslation();
+  const { userData } = useGetUser();
+  const adminOptions = useQuery<AdminOption[], Error>(
+    ["user-filter-admins"],
+    fetchAdminOptions,
+    { enabled: userData.is_sudo, staleTime: 30000 }
+  );
   const [search, setSearch] = useState("");
   const onChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearch(e.target.value);
@@ -72,6 +86,9 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
         : undefined,
       offset: 0,
     });
+  };
+  const changeAdmin = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    onFilterChange({ admin: e.target.value || undefined, offset: 0 });
   };
   return (
     <Grid
@@ -151,13 +168,14 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
         _dark={{ borderColor: "whiteAlpha.200" }}
         pt={3}
       >
-        <HStack
-          spacing={3}
-          justify="flex-end"
-          flexWrap="wrap"
-          fontSize="sm"
-        >
-          <Text color="gray.600" _dark={{ color: "gray.300" }} fontWeight="medium" whiteSpace="nowrap" w={{ base: "full", sm: "auto" }}>
+        <HStack spacing={3} justify="flex-end" flexWrap="wrap" fontSize="sm">
+          <Text
+            color="gray.600"
+            _dark={{ color: "gray.300" }}
+            fontWeight="medium"
+            whiteSpace="nowrap"
+            w={{ base: "full", sm: "auto" }}
+          >
             {t("usersTable.organizeUsers")}
           </Text>
           <Select
@@ -176,6 +194,25 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
             <option value="limited">{t("limited")}</option>
             <option value="expired">{t("expired")}</option>
           </Select>
+          {userData.is_sudo && (
+            <Select
+              aria-label={t("usersTable.filterAdmin")}
+              value={filters.admin || ""}
+              onChange={changeAdmin}
+              size="sm"
+              rounded="md"
+              w={{ base: "full", sm: "180px" }}
+              bg="chakra-body-bg"
+              isDisabled={adminOptions.isLoading}
+            >
+              <option value="">{t("usersTable.allAdmins")}</option>
+              {adminOptions.data?.map((admin) => (
+                <option key={admin.username} value={admin.username}>
+                  {admin.username}
+                </option>
+              ))}
+            </Select>
+          )}
           <Select
             aria-label={t("usersTable.sortBy")}
             value={filters.sort}
@@ -189,7 +226,11 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
             <option value="created_at">{t("usersTable.oldestFirst")}</option>
             <option value="username">{t("usersTable.usernameAZ")}</option>
             <option value="-username">{t("usersTable.usernameZA")}</option>
-            <option value="-used_traffic">{t("usersTable.usageHighLow")}</option>
+            <option value="admin">{t("usersTable.adminAZ")}</option>
+            <option value="-admin">{t("usersTable.adminZA")}</option>
+            <option value="-used_traffic">
+              {t("usersTable.usageHighLow")}
+            </option>
             <option value="used_traffic">{t("usersTable.usageLowHigh")}</option>
             <option value="expire">{t("usersTable.expireSoon")}</option>
             <option value="-expire">{t("usersTable.expireLate")}</option>

@@ -1,6 +1,6 @@
 from typing import Dict, List, Union
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app import __version__, xray
 from app.db import Session, crud, get_db
@@ -10,6 +10,7 @@ from app.models.proxy import ProxyHost, ProxyInbound, ProxyTypes
 from app.models.system import SystemStats
 from app.models.user import UserStatus
 from app.utils import responses
+from app.utils.audit import AuditLogService
 from app.utils.system import cpu_usage, memory_usage, realtime_bandwidth
 
 router = APIRouter(tags=["System"], prefix="/api", responses={401: responses._401})
@@ -102,6 +103,7 @@ def get_hosts(
     "/hosts", response_model=Dict[str, List[ProxyHost]], responses={403: responses._403}
 )
 def modify_hosts(
+    request: Request,
     modified_hosts: Dict[str, List[ProxyHost]],
     db: Session = Depends(get_db),
     admin: Admin = Depends(Admin.check_sudo_admin),
@@ -117,5 +119,21 @@ def modify_hosts(
         crud.update_hosts(db, inbound_tag, hosts)
 
     xray.hosts.update()
+
+    AuditLogService.log(
+        db,
+        admin,
+        "settings.hosts_update",
+        "proxy_hosts",
+        f"Admin {admin.username} updated proxy hosts",
+        details={
+            "inbounds": {
+                inbound_tag: len(hosts)
+                for inbound_tag, hosts in modified_hosts.items()
+            },
+            "host_values_stored": False,
+        },
+        request=request,
+    )
 
     return {tag: crud.get_hosts(db, tag) for tag in xray.config.inbounds_by_tag}

@@ -92,7 +92,7 @@ export type UserApi = {
   is_sudo: boolean;
   telegram_id: number | string;
   username: string;
-}
+};
 
 export type UseGetUserReturn = {
   userData: UserApi;
@@ -100,4 +100,19 @@ export type UseGetUserReturn = {
   getUserIsSuccess: boolean;
   getUserIsError: boolean;
   getUserError: Error | null;
-}
+};
+
+export type BulkUserOperation =
+  | "activate"
+  | "deactivate"
+  | "add_data"
+  | "subtract_data"
+  | "add_days"
+  | "subtract_days"
+  | "delete";
+
+export type BulkUserActionResponse = {
+  operation: BulkUserOperation;
+  updated: string[];
+  skipped: string[];
+};

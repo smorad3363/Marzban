@@ -10,6 +10,7 @@ import config as app_config
 
 
 REQUIRED_TABLES = {
+    "admin_audit_logs",
     "marzhelp_metadata",
     "marzhelp_admin_settings",
     "marzhelp_user_states",
@@ -62,6 +63,10 @@ def test_fresh_and_existing_migration_preserve_data(tmp_path, monkeypatch):
         row[1] for row in connection.execute("PRAGMA index_list(users)")
     }
     assert "ix_users_admin_id" in user_indexes
+    audit_indexes = {
+        row[1] for row in connection.execute("PRAGMA index_list(admin_audit_logs)")
+    }
+    assert "ix_admin_audit_logs_created_at" in audit_indexes
     connection.close()
 
 
@@ -103,3 +108,7 @@ def test_installer_targets_master_and_latest_mysql_image():
     assert 'marzban_version="latest"' in installer
     assert 'elif [ "$database_type" == "mysql" ]; then' in installer
     assert 'image: $(marzban_docker_image "${marzban_version}")' in installer
+    assert 'requested_version="latest"' in installer
+    assert 'previous_image=$(yq -r' in installer
+    assert 'update_command --version "$1"' in installer
+    assert 'rollback)' in installer

@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     JSON,
@@ -11,6 +11,7 @@ from sqlalchemy import (
     Enum,
     Float,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -33,6 +34,12 @@ from app.models.proxy import (
     ProxyTypes,
 )
 from app.models.user import ReminderType, UserDataLimitResetStrategy, UserStatus
+
+
+def utc_now_naive() -> datetime:
+    """Return UTC in the naive format used by existing database timestamps."""
+
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class Admin(Base):
@@ -59,6 +66,50 @@ class AdminUsageLogs(Base):
     admin = relationship("Admin", back_populates="usage_logs")
     used_traffic_at_reset = Column(BigInteger, nullable=False)
     reset_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AdminAuditLog(Base):
+    """Append-only record of sensitive administrative activity."""
+
+    __tablename__ = "admin_audit_logs"
+    __table_args__ = (
+        Index("ix_admin_audit_logs_admin_created", "admin_id", "created_at"),
+        Index("ix_admin_audit_logs_action_created", "action", "created_at"),
+        Index(
+            "ix_admin_audit_logs_target",
+            "target_type",
+            "target_id",
+        ),
+        Index(
+            "ix_admin_audit_logs_target_name_created",
+            "target_name",
+            "created_at",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    admin_id = Column(
+        Integer,
+        ForeignKey("admins.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    admin_username = Column(String(34), nullable=False, index=True)
+    action = Column(String(64), nullable=False)
+    target_type = Column(String(64), nullable=False)
+    target_id = Column(String(128), nullable=True)
+    target_name = Column(String(256), nullable=True)
+    description = Column(Text, nullable=False)
+    previous_value = Column(JSON, nullable=True)
+    new_value = Column(JSON, nullable=True)
+    details = Column(JSON, nullable=True)
+    ip_address = Column(String(64), nullable=True)
+    status = Column(String(16), nullable=False, default="success")
+    created_at = Column(
+        DateTime,
+        nullable=False,
+        default=utc_now_naive,
+        index=True,
+    )
 
 
 class MarzhelpMetadata(Base):

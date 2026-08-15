@@ -2,7 +2,7 @@ import asyncio
 import time
 from typing import List
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, WebSocket
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, WebSocket
 from sqlalchemy.exc import IntegrityError
 from starlette.websockets import WebSocketDisconnect
 
@@ -23,6 +23,7 @@ from app.models.node import (
 from app.utils.node_watchdog import send_telegram_message
 from app.models.proxy import ProxyHost
 from app.utils import responses
+from app.utils.audit import AuditLogService, sanitize_audit_value
 
 router = APIRouter(
     tags=["Node"], prefix="/api", responses={401: responses._401, 403: responses._403}
@@ -70,21 +71,36 @@ def get_watchdog_settings(
 
 @router.put("/node/watchdog/settings", response_model=NodeWatchdogSettingsResponse)
 def set_watchdog_settings(
+    request: Request,
     update: NodeWatchdogSettingsUpdate,
     db: Session = Depends(get_db),
-    _: Admin = Depends(Admin.check_sudo_admin),
+    admin: Admin = Depends(Admin.check_sudo_admin),
 ):
     current = crud.get_node_watchdog_settings(db)
     if update.enabled and not (update.telegram_bot_token or current.telegram_bot_token):
         raise HTTPException(status_code=422, detail={"telegram_bot_token": "Bot token is required"})
     if update.enabled and not update.telegram_chat_id:
         raise HTTPException(status_code=422, detail={"telegram_chat_id": "Chat ID is required"})
-    return _watchdog_response(crud.update_node_watchdog_settings(db, update))
+    previous_value = _watchdog_response(current)
+    result = _watchdog_response(crud.update_node_watchdog_settings(db, update))
+    AuditLogService.log(
+        db,
+        admin,
+        "settings.watchdog_update",
+        "node_watchdog",
+        f"Admin {admin.username} updated node watchdog settings",
+        previous_value=previous_value,
+        new_value=result,
+        request=request,
+    )
+    return result
 
 
 @router.post("/node/watchdog/test")
 def test_watchdog_notification(
-    db: Session = Depends(get_db), _: Admin = Depends(Admin.check_sudo_admin)
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.check_sudo_admin),
 ):
     settings = crud.get_node_watchdog_settings(db)
     if not settings.telegram_bot_token or not settings.telegram_chat_id:
@@ -97,15 +113,24 @@ def test_watchdog_notification(
         )
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
+    AuditLogService.log(
+        db,
+        admin,
+        "settings.watchdog_test",
+        "node_watchdog",
+        f"Admin {admin.username} sent a watchdog test notification",
+        request=request,
+    )
     return {"detail": "Test notification sent"}
 
 
 @router.post("/node", response_model=NodeResponse, responses={409: responses._409})
 def add_node(
+    request: Request,
     new_node: NodeCreate,
     bg: BackgroundTasks,
     db: Session = Depends(get_db),
-    _: Admin = Depends(Admin.check_sudo_admin),
+    admin: Admin = Depends(Admin.check_sudo_admin),
 ):
     """Add a new node to the database and optionally add it as a host."""
     try:
@@ -120,6 +145,17 @@ def add_node(
     bg.add_task(add_host_if_needed, new_node, db)
 
     logger.info(f'New node "{dbnode.name}" added')
+    AuditLogService.log(
+        db,
+        admin,
+        "node.create",
+        "node",
+        f"Admin {admin.username} created node {dbnode.name}",
+        target_id=dbnode.id,
+        target_name=dbnode.name,
+        new_value=sanitize_audit_value(dbnode),
+        request=request,
+    )
     return dbnode
 
 
@@ -210,44 +246,85 @@ def get_nodes(
 
 @router.put("/node/{node_id}", response_model=NodeResponse)
 def modify_node(
+    request: Request,
     modified_node: NodeModify,
     bg: BackgroundTasks,
     dbnode: NodeResponse = Depends(get_node),
     db: Session = Depends(get_db),
-    _: Admin = Depends(Admin.check_sudo_admin),
+    admin: Admin = Depends(Admin.check_sudo_admin),
 ):
     """Update a node's details. Only accessible to sudo admins."""
+    previous_value = sanitize_audit_value(dbnode)
     updated_node = crud.update_node(db, dbnode, modified_node)
     xray.operations.remove_node(updated_node.id)
     if updated_node.status != NodeStatus.disabled:
         bg.add_task(xray.operations.connect_node, node_id=updated_node.id)
 
     logger.info(f'Node "{dbnode.name}" modified')
+    AuditLogService.log(
+        db,
+        admin,
+        "node.update",
+        "node",
+        f"Admin {admin.username} updated node {updated_node.name}",
+        target_id=updated_node.id,
+        target_name=updated_node.name,
+        previous_value=previous_value,
+        new_value=sanitize_audit_value(updated_node),
+        request=request,
+    )
     return dbnode
 
 
 @router.post("/node/{node_id}/reconnect")
 def reconnect_node(
+    request: Request,
     bg: BackgroundTasks,
     dbnode: NodeResponse = Depends(get_node),
-    _: Admin = Depends(Admin.check_sudo_admin),
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.check_sudo_admin),
 ):
     """Trigger a reconnection for the specified node. Only accessible to sudo admins."""
     bg.add_task(xray.operations.connect_node, node_id=dbnode.id)
+    AuditLogService.log(
+        db,
+        admin,
+        "node.reconnect",
+        "node",
+        f"Admin {admin.username} scheduled reconnect for node {dbnode.name}",
+        target_id=dbnode.id,
+        target_name=dbnode.name,
+        request=request,
+    )
     return {"detail": "Reconnection task scheduled"}
 
 
 @router.delete("/node/{node_id}")
 def remove_node(
+    request: Request,
     dbnode: NodeResponse = Depends(get_node),
     db: Session = Depends(get_db),
     admin: Admin = Depends(Admin.check_sudo_admin),
 ):
     """Delete a node and remove it from xray in the background."""
+    target_id = dbnode.id
+    target_name = dbnode.name
+    previous_value = sanitize_audit_value(dbnode)
     crud.remove_node(db, dbnode)
-    xray.operations.remove_node(dbnode.id)
+    xray.operations.remove_node(target_id)
 
     logger.info(f'Node "{dbnode.name}" deleted')
+    AuditLogService.log(
+        db,
+        admin,
+        "node.delete",
+        "node",
+        f"Admin {admin.username} deleted node {target_name}",
+        target_id=target_id,
+        target_name=target_name,
+        previous_value=previous_value,
+        request=request,
+    )
     return {}
 
 

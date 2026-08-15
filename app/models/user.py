@@ -40,6 +40,16 @@ class UserStatusCreate(str, Enum):
     on_hold = "on_hold"
 
 
+class BulkUserOperation(str, Enum):
+    activate = "activate"
+    deactivate = "deactivate"
+    add_data = "add_data"
+    subtract_data = "subtract_data"
+    add_days = "add_days"
+    subtract_days = "subtract_days"
+    delete = "delete"
+
+
 class UserDataLimitResetStrategy(str, Enum):
     no_reset = "no_reset"
     day = "day"
@@ -277,6 +287,32 @@ class UserModify(User):
             if expire:
                 raise ValueError("User cannot be on hold with specified expire.")
         return status
+
+
+class BulkUserActionRequest(BaseModel):
+    usernames: List[str] = Field(min_length=1, max_length=500)
+    operation: BulkUserOperation
+    amount: Optional[int] = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def validate_amount(self):
+        amount_operations = {
+            BulkUserOperation.add_data,
+            BulkUserOperation.subtract_data,
+            BulkUserOperation.add_days,
+            BulkUserOperation.subtract_days,
+        }
+        if self.operation in amount_operations and self.amount is None:
+            raise ValueError("amount is required for this bulk operation")
+        if self.operation not in amount_operations:
+            self.amount = None
+        return self
+
+
+class BulkUserActionResponse(BaseModel):
+    operation: BulkUserOperation
+    updated: List[str] = Field(default_factory=list)
+    skipped: List[str] = Field(default_factory=list)
 
 
 class UserUsageResetResponse(BaseModel):

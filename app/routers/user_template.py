@@ -1,18 +1,20 @@
 from typing import List
 
 from sqlalchemy.exc import IntegrityError
-from fastapi import Depends, HTTPException, APIRouter
+from fastapi import Depends, HTTPException, APIRouter, Request
 
 from app.db import Session, crud, get_db
 from app.models.admin import Admin
 from app.models.user_template import (UserTemplateCreate, UserTemplateModify,
                                       UserTemplateResponse)
 from app.dependencies import get_user_template
+from app.utils.audit import AuditLogService, sanitize_audit_value
 
 router = APIRouter(tags=['User Template'], prefix='/api')
 
 @router.post("/user_template", response_model=UserTemplateResponse)
 def add_user_template(
+    request: Request,
     new_user_template: UserTemplateCreate,
     db: Session = Depends(get_db),
     admin: Admin = Depends(Admin.check_sudo_admin)
@@ -26,7 +28,19 @@ def add_user_template(
     - **inbounds** dictionary of protocol:inbound_tags, empty means all inbounds
     """
     try:
-        return crud.create_user_template(db, new_user_template)
+        template = crud.create_user_template(db, new_user_template)
+        AuditLogService.log(
+            db,
+            admin,
+            "template.create",
+            "user_template",
+            f"Admin {admin.username} created user template {template.name}",
+            target_id=template.id,
+            target_name=template.name,
+            new_value=sanitize_audit_value(new_user_template),
+            request=request,
+        )
+        return template
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="Template by this name already exists")
@@ -42,6 +56,7 @@ def get_user_template_endpoint(
 
 @router.put("/user_template/{template_id}", response_model=UserTemplateResponse)
 def modify_user_template(
+    request: Request,
     modify_user_template: UserTemplateModify,
     db: Session = Depends(get_db),
     admin: Admin = Depends(Admin.check_sudo_admin),
@@ -56,7 +71,21 @@ def modify_user_template(
     - **inbounds** dictionary of protocol:inbound_tags, empty means all inbounds
     """
     try:
-        return crud.update_user_template(db, dbuser_template, modify_user_template)
+        previous_value = sanitize_audit_value(dbuser_template)
+        template = crud.update_user_template(db, dbuser_template, modify_user_template)
+        AuditLogService.log(
+            db,
+            admin,
+            "template.update",
+            "user_template",
+            f"Admin {admin.username} updated user template {template.name}",
+            target_id=template.id,
+            target_name=template.name,
+            previous_value=previous_value,
+            new_value=sanitize_audit_value(template),
+            request=request,
+        )
+        return template
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="Template by this name already exists")
@@ -64,12 +93,28 @@ def modify_user_template(
 
 @router.delete("/user_template/{template_id}")
 def remove_user_template(
+    request: Request,
     db: Session = Depends(get_db),
     admin: Admin = Depends(Admin.check_sudo_admin),
     dbuser_template: UserTemplateResponse = Depends(get_user_template)
 ):
     """Remove a User Template by its ID"""
-    return crud.remove_user_template(db, dbuser_template)
+    target_id = dbuser_template.id
+    target_name = dbuser_template.name
+    previous_value = sanitize_audit_value(dbuser_template)
+    result = crud.remove_user_template(db, dbuser_template)
+    AuditLogService.log(
+        db,
+        admin,
+        "template.delete",
+        "user_template",
+        f"Admin {admin.username} deleted user template {target_name}",
+        target_id=target_id,
+        target_name=target_name,
+        previous_value=previous_value,
+        request=request,
+    )
+    return result
 
 
 @router.get("/user_template", response_model=List[UserTemplateResponse])
