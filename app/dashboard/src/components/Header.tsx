@@ -112,7 +112,7 @@ export const Header: FC = () => {
           <BrandMark aria-hidden="true" boxSize={{ base: "38px", lg: "46px" }} filter="drop-shadow(0 8px 20px rgba(34, 197, 94, 0.22))" />
           <Box minW={0}>
             <Text fontFamily="mono" fontSize="xs" fontWeight="700" letterSpacing="0.13em" color="primary.300" noOfLines={1}>HEISENBERG</Text>
-            <Text fontSize="xs" color="gray.400" mt="1px" noOfLines={1}>Control laboratory</Text>
+            <Text fontSize="xs" color="gray.400" mt="1px" noOfLines={1}>آزمایشگاه کنترل</Text>
           </Box>
         </HStack>
         <HStack display={{ base: "flex", lg: "none" }} spacing={1} flexShrink={0}>

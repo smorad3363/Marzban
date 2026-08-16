@@ -545,7 +545,7 @@ export const Admins: FC = () => {
     <AppShell>
         <Stack direction={{ base: "column", md: "row" }} justify="space-between" align={{ md: "end" }} mb={6} gap={4}>
           <Box>
-            <Text color="primary.300" fontSize="xs" fontWeight="800" letterSpacing="0.13em" textTransform="uppercase">Control laboratory</Text>
+            <Text color="primary.300" fontSize="xs" fontWeight="800">آزمایشگاه کنترل</Text>
             <Text as="h1" fontSize={{ base: "2xl", md: "3xl" }} fontWeight="800" letterSpacing="-0.035em" mt={1}>{t("admins.title")}</Text>
             <Text color="gray.300" mt={1} maxW="650px">{t("admins.subtitle")}</Text>
           </Box>

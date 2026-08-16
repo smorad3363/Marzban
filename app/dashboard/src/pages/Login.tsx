@@ -76,7 +76,7 @@ export const Login: FC = () => {
             <BrandMark aria-hidden="true" boxSize="44px" filter="drop-shadow(0 9px 22px rgba(34,197,94,.2))" />
             <Box>
               <Text fontFamily="mono" fontSize="xs" fontWeight="700" letterSpacing="0.14em" color="primary.600" _dark={{ color: "primary.300" }}>HEISENBERG PANEL</Text>
-              <Text fontSize="xs" color="gray.500">Private control laboratory</Text>
+              <Text fontSize="xs" color="gray.500">آزمایشگاه کنترل خصوصی</Text>
             </Box>
           </HStack>
         </HStack>

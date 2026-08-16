@@ -6,6 +6,9 @@ import tsconfigPaths from "vite-tsconfig-paths";
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  define: {
+    __LOCALE_BUILD_ID__: JSON.stringify(Date.now().toString()),
+  },
   plugins: [
     tsconfigPaths(),
     react({

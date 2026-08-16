@@ -28,7 +28,7 @@ export const Dashboard: FC = () => {
       <HStack justify="space-between" align="end" mb={6}>
         <Box>
           <Text color="primary.600" _dark={{ color: "primary.300" }} fontSize="xs" fontWeight="800" letterSpacing="0.13em" textTransform="uppercase">
-            Control laboratory
+            آزمایشگاه کنترل
           </Text>
           <Text as="h1" fontSize={{ base: "2xl", md: "3xl" }} fontWeight="800" letterSpacing="-0.035em" mt={1}>
             {t("users")}
