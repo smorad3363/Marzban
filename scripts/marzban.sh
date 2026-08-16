@@ -1557,19 +1557,32 @@ update_command() {
     up_marzban
 
     local container_id
+    local attempt
+    local health_probe
     local ready="false"
-    for _ in $(seq 1 15); do
+    health_probe="import os, urllib.request; port = int(os.environ.get('UVICORN_PORT', '8000')); urllib.request.urlopen(f'http://127.0.0.1:{port}/api/marzhelp/compatibility', timeout=3)"
+    for attempt in $(seq 1 150); do
         container_id=$($COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" ps -q marzban 2>/dev/null)
         if [ -n "$container_id" ] && docker exec "$container_id" python -c \
-            "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/marzhelp/compatibility', timeout=2)" \
+            "$health_probe" \
             >/dev/null 2>&1; then
             ready="true"
             break
         fi
-        sleep 1
+        if [ $((attempt % 15)) -eq 0 ]; then
+            colorized_echo blue "Waiting for Marzban health check (${attempt}/150)"
+        fi
+        sleep 2
     done
 
     if [ "$ready" != "true" ]; then
+        if [ -n "$container_id" ]; then
+            colorized_echo yellow "Final Marzban health check error:"
+            docker exec "$container_id" python -c "$health_probe" || true
+            mkdir -p "$DATA_DIR"
+            docker logs --tail 200 "$container_id" > "$DATA_DIR/update-failed.log" 2>&1 || true
+            colorized_echo yellow "Container logs saved to $DATA_DIR/update-failed.log"
+        fi
         colorized_echo red "Update health check failed. Restoring previous image: ${previous_image}"
         down_marzban
         yq -i ".services.marzban.image = \"${previous_image}\"" "$COMPOSE_FILE"

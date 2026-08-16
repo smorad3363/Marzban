@@ -121,6 +121,9 @@ def test_installer_targets_master_and_latest_mysql_image():
     assert 'image: $(marzban_docker_image "${marzban_version}")' in installer
     assert 'requested_version="latest"' in installer
     assert 'previous_image=$(yq -r' in installer
+    assert "os.environ.get('UVICORN_PORT', '8000')" in installer
+    assert "for attempt in $(seq 1 150)" in installer
+    assert 'docker logs --tail 200 "$container_id"' in installer
     assert "Update health check failed" in installer
     assert 'update_command --version "$1"' in installer
     assert 'rollback)' in installer
