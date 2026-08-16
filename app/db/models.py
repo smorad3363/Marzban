@@ -151,6 +151,9 @@ class MarzhelpAdminSettings(Base):
     prevent_user_reset = Column(Boolean, nullable=False, default=False)
     prevent_revoke_subscription = Column(Boolean, nullable=False, default=False)
     prevent_unlimited_traffic = Column(Boolean, nullable=False, default=False)
+    # Full client addresses are sensitive. Non-sudo admins receive masked
+    # addresses unless this capability is explicitly granted by sudo.
+    view_full_client_ip = Column(Boolean, nullable=False, default=False)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
     inbound_permissions = relationship(
         "MarzhelpAdminInboundPermission",
@@ -162,6 +165,11 @@ class MarzhelpAdminSettings(Base):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
+    subscription_mode_permissions = relationship(
+        "MarzhelpAdminSubscriptionModePermission",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
     @property
     def allowed_inbounds(self):
@@ -170,6 +178,10 @@ class MarzhelpAdminSettings(Base):
     @property
     def allowed_user_limits(self):
         return sorted(item.concurrent_user_limit for item in self.user_limit_permissions)
+
+    @property
+    def allowed_subscription_modes(self):
+        return sorted(item.mode for item in self.subscription_mode_permissions)
 
 
 class MarzhelpAdminInboundPermission(Base):
@@ -192,6 +204,129 @@ class MarzhelpAdminUserLimitPermission(Base):
         primary_key=True,
     )
     concurrent_user_limit = Column(Integer, primary_key=True)
+
+
+class MarzhelpAdminSubscriptionModePermission(Base):
+    __tablename__ = "marzhelp_admin_allowed_subscription_modes"
+
+    admin_id = Column(
+        Integer,
+        ForeignKey("marzhelp_admin_settings.admin_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    mode = Column(String(48), primary_key=True)
+
+
+class DeviceLimitSettings(Base):
+    """Singleton runtime policy for native device/IP-limit enforcement."""
+
+    __tablename__ = "device_limit_settings"
+
+    id = Column(Integer, primary_key=True, default=1)
+    enabled = Column(Boolean, nullable=False, default=False)
+    enforcement_mode = Column(String(24), nullable=False, default="hybrid")
+    check_interval_seconds = Column(Integer, nullable=False, default=60)
+    active_window_seconds = Column(Integer, nullable=False, default=300)
+    hit_threshold = Column(Integer, nullable=False, default=3)
+    strike_reset_seconds = Column(Integer, nullable=False, default=2592000)
+    full_ip_retention_days = Column(Integer, nullable=False, default=7)
+    incident_retention_days = Column(Integer, nullable=False, default=90)
+    audit_retention_days = Column(Integer, nullable=False, default=180)
+    auto_delete_enabled = Column(Boolean, nullable=False, default=False)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=utc_now_naive,
+        onupdate=utc_now_naive,
+    )
+
+
+class DeviceLimitPenaltyStage(Base):
+    __tablename__ = "device_limit_penalty_stages"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    violation_count = Column(Integer, nullable=False, unique=True)
+    action = Column(String(32), nullable=False)
+    duration_seconds = Column(Integer, nullable=True)
+    enabled = Column(Boolean, nullable=False, default=True)
+
+
+class DeviceSlot(Base):
+    """One independently revocable credential bundle owned by a user."""
+
+    __tablename__ = "device_slots"
+    __table_args__ = (
+        UniqueConstraint("user_id", "slot_index", name="uq_device_slots_user_index"),
+        Index("ix_device_slots_user_enabled", "user_id", "enabled"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    slot_index = Column(Integer, nullable=False)
+    label = Column(String(64), nullable=True)
+    credentials = Column(JSON, nullable=False)
+    token_version = Column(String(36), nullable=False)
+    enabled = Column(Boolean, nullable=False, default=True)
+    last_seen_at = Column(DateTime, nullable=True)
+    last_ip = Column(String(64), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utc_now_naive)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=utc_now_naive,
+        onupdate=utc_now_naive,
+    )
+
+    user = relationship("User", back_populates="device_slots")
+
+
+class DeviceLimitUserState(Base):
+    __tablename__ = "device_limit_user_states"
+    __table_args__ = (
+        Index("ix_device_limit_state_penalty_until", "penalty_status", "blocked_until"),
+    )
+
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    violation_count = Column(Integer, nullable=False, default=0)
+    current_stage = Column(Integer, nullable=False, default=0)
+    penalty_status = Column(String(32), nullable=False, default="clear")
+    blocked_until = Column(DateTime, nullable=True)
+    status_before_penalty = Column(String(24), nullable=True)
+    last_violation_at = Column(DateTime, nullable=True)
+    last_seen_at = Column(DateTime, nullable=True)
+    active_ip_count = Column(Integer, nullable=False, default=0)
+    last_reason = Column(Text, nullable=True)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=utc_now_naive,
+        onupdate=utc_now_naive,
+    )
+
+    user = relationship("User", back_populates="device_limit_state")
+
+
+class DeviceLimitIncident(Base):
+    __tablename__ = "device_limit_incidents"
+    __table_args__ = (
+        Index("ix_device_limit_incidents_user_created", "user_id", "created_at"),
+        Index("ix_device_limit_incidents_admin_created", "admin_id", "created_at"),
+        Index("ix_device_limit_incidents_created", "created_at"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    admin_id = Column(Integer, nullable=True)
+    username = Column(String(34), nullable=False)
+    stage = Column(Integer, nullable=False)
+    action = Column(String(32), nullable=False)
+    configured_limit = Column(Integer, nullable=False)
+    observed_count = Column(Integer, nullable=False)
+    ip_addresses = Column(JSON, nullable=True)
+    source_nodes = Column(JSON, nullable=True)
+    reason = Column(Text, nullable=False)
+    resolved_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utc_now_naive)
 
 
 class MarzhelpUserState(Base):
@@ -276,6 +411,14 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     username = Column(String(34, collation='NOCASE'), unique=True, index=True)
     proxies = relationship("Proxy", back_populates="user", cascade="all, delete-orphan")
+    device_slots = relationship("DeviceSlot", back_populates="user", cascade="all, delete-orphan")
+    device_limit_state = relationship(
+        "DeviceLimitUserState",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        uselist=False,
+        lazy="selectin",
+    )
     status = Column(Enum(UserStatus), nullable=False, default=UserStatus.active)
     used_traffic = Column(BigInteger, default=0)
     node_usages = relationship("NodeUserUsage", back_populates="user", cascade="all, delete-orphan")

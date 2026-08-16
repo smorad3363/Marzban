@@ -2,7 +2,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.exc import IntegrityError
 
 from app import xray
@@ -22,6 +22,7 @@ from app.models.admin import (
     Token,
 )
 from app.models.user import UserStatus
+from app.device_limit.constants import SubscriptionMode
 from app.utils import marzhelp_policy, report, responses
 from app.utils.audit import (
     AuditLogService,
@@ -248,7 +249,10 @@ def get_admin_capabilities(
 
     dbadmin = crud.get_admin(db, admin.username)
     if admin.is_sudo or dbadmin is None:
-        return AdminCapabilities()
+        return AdminCapabilities(
+            allowed_subscription_modes=list(SubscriptionMode),
+            view_full_client_ip=True,
+        )
     settings = db.get(MarzhelpAdminSettings, dbadmin.id)
     if settings is None:
         return AdminCapabilities()
@@ -259,6 +263,8 @@ def get_admin_capabilities(
         allowed_inbounds=settings.allowed_inbounds,
         all_user_limits=settings.all_user_limits,
         allowed_user_limits=settings.allowed_user_limits,
+        allowed_subscription_modes=settings.allowed_subscription_modes,
+        view_full_client_ip=settings.view_full_client_ip,
         capacity_used=used,
         capacity_limit=maximum,
         capacity_remaining=(max(int(maximum) - used, 0) if maximum is not None else None),
@@ -317,13 +323,28 @@ def get_managed_admins(
         if dbadmins
         else {}
     )
+    capacity_weight = case(
+        (User.concurrent_user_limit.is_(None), 1),
+        (User.concurrent_user_limit < 1, 1),
+        else_=User.concurrent_user_limit,
+    )
+    capacity_usage = (
+        dict(
+            db.query(User.admin_id, func.coalesce(func.sum(capacity_weight), 0))
+            .filter(User.admin_id.in_([item.id for item in dbadmins]))
+            .group_by(User.admin_id)
+            .all()
+        )
+        if dbadmins
+        else {}
+    )
     return ManagedAdminList(
         admins=[
             managed_admin_response(
                 item,
                 settings_by_admin.get(item.id),
                 user_counts.get(item.id, 0),
-                marzhelp_policy.capacity_used(db, item.id),
+                int(capacity_usage.get(item.id, 0)),
             )
             for item in dbadmins
         ],

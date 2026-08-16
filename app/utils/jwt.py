@@ -57,6 +57,23 @@ def create_subscription_token(username: str) -> str:
     return data_final
 
 
+def create_device_slot_token(username: str, slot_index: int, token_version: str) -> str:
+    data = ",".join(
+        (
+            username,
+            str(ceil(time.time())),
+            f"slot:{int(slot_index)}",
+            str(token_version),
+        )
+    )
+    data_b64_str = b64encode(data.encode("utf-8"), altchars=b"-_").decode("utf-8").rstrip("=")
+    signature = b64encode(
+        sha256((data_b64_str + get_secret_key()).encode("utf-8")).digest(),
+        altchars=b"-_",
+    ).decode("utf-8")[:10]
+    return data_b64_str + signature
+
+
 def get_subscription_payload(token: str) -> Union[dict, None]:
     try:
         if len(token) < 15:
@@ -81,9 +98,14 @@ def get_subscription_payload(token: str) -> Union[dict, None]:
             u_token_resign = b64encode(sha256((u_token+get_secret_key()).encode('utf-8')
                                               ).digest(), altchars=b'-_').decode('utf-8')[:10]
             if u_signature == u_token_resign:
-                u_username = u_token_dec_str.split(',')[0]
-                u_created_at = int(u_token_dec_str.split(',')[1])
-                return {"username": u_username, "created_at": datetime.utcfromtimestamp(u_created_at)}
+                parts = u_token_dec_str.split(',')
+                u_username = parts[0]
+                u_created_at = int(parts[1])
+                result = {"username": u_username, "created_at": datetime.utcfromtimestamp(u_created_at)}
+                if len(parts) == 4 and parts[2].startswith("slot:"):
+                    result["slot_index"] = int(parts[2].split(":", 1)[1])
+                    result["token_version"] = parts[3]
+                return result
             else:
                 return
     except jwt.exceptions.PyJWTError:

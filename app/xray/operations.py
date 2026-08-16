@@ -7,6 +7,7 @@ from app import logger, xray
 from app.db import GetDB, crud
 from app.models.node import NodeStatus
 from app.models.user import UserResponse
+from app.device_limit.slots import enabled_device_slots, slot_email
 from app.utils.concurrency import threaded_function
 from app.xray.node import XRayNode
 from xray_api import XRay as XRayAPI
@@ -45,104 +46,129 @@ def _remove_user_from_inbound(api: XRayAPI, inbound_tag: str, email: str):
 
 
 @threaded_function
-def _alter_inbound_user(api: XRayAPI, inbound_tag: str, account: Account):
-    try:
-        api.remove_inbound_user(tag=inbound_tag, email=account.email, timeout=30)
-    except (xray.exc.EmailNotFoundError, xray.exc.ConnectionError):
-        pass
-    try:
-        api.add_inbound_user(tag=inbound_tag, user=account, timeout=30)
-    except (xray.exc.EmailExistsError, xray.exc.ConnectionError):
-        pass
+def _replace_inbound_users(
+    api: XRayAPI,
+    inbound_tag: str,
+    emails: tuple[str, ...],
+    accounts: tuple[Account, ...],
+):
+    """Replace all slot accounts in one ordered HandlerService operation."""
+
+    for email in emails:
+        try:
+            api.remove_inbound_user(tag=inbound_tag, email=email, timeout=30)
+        except (xray.exc.EmailNotFoundError, xray.exc.ConnectionError):
+            pass
+    for account in accounts:
+        try:
+            api.add_inbound_user(tag=inbound_tag, user=account, timeout=30)
+        except (xray.exc.EmailExistsError, xray.exc.ConnectionError):
+            pass
 
 
 def add_user(dbuser: "DBUser"):
     user = UserResponse.model_validate(dbuser)
-    email = f"{dbuser.id}.{dbuser.username}"
+
+    slots = enabled_device_slots(dbuser)
+    credential_sets = (
+        [(slot.slot_index, slot.credentials) for slot in slots]
+        if slots
+        else [(1, {key.value: value.dict(no_obj=True) for key, value in user.proxies.items()})]
+    )
 
     for proxy_type, inbound_tags in user.inbounds.items():
         for inbound_tag in inbound_tags:
             inbound = xray.config.inbounds_by_tag.get(inbound_tag, {})
-
-            try:
-                proxy_settings = user.proxies[proxy_type].dict(no_obj=True)
-            except KeyError:
-                pass
-            account = proxy_type.account_model(email=email, **proxy_settings)
-
-            # XTLS currently only supports transmission methods of TCP and mKCP
-            if getattr(account, 'flow', None) and (
-                inbound.get('network', 'tcp') not in ('tcp', 'kcp')
-                or
-                (
-                    inbound.get('network', 'tcp') in ('tcp', 'kcp')
-                    and
-                    inbound.get('tls') not in ('tls', 'reality')
+            for slot_index, credentials in credential_sets:
+                proxy_settings = credentials.get(proxy_type.value)
+                if not proxy_settings:
+                    continue
+                account = proxy_type.account_model(
+                    email=slot_email(dbuser.id, dbuser.username, slot_index),
+                    **proxy_settings,
                 )
-                or
-                inbound.get('header_type') == 'http'
-            ):
-                account.flow = XTLSFlows.NONE
 
-            _add_user_to_inbound(xray.api, inbound_tag, account)  # main core
-            for node in list(xray.nodes.values()):
-                if node.connected and node.started:
-                    _add_user_to_inbound(node.api, inbound_tag, account)
+                # XTLS currently only supports transmission methods of TCP and mKCP
+                if getattr(account, 'flow', None) and (
+                    inbound.get('network', 'tcp') not in ('tcp', 'kcp')
+                    or
+                    (
+                        inbound.get('network', 'tcp') in ('tcp', 'kcp')
+                        and
+                        inbound.get('tls') not in ('tls', 'reality')
+                    )
+                    or
+                    inbound.get('header_type') == 'http'
+                ):
+                    account.flow = XTLSFlows.NONE
+
+                _add_user_to_inbound(xray.api, inbound_tag, account)  # main core
+                for node in list(xray.nodes.values()):
+                    if node.connected and node.started:
+                        _add_user_to_inbound(node.api, inbound_tag, account)
 
 
 def remove_user(dbuser: "DBUser"):
-    email = f"{dbuser.id}.{dbuser.username}"
+    emails = {f"{dbuser.id}.{dbuser.username}"}
+    emails.update(
+        slot_email(dbuser.id, dbuser.username, slot.slot_index)
+        for slot in dbuser.device_slots
+    )
 
     for inbound_tag in xray.config.inbounds_by_tag:
-        _remove_user_from_inbound(xray.api, inbound_tag, email)
-        for node in list(xray.nodes.values()):
-            if node.connected and node.started:
-                _remove_user_from_inbound(node.api, inbound_tag, email)
+        for email in emails:
+            _remove_user_from_inbound(xray.api, inbound_tag, email)
+            for node in list(xray.nodes.values()):
+                if node.connected and node.started:
+                    _remove_user_from_inbound(node.api, inbound_tag, email)
 
 
 def update_user(dbuser: "DBUser"):
-    user = UserResponse.model_validate(dbuser)
-    email = f"{dbuser.id}.{dbuser.username}"
+    """Atomically replace a user's slot accounts without restarting Xray."""
 
-    active_inbounds = []
+    user = UserResponse.model_validate(dbuser)
+    all_emails = tuple({
+        f"{dbuser.id}.{dbuser.username}",
+        *(
+            slot_email(dbuser.id, dbuser.username, slot.slot_index)
+            for slot in dbuser.device_slots
+        ),
+    })
+    slots = enabled_device_slots(dbuser)
+    credential_sets = (
+        [(slot.slot_index, slot.credentials) for slot in slots]
+        if slots
+        else [(1, {key.value: value.dict(no_obj=True) for key, value in user.proxies.items()})]
+    )
+
+    accounts_by_inbound: dict[str, list[Account]] = {
+        inbound_tag: [] for inbound_tag in xray.config.inbounds_by_tag
+    }
     for proxy_type, inbound_tags in user.inbounds.items():
         for inbound_tag in inbound_tags:
-            active_inbounds.append(inbound_tag)
             inbound = xray.config.inbounds_by_tag.get(inbound_tag, {})
-
-            try:
-                proxy_settings = user.proxies[proxy_type].dict(no_obj=True)
-            except KeyError:
-                pass
-            account = proxy_type.account_model(email=email, **proxy_settings)
-
-            # XTLS currently only supports transmission methods of TCP and mKCP
-            if getattr(account, 'flow', None) and (
-                inbound.get('network', 'tcp') not in ('tcp', 'kcp')
-                or
-                (
-                    inbound.get('network', 'tcp') in ('tcp', 'kcp')
-                    and
-                    inbound.get('tls') not in ('tls', 'reality')
+            for slot_index, credentials in credential_sets:
+                proxy_settings = credentials.get(proxy_type.value)
+                if not proxy_settings:
+                    continue
+                account = proxy_type.account_model(
+                    email=slot_email(dbuser.id, dbuser.username, slot_index),
+                    **proxy_settings,
                 )
-                or
-                inbound.get('header_type') == 'http'
-            ):
-                account.flow = XTLSFlows.NONE
+                if getattr(account, "flow", None) and (
+                    inbound.get("network", "tcp") not in ("tcp", "kcp")
+                    or inbound.get("tls") not in ("tls", "reality")
+                    or inbound.get("header_type") == "http"
+                ):
+                    account.flow = XTLSFlows.NONE
+                accounts_by_inbound.setdefault(inbound_tag, []).append(account)
 
-            _alter_inbound_user(xray.api, inbound_tag, account)  # main core
-            for node in list(xray.nodes.values()):
-                if node.connected and node.started:
-                    _alter_inbound_user(node.api, inbound_tag, account)
-
-    for inbound_tag in xray.config.inbounds_by_tag:
-        if inbound_tag in active_inbounds:
-            continue
-        # remove disabled inbounds
-        _remove_user_from_inbound(xray.api, inbound_tag, email)
+    for inbound_tag, accounts in accounts_by_inbound.items():
+        account_tuple = tuple(accounts)
+        _replace_inbound_users(xray.api, inbound_tag, all_emails, account_tuple)
         for node in list(xray.nodes.values()):
             if node.connected and node.started:
-                _remove_user_from_inbound(node.api, inbound_tag, email)
+                _replace_inbound_users(node.api, inbound_tag, all_emails, account_tuple)
 
 
 def remove_node(node_id: int):

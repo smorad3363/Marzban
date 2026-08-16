@@ -50,7 +50,7 @@ import { Controller, FormProvider, useForm, useWatch } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "react-query";
 import { fetch } from "service/http";
-import { AdminCapabilities, ManagedAdmin, ManagedAdminList } from "types/Admin";
+import { AdminCapabilities, ManagedAdmin, ManagedAdminList, SubscriptionMode } from "types/Admin";
 import {
   ProxyKeys,
   ProxyType,
@@ -273,6 +273,13 @@ const unrestrictedCapabilities: AdminCapabilities = {
   allowed_inbounds: [],
   all_user_limits: true,
   allowed_user_limits: [],
+  allowed_subscription_modes: [
+    "limited_traffic_unlimited_devices",
+    "unlimited_traffic_limited_devices",
+    "limited_traffic_limited_devices",
+    "unlimited_traffic_unlimited_devices",
+  ],
+  view_full_client_ip: true,
   capacity_used: 0,
   capacity_limit: null,
   capacity_remaining: null,
@@ -345,6 +352,8 @@ export const UserDialog: FC<UserDialogProps> = () => {
       allowed_inbounds: selectedOwner.policy.allowed_inbounds,
       all_user_limits: selectedOwner.policy.all_user_limits,
       allowed_user_limits: selectedOwner.policy.allowed_user_limits,
+      allowed_subscription_modes: selectedOwner.policy.allowed_subscription_modes,
+      view_full_client_ip: selectedOwner.policy.view_full_client_ip,
       capacity_used: selectedOwner.capacity_used,
       capacity_limit: selectedOwner.policy.max_users,
       capacity_remaining: selectedOwner.policy.max_users === null
@@ -365,11 +374,29 @@ export const UserDialog: FC<UserDialogProps> = () => {
     : effectiveCapabilities.capacity_remaining + reclaimedCapacity;
   const requestedCapacity = concurrentUserLimit || 1;
   const lacksCapacity = assignableCapacity !== null && requestedCapacity > assignableCapacity;
+  const subscriptionMode: SubscriptionMode = dataLimit && dataLimit > 0
+    ? concurrentUserLimit === null
+      ? "limited_traffic_unlimited_devices"
+      : "limited_traffic_limited_devices"
+    : concurrentUserLimit === null
+      ? "unlimited_traffic_unlimited_devices"
+      : "unlimited_traffic_limited_devices";
+  const modeAllowed = effectiveCapabilities.allowed_subscription_modes.includes(subscriptionMode);
+  const unlimitedDevicesAllowed = effectiveCapabilities.allowed_subscription_modes.some(
+    (mode) => mode.endsWith("_unlimited_devices")
+  );
 
   useEffect(() => {
     if (!isOpen || effectiveCapabilities.all_user_limits) return;
     const current = form.getValues("concurrent_user_limit");
-    if (!isEditing && (current === null || !effectiveCapabilities.allowed_user_limits.includes(current))) {
+    if (
+      !isEditing
+      && !(
+        current === null
+        ? unlimitedDevicesAllowed
+        : effectiveCapabilities.allowed_user_limits.includes(current)
+      )
+    ) {
       form.setValue("concurrent_user_limit", effectiveCapabilities.allowed_user_limits[0] ?? null);
     }
   }, [
@@ -377,6 +404,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
     isEditing,
     effectiveCapabilities.all_user_limits,
     effectiveCapabilities.allowed_user_limits.join(","),
+    unlimitedDevicesAllowed,
   ]);
 
   useEffect(() => {
@@ -788,12 +816,18 @@ export const UserDialog: FC<UserDialogProps> = () => {
                               <Select
                                 {...field}
                                 value={field.value ?? ""}
-                                onChange={(event) => field.onChange(Number(event.target.value))}
+                                onChange={(event) => field.onChange(
+                                  event.target.value === "" ? null : Number(event.target.value)
+                                )}
                                 isDisabled={disabled}
                                 dir="ltr"
                                 minH="44px"
                               >
-                                <option value="" disabled>{t("userDialog.selectConnectionLimit")}</option>
+                                <option value="" disabled={!unlimitedDevicesAllowed}>
+                                  {unlimitedDevicesAllowed
+                                    ? t("unlimited")
+                                    : t("userDialog.selectConnectionLimit")}
+                                </option>
                                 {effectiveCapabilities.allowed_user_limits.map((limit) => (
                                   <option
                                     key={limit}
@@ -813,6 +847,15 @@ export const UserDialog: FC<UserDialogProps> = () => {
                             })}
                           </FormHelperText>
                         </FormControl>
+                      {!modeAllowed && (
+                        <Alert status="warning" borderRadius="10px" mb={3} alignItems="start">
+                          <AlertIcon mt={0.5} />
+                          <Box>
+                            <Text fontWeight="700">{t("userDialog.subscriptionModeForbidden")}</Text>
+                            <Text fontSize="sm" mt={1}>{t(`admins.subscriptionMode.${subscriptionMode}`)}</Text>
+                          </Box>
+                        </Alert>
+                      )}
                       <Collapse
                         in={!!(dataLimit && dataLimit > 0)}
                         animateOpacity
@@ -1149,7 +1192,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                     variant="ghost"
                     minH="44px"
                     onClick={onClose}
-                    isDisabled={disabled || lacksCapacity}
+                    isDisabled={disabled}
                     w={{ base: "full", sm: "auto" }}
                   >
                     {t("cancel")}
@@ -1160,7 +1203,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                     px="8"
                     colorScheme="primary"
                     isLoading={loading}
-                    isDisabled={disabled}
+                    isDisabled={disabled || lacksCapacity || !modeAllowed}
                     w={{ base: "full", sm: "auto" }}
                   >
                     {isEditing ? t("userDialog.editUser") : t("createUser")}

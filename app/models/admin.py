@@ -7,6 +7,10 @@ from passlib.context import CryptContext
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.db import Session, crud, get_db
+from app.device_limit.constants import (
+    DEFAULT_ADMIN_SUBSCRIPTION_MODES,
+    SubscriptionMode,
+)
 from app.utils.jwt import get_admin_payload
 from config import SUDOERS
 
@@ -155,6 +159,10 @@ class MarzhelpAdminPolicy(BaseModel):
     allowed_inbounds: list[str] = Field(default_factory=list)
     all_user_limits: bool = True
     allowed_user_limits: list[int] = Field(default_factory=list)
+    allowed_subscription_modes: list[SubscriptionMode] = Field(
+        default_factory=lambda: list(DEFAULT_ADMIN_SUBSCRIPTION_MODES)
+    )
+    view_full_client_ip: bool = False
     max_user_duration_days: Optional[int] = Field(default=None, ge=1)
     calculate_volume: Literal["used_traffic", "created_traffic"] = "used_traffic"
     prevent_user_creation: bool = False
@@ -176,12 +184,21 @@ class MarzhelpAdminPolicy(BaseModel):
             raise ValueError("Allowed user limits must be positive integers")
         return sorted(set(value))
 
+    @field_validator("allowed_subscription_modes")
+    @classmethod
+    def normalize_subscription_modes(
+        cls, value: list[SubscriptionMode]
+    ) -> list[SubscriptionMode]:
+        return sorted(set(value), key=lambda item: item.value)
+
     @model_validator(mode="after")
     def validate_selected_permissions(self):
         if not self.all_inbounds and not self.allowed_inbounds:
             raise ValueError("Select at least one inbound")
         if not self.all_user_limits and not self.allowed_user_limits:
             raise ValueError("Select at least one user limit")
+        if not self.allowed_subscription_modes:
+            raise ValueError("Select at least one subscription mode")
         return self
 
 
@@ -196,6 +213,10 @@ class AdminCapabilities(BaseModel):
     allowed_inbounds: list[str] = Field(default_factory=list)
     all_user_limits: bool = True
     allowed_user_limits: list[int] = Field(default_factory=list)
+    allowed_subscription_modes: list[SubscriptionMode] = Field(
+        default_factory=lambda: list(DEFAULT_ADMIN_SUBSCRIPTION_MODES)
+    )
+    view_full_client_ip: bool = False
     capacity_used: int = 0
     capacity_limit: Optional[int] = None
     capacity_remaining: Optional[int] = None

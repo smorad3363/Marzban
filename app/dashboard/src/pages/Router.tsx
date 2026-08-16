@@ -5,6 +5,7 @@ import { Dashboard } from "./Dashboard";
 import { Admins } from "./Admins";
 import { Login } from "./Login";
 import { AuditLogs } from "./AuditLogs";
+import { DeviceLimits } from "./DeviceLimits";
 const fetchAdminLoader = () => {
     return fetch("/admin", {
         headers: {
@@ -26,6 +27,12 @@ export const router = createHashRouter([
     {
         path: "/admins/",
         element: <Admins />,
+        errorElement: <Login />,
+        loader: fetchAdminLoader,
+    },
+    {
+        path: "/device-limits/",
+        element: <DeviceLimits />,
         errorElement: <Login />,
         loader: fetchAdminLoader,
     },

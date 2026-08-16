@@ -51,6 +51,7 @@ import { formatBytes } from "utils/formatByte";
 import { BulkUserActions } from "./BulkUserActions";
 import { OnlineBadge } from "./OnlineBadge";
 import { Pagination } from "./Pagination";
+import { UserDeviceLimit } from "./UserDeviceLimit";
 
 const EmptySectionIcon = chakra(AddFileIcon);
 const iconProps = { baseStyle: { w: 4, h: 4 } };
@@ -758,6 +759,7 @@ const UserCard: FC<UserCardProps> = ({
           wrap="wrap"
         >
           <ActionButtons user={user} onEdit={onOpen} accent={visual.accent} />
+          <UserDeviceLimit user={user} />
         </Flex>
       </Stack>
     </Card>

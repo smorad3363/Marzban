@@ -30,7 +30,7 @@ marzban update
 Install or update to an exact version:
 
 ```bash
-marzban update --version v4.5.2
+marzban update --version v4.6.0
 ```
 
 ## Rollback
@@ -38,7 +38,7 @@ marzban update --version v4.5.2
 Roll back the application image while preserving the current database and data:
 
 ```bash
-marzban rollback v4.5.1
+marzban rollback v4.5.2
 ```
 
 You can also pin an immutable commit image:

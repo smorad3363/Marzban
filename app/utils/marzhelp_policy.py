@@ -14,6 +14,7 @@ from sqlalchemy import case, func, or_, update
 from sqlalchemy.orm import Session
 
 from app import xray
+from app.device_limit.constants import SubscriptionMode
 from app.db.models import (
     Admin,
     MarzhelpAccountingTransaction,
@@ -41,6 +42,9 @@ def calculate_delete_refund(data_limit: int | None, actual_used_traffic: int | N
 def _settings(db: Session, admin_id: int | None, lock: bool = False) -> MarzhelpAdminSettings | None:
     if admin_id is None:
         return None
+    admin = db.get(Admin, admin_id)
+    if admin is not None and admin.is_sudo:
+        return None
     query = db.query(MarzhelpAdminSettings).filter(MarzhelpAdminSettings.admin_id == admin_id)
     if lock:
         query = query.with_for_update()
@@ -57,6 +61,39 @@ def _effective_expire(value: Any) -> int | None:
     if value in (None, 0):
         return None
     return int(value)
+
+
+def subscription_mode_for(
+    data_limit: int | None,
+    concurrent_user_limit: int | None,
+) -> SubscriptionMode:
+    finite_traffic = _effective_data_limit(data_limit) is not None
+    finite_devices = concurrent_user_limit is not None
+    if finite_traffic and finite_devices:
+        return SubscriptionMode.limited_traffic_limited_devices
+    if finite_traffic:
+        return SubscriptionMode.limited_traffic_unlimited_devices
+    if finite_devices:
+        return SubscriptionMode.unlimited_traffic_limited_devices
+    return SubscriptionMode.unlimited_traffic_unlimited_devices
+
+
+def _validate_subscription_mode(
+    settings: MarzhelpAdminSettings,
+    data_limit: int | None,
+    concurrent_user_limit: int | None,
+) -> None:
+    mode = subscription_mode_for(data_limit, concurrent_user_limit)
+    allowed = set(settings.allowed_subscription_modes)
+    # Legacy rows created before mode permissions existed remain unrestricted.
+    # The migration and every new admin explicitly receive the safe defaults.
+    if not allowed:
+        return
+    if mode.value not in allowed:
+        raise MarzhelpPolicyError(
+            "subscription_mode_forbidden",
+            f"MarzHelp: subscription mode '{mode.value}' is not allowed for the admin",
+        )
 
 
 def capacity_weight(concurrent_user_limit: int | None) -> int:
@@ -144,10 +181,14 @@ def _validate_concurrent_user_limit(
     settings: MarzhelpAdminSettings,
     concurrent_user_limit: int | None,
 ) -> None:
+    # Unlimited devices are authorized by the subscription-mode permission.
+    # The exact-limit allow-list applies only when a finite value is requested.
+    if concurrent_user_limit is None:
+        return
     if settings.all_user_limits:
         capacity_weight(concurrent_user_limit)
         return
-    if concurrent_user_limit is None or int(concurrent_user_limit) not in settings.allowed_user_limits:
+    if int(concurrent_user_limit) not in settings.allowed_user_limits:
         raise MarzhelpPolicyError(
             "user_limit_forbidden",
             "MarzHelp: this concurrent user limit is not allowed for the admin",
@@ -377,12 +418,15 @@ def validate_create(db: Session, admin_id: int | None, user: Any) -> MarzhelpAdm
     data_limit = _effective_data_limit(user.data_limit)
     expire = _effective_expire(user.expire)
     _validate_data_limit(settings, data_limit)
+    _validate_subscription_mode(settings, data_limit, concurrent_user_limit)
     _validate_expiration(settings, expire, getattr(user, "on_hold_expire_duration", None))
     _validate_traffic_credit(db, settings, data_limit)
 
     next_plan = getattr(user, "next_plan", None)
     if next_plan is not None:
-        _validate_data_limit(settings, _effective_data_limit(next_plan.data_limit))
+        next_data_limit = _effective_data_limit(next_plan.data_limit)
+        _validate_data_limit(settings, next_data_limit)
+        _validate_subscription_mode(settings, next_data_limit, concurrent_user_limit)
         _validate_expiration(settings, _effective_expire(next_plan.expire))
 
     _consume_allowance(db, settings)
@@ -487,11 +531,14 @@ def validate_update(db: Session, dbuser: User, modify: Any) -> tuple[bool, bool]
         else dbuser.on_hold_expire_duration
     )
     _validate_data_limit(settings, data_limit)
+    _validate_subscription_mode(settings, data_limit, concurrent_user_limit)
     _validate_expiration(settings, expire, on_hold_duration)
     _validate_traffic_credit(db, settings, data_limit, excluded_user_id=dbuser.id)
 
     if modify.next_plan is not None:
-        _validate_data_limit(settings, _effective_data_limit(modify.next_plan.data_limit))
+        next_data_limit = _effective_data_limit(modify.next_plan.data_limit)
+        _validate_data_limit(settings, next_data_limit)
+        _validate_subscription_mode(settings, next_data_limit, concurrent_user_limit)
         _validate_expiration(settings, _effective_expire(modify.next_plan.expire))
 
     if renewal:
@@ -538,6 +585,7 @@ def validate_next_plan_activation(db: Session, dbuser: User) -> bool:
     data_limit = resulting_next_plan_data_limit(dbuser)
     expire = _effective_expire(dbuser.next_plan.expire)
     _validate_data_limit(settings, data_limit)
+    _validate_subscription_mode(settings, data_limit, dbuser.concurrent_user_limit)
     _validate_expiration(settings, expire)
     _validate_traffic_credit(db, settings, data_limit, excluded_user_id=dbuser.id)
     _consume_allowance(db, settings)
@@ -564,6 +612,11 @@ def validate_activation(db: Session, dbuser: User) -> None:
         return
     _validate_account(settings)
     _validate_data_limit(settings, dbuser.data_limit)
+    _validate_subscription_mode(
+        settings,
+        dbuser.data_limit,
+        dbuser.concurrent_user_limit,
+    )
     _validate_expiration(
         settings,
         dbuser.expire,
@@ -593,6 +646,11 @@ def validate_transfer(db: Session, dbuser: User, new_admin_id: int) -> None:
         _validate_inbounds(settings, user_inbound_tags(dbuser))
         _validate_concurrent_user_limit(settings, dbuser.concurrent_user_limit)
         _validate_data_limit(settings, dbuser.data_limit)
+        _validate_subscription_mode(
+            settings,
+            dbuser.data_limit,
+            dbuser.concurrent_user_limit,
+        )
         _validate_expiration(settings, dbuser.expire, dbuser.on_hold_expire_duration)
         _validate_traffic_credit(db, settings, dbuser.data_limit)
         if owner_changes:
