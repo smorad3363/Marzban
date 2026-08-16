@@ -11,7 +11,7 @@ export const Footer: FC<BoxProps> = (props) => {
         fontSize="xs"
         letterSpacing="0.02em"
       >
-        Heisenberg Panel · Private control laboratory
+        پنل هایزنبرگ · آزمایشگاه کنترل خصوصی
       </Text>
     </HStack>
   );

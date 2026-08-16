@@ -37,10 +37,10 @@ i18n
             },
             load: "languageOnly",
             backend: {
-                loadPath: joinPaths([
+                loadPath: `${joinPaths([
                     import.meta.env.BASE_URL,
                     `statics/locales/{{lng}}.json`,
-                ]),
+                ])}?v=${__LOCALE_BUILD_ID__}`,
             },
         },
         function () {
