@@ -155,6 +155,11 @@ class MarzhelpAdminPolicy(BaseModel):
     expiry_date: Optional[date] = None
     user_limit: Optional[int] = Field(default=None, ge=0)
     max_users: Optional[int] = Field(default=None, ge=1)
+    device_capacity_limit: Optional[int] = Field(default=None, ge=1)
+    provisioning_volume_limit: Optional[int] = Field(default=None, ge=0)
+    provisioning_volume_used: int = Field(default=0, ge=0)
+    renewal_limit: Optional[int] = Field(default=None, ge=0)
+    renewals_used: int = Field(default=0, ge=0)
     all_inbounds: bool = True
     allowed_inbounds: list[str] = Field(default_factory=list)
     all_user_limits: bool = True
@@ -202,10 +207,23 @@ class MarzhelpAdminPolicy(BaseModel):
         return self
 
 
+class AdminQuotaSummary(BaseModel):
+    current_users: int
+    max_users: Optional[int] = None
+    remaining_user_slots: Optional[int] = None
+    provisioned_volume: int
+    provisioning_volume_limit: Optional[int] = None
+    remaining_provisioning_volume: Optional[int] = None
+    renewals_used: int
+    renewal_limit: Optional[int] = None
+    renewals_remaining: Optional[int] = None
+
+
 class ManagedAdmin(Admin):
     user_count: int = 0
     capacity_used: int = 0
     policy: MarzhelpAdminPolicy
+    quota: AdminQuotaSummary
 
 
 class AdminCapabilities(BaseModel):
@@ -220,6 +238,13 @@ class AdminCapabilities(BaseModel):
     capacity_used: int = 0
     capacity_limit: Optional[int] = None
     capacity_remaining: Optional[int] = None
+    quota: AdminQuotaSummary = Field(
+        default_factory=lambda: AdminQuotaSummary(
+            current_users=0,
+            provisioned_volume=0,
+            renewals_used=0,
+        )
+    )
 
 
 class ManagedAdminList(BaseModel):
@@ -235,3 +260,7 @@ class ManagedAdminCreate(AdminCreate):
 
 class ManagedAdminModify(AdminModify):
     policy: MarzhelpAdminPolicy
+
+
+class AdminDeleteRequest(BaseModel):
+    strategy: Literal["delete_users", "disable_users", "keep_users"] = "keep_users"

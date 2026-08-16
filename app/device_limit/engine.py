@@ -18,6 +18,7 @@ from app import logger, xray
 from app.db import GetDB
 from app.db.models import (
     AdminAuditLog,
+    DeviceClientObservation,
     DeviceLimitIncident,
     DeviceLimitPenaltyStage,
     DeviceLimitSettings,
@@ -25,7 +26,7 @@ from app.db.models import (
     DeviceSlot,
     User,
 )
-from app.device_limit.constants import PenaltyAction, PenaltyStatus
+from app.device_limit.constants import DeviceEventState, PenaltyAction, PenaltyStatus
 from app.models.user import UserStatus
 from app.utils.audit import AuditLogService
 
@@ -70,7 +71,7 @@ class DeviceLimitEngine:
         self._last_evaluation = 0.0
         self._event_logger: logging.Logger | None = None
         self._runtime_enabled = False
-        self._enforcement_mode = "hybrid"
+        self._ip_detection_enabled = True
         self._limited_user_ids: set[int] | None = None
         self._last_user_cache_refresh = 0.0
 
@@ -83,7 +84,11 @@ class DeviceLimitEngine:
             with GetDB() as db:
                 settings = db.get(DeviceLimitSettings, 1)
                 if settings is not None:
-                    self.configure(settings.enabled, settings.enforcement_mode)
+                    self.configure(
+                        settings.enabled,
+                        settings.enforcement_mode,
+                        settings.ip_detection_enabled,
+                    )
                     if settings.enabled:
                         self._refresh_limited_users(db, force=True)
         except Exception as exc:
@@ -160,7 +165,7 @@ class DeviceLimitEngine:
             logger.debug("Device-limit collector %s stopped: %s", source_name, exc)
 
     def record_log(self, raw: str, source_name: str = "master") -> int:
-        if not self._runtime_enabled or self._enforcement_mode == "slots":
+        if not self._runtime_enabled or not self._ip_detection_enabled:
             return 0
         recorded = 0
         now = time.time()
@@ -234,17 +239,120 @@ class DeviceLimitEngine:
     ) -> tuple[set[str], set[str], dict[int, set[str]]]:
         return self._snapshot_user(user_id, window_seconds, hit_threshold)
 
+    def _snapshot_user_detailed(
+        self,
+        user_id: int,
+        window_seconds: int,
+        fresh_seconds: int,
+        hit_threshold: int,
+    ) -> tuple[
+        set[str],
+        set[str],
+        dict[int, set[str]],
+        set[str],
+        dict[int, set[str]],
+    ]:
+        now = time.time()
+        cutoff = now - window_seconds
+        fresh_cutoff = now - fresh_seconds
+        historical_per_slot: dict[int, set[str]] = {}
+        fresh_per_slot: dict[int, set[str]] = {}
+        with self._lock:
+            slots = self._activity.get(user_id, {})
+            for slot_index, addresses in list(slots.items()):
+                historical: set[str] = set()
+                fresh: set[str] = set()
+                for address, hits in list(addresses.items()):
+                    while hits and hits[0] < cutoff:
+                        hits.popleft()
+                    if not hits:
+                        del addresses[address]
+                        continue
+                    if len(hits) >= hit_threshold:
+                        historical.add(address)
+                        if hits[-1] >= fresh_cutoff:
+                            fresh.add(address)
+                if not addresses:
+                    slots.pop(slot_index, None)
+                if historical:
+                    historical_per_slot[slot_index] = historical
+                if fresh:
+                    fresh_per_slot[slot_index] = fresh
+            if not slots:
+                self._activity.pop(user_id, None)
+                self._sources.pop(user_id, None)
+            sources = set(self._sources.get(user_id, set()))
+        historical_all = (
+            set().union(*historical_per_slot.values()) if historical_per_slot else set()
+        )
+        fresh_all = set().union(*fresh_per_slot.values()) if fresh_per_slot else set()
+        return historical_all, sources, historical_per_slot, fresh_all, fresh_per_slot
+
+    @staticmethod
+    def _fresh_window(settings: DeviceLimitSettings) -> int:
+        if settings.handoff_grace_seconds <= 0:
+            return max(5, min(int(settings.check_interval_seconds), 60))
+        return max(
+            5,
+            min(
+                int(settings.check_interval_seconds),
+                max(int(settings.handoff_grace_seconds) // 3, 5),
+            ),
+        )
+
+    def _risk_for_user(
+        self,
+        db,
+        user_id: int,
+        settings: DeviceLimitSettings,
+        fresh_addresses: set[str],
+        fresh_per_slot: dict[int, set[str]],
+        now: datetime,
+    ) -> tuple[int, dict]:
+        signals = {
+            "ip_concurrency": len(fresh_addresses) > 1,
+            "fresh_ip_count": len(fresh_addresses),
+            "active_slot_count": (
+                len(fresh_per_slot) if settings.device_slots_enabled else 0
+            ),
+            "client_family_count": 0,
+            "platform_count": 0,
+        }
+        risk = 70 if signals["ip_concurrency"] else 0
+        if settings.client_fingerprint_enabled:
+            observations = (
+                db.query(DeviceClientObservation)
+                .filter(
+                    DeviceClientObservation.user_id == user_id,
+                    DeviceClientObservation.last_seen_at
+                    >= now - timedelta(seconds=settings.active_window_seconds),
+                )
+                .all()
+            )
+            families = {item.client_name.lower() for item in observations if item.client_name}
+            platforms = {item.platform.lower() for item in observations if item.platform}
+            signals["client_family_count"] = len(families)
+            signals["platform_count"] = len(platforms)
+            if len(families) > 1:
+                risk += 15
+            if len(platforms) > 1:
+                risk += 10
+        if settings.device_slots_enabled and len(fresh_per_slot) > 1:
+            risk += 5
+        return min(risk, 100), signals
+
     def evaluate(self) -> None:
         with GetDB() as db:
             settings = db.get(DeviceLimitSettings, 1)
             self.configure(
                 bool(settings and settings.enabled),
                 settings.enforcement_mode if settings else "hybrid",
+                settings.ip_detection_enabled if settings else True,
             )
             if settings is None or not settings.enabled:
                 return
             self._refresh_limited_users(db)
-            if settings.enforcement_mode == "slots":
+            if not settings.ip_detection_enabled:
                 self._release_due_penalties(db, settings, force=True)
                 return
             now_monotonic = time.monotonic()
@@ -275,26 +383,82 @@ class DeviceLimitEngine:
                     .all()
                 )
                 for user in users:
-                    addresses, sources, per_slot = self._snapshot_user(
+                    (
+                        addresses,
+                        sources,
+                        per_slot,
+                        fresh_addresses,
+                        fresh_per_slot,
+                    ) = self._snapshot_user_detailed(
                         user.id,
                         settings.active_window_seconds,
-                        settings.hit_threshold,
+                        self._fresh_window(settings),
+                        settings.min_successful_connections,
                     )
                     limit = int(user.concurrent_user_limit or 0)
                     if limit < 1 or len(addresses) <= limit:
+                        state = db.get(DeviceLimitUserState, user.id)
+                        if state and state.pending_handoff_started_at:
+                            self._clear_pending(state)
                         continue
                     state = db.get(DeviceLimitUserState, user.id)
+                    if state is None:
+                        state = DeviceLimitUserState(user_id=user.id)
+                        db.add(state)
+                    risk_score, signals = self._risk_for_user(
+                        db,
+                        user.id,
+                        settings,
+                        fresh_addresses,
+                        fresh_per_slot,
+                        now,
+                    )
+                    if len(fresh_addresses) <= limit:
+                        if state.pending_handoff_started_at:
+                            logger.info(
+                                "device_handoff_completed user_id=%s historical_ips=%s fresh_ips=%s",
+                                user.id,
+                                len(addresses),
+                                len(fresh_addresses),
+                            )
+                            self._clear_pending(state)
+                        continue
+                    if state.pending_handoff_started_at is None:
+                        if settings.handoff_grace_seconds > 0:
+                            self._begin_pending(
+                                state,
+                                fresh_addresses,
+                                sources,
+                                risk_score,
+                                now,
+                            )
+                            logger.info(
+                                "device_handoff_pending user_id=%s grace_seconds=%s risk=%s",
+                                user.id,
+                                settings.handoff_grace_seconds,
+                                risk_score,
+                            )
+                            continue
+                    elif (
+                        state.pending_handoff_started_at
+                        + timedelta(seconds=settings.handoff_grace_seconds)
+                        > now
+                    ):
+                        state.pending_ip_addresses = sorted(fresh_addresses)
+                        state.pending_source_nodes = sorted(sources)
+                        state.pending_risk_score = risk_score
+                        state.pending_last_fresh_at = now
+                        continue
                     if state and state.last_violation_at:
                         cooldown = timedelta(seconds=settings.active_window_seconds)
                         if state.last_violation_at + cooldown > now:
+                            self._clear_pending(state)
                             continue
                         if state.last_violation_at + timedelta(
                             seconds=settings.strike_reset_seconds
                         ) <= now:
                             state.violation_count = 0
-                    if state is None:
-                        state = DeviceLimitUserState(user_id=user.id)
-                        db.add(state)
+                    self._clear_pending(state)
                     state.violation_count = int(state.violation_count or 0) + 1
                     stage = self._stage_for(stages, state.violation_count)
                     self._apply_penalty(
@@ -303,13 +467,42 @@ class DeviceLimitEngine:
                         user,
                         state,
                         stage,
-                        addresses,
+                        fresh_addresses,
                         sources,
-                        per_slot,
+                        fresh_per_slot,
                         now,
+                        risk_score,
+                        signals,
                     )
             db.commit()
             self._release_due_penalties(db, settings)
+
+    @staticmethod
+    def _begin_pending(
+        state: DeviceLimitUserState,
+        addresses: set[str],
+        sources: set[str],
+        risk_score: int,
+        now: datetime,
+    ) -> None:
+        state.penalty_status = PenaltyStatus.pending_handoff.value
+        state.pending_handoff_started_at = now
+        state.pending_ip_addresses = sorted(addresses)
+        state.pending_source_nodes = sorted(sources)
+        state.pending_risk_score = risk_score
+        state.pending_last_fresh_at = now
+        state.active_ip_count = len(addresses)
+        state.last_seen_at = now
+
+    @staticmethod
+    def _clear_pending(state: DeviceLimitUserState) -> None:
+        state.pending_handoff_started_at = None
+        state.pending_ip_addresses = None
+        state.pending_source_nodes = None
+        state.pending_risk_score = None
+        state.pending_last_fresh_at = None
+        if state.penalty_status == PenaltyStatus.pending_handoff.value:
+            state.penalty_status = PenaltyStatus.clear.value
 
     def _refresh_limited_users(self, db, force: bool = False) -> None:
         now = time.monotonic()
@@ -350,13 +543,19 @@ class DeviceLimitEngine:
         sources: set[str],
         per_slot: dict[int, set[str]],
         now: datetime,
+        risk_score: int,
+        signals: dict,
     ) -> None:
         action = PenaltyAction(stage.action) if stage else PenaltyAction.warn
+        # User-Agent is diagnostic/non-cryptographic. A destructive action is
+        # impossible unless fresh Xray IP concurrency independently confirms it.
+        if not signals.get("ip_concurrency") and action != PenaltyAction.warn:
+            action = PenaltyAction.warn
         if action == PenaltyAction.delete and not settings.auto_delete_enabled:
             action = PenaltyAction.permanent_disable
         reason = (
-            f"Observed {len(addresses)} active public IPs for configured device limit "
-            f"{user.concurrent_user_limit}"
+            f"Confirmed {len(addresses)} fresh public IPs for configured device limit "
+            f"{user.concurrent_user_limit}; risk={risk_score}"
         )
         state.current_stage = stage.violation_count if stage else state.violation_count
         state.last_violation_at = now
@@ -398,7 +597,20 @@ class DeviceLimitEngine:
             observed_count=len(addresses),
             ip_addresses=sorted(addresses),
             source_nodes=sorted(sources),
+            event_state={
+                PenaltyAction.warn: DeviceEventState.warning.value,
+                PenaltyAction.temporary_disable: DeviceEventState.temporarily_disabled.value,
+                PenaltyAction.permanent_disable: DeviceEventState.permanently_disabled.value,
+                PenaltyAction.delete: DeviceEventState.permanently_disabled.value,
+            }[action],
+            risk_score=risk_score,
+            signal_summary=signals,
             reason=reason,
+            expires_at=(
+                now + timedelta(seconds=settings.warning_auto_delete_seconds)
+                if action == PenaltyAction.warn and settings.warning_auto_delete_seconds > 0
+                else None
+            ),
             created_at=now,
         )
         db.add(incident)
@@ -419,6 +631,8 @@ class DeviceLimitEngine:
                 "stage": state.current_stage,
                 "configured_limit": user.concurrent_user_limit,
                 "observed_count": len(addresses),
+                "risk_score": risk_score,
+                "signals": signals,
             },
             commit=False,
         )
@@ -464,7 +678,13 @@ class DeviceLimitEngine:
             db.query(DeviceLimitIncident).filter(
                 DeviceLimitIncident.user_id == user.id,
                 DeviceLimitIncident.resolved_at.is_(None),
-            ).update({DeviceLimitIncident.resolved_at: now}, synchronize_session=False)
+            ).update(
+                {
+                    DeviceLimitIncident.resolved_at: now,
+                    DeviceLimitIncident.event_state: DeviceEventState.resolved.value,
+                },
+                synchronize_session=False,
+            )
             changed = True
         if changed:
             db.commit()
@@ -481,6 +701,39 @@ class DeviceLimitEngine:
             if settings is None:
                 return
             now = utc_now()
+            if settings.warning_auto_delete_seconds > 0:
+                expired_warning_user_ids = [
+                    row[0]
+                    for row in db.query(DeviceLimitIncident.user_id)
+                    .filter(
+                        DeviceLimitIncident.event_state == DeviceEventState.warning.value,
+                        DeviceLimitIncident.resolved_at.is_(None),
+                        DeviceLimitIncident.expires_at.is_not(None),
+                        DeviceLimitIncident.expires_at <= now,
+                    )
+                    .distinct()
+                ]
+                db.query(DeviceLimitIncident).filter(
+                    DeviceLimitIncident.event_state == DeviceEventState.warning.value,
+                    DeviceLimitIncident.resolved_at.is_(None),
+                    DeviceLimitIncident.expires_at.is_not(None),
+                    DeviceLimitIncident.expires_at <= now,
+                ).delete(synchronize_session=False)
+                if expired_warning_user_ids:
+                    db.query(DeviceLimitUserState).filter(
+                        DeviceLimitUserState.user_id.in_(expired_warning_user_ids),
+                        DeviceLimitUserState.penalty_status == PenaltyStatus.warning.value,
+                    ).update(
+                        {
+                            DeviceLimitUserState.penalty_status: PenaltyStatus.clear.value,
+                            DeviceLimitUserState.last_reason: None,
+                        },
+                        synchronize_session=False,
+                    )
+                    logger.info(
+                        "device_warning_expired users=%s",
+                        len(expired_warning_user_ids),
+                    )
             db.execute(
                 update(DeviceLimitIncident)
                 .where(
@@ -504,10 +757,19 @@ class DeviceLimitEngine:
             self._activity.pop(user_id, None)
             self._sources.pop(user_id, None)
 
-    def configure(self, enabled: bool, enforcement_mode: str = "hybrid") -> None:
+    def configure(
+        self,
+        enabled: bool,
+        enforcement_mode: str = "hybrid",
+        ip_detection_enabled: bool | None = None,
+    ) -> None:
         self._runtime_enabled = enabled
-        self._enforcement_mode = enforcement_mode
-        if not enabled or enforcement_mode == "slots":
+        self._ip_detection_enabled = (
+            enforcement_mode != "slots"
+            if ip_detection_enabled is None
+            else bool(ip_detection_enabled)
+        )
+        if not enabled or not self._ip_detection_enabled:
             with self._lock:
                 self._activity.clear()
                 self._sources.clear()
@@ -528,6 +790,8 @@ class DeviceLimitEngine:
                     "stage": incident.stage,
                     "configured_limit": incident.configured_limit,
                     "observed_count": incident.observed_count,
+                    "event_state": incident.event_state,
+                    "risk_score": incident.risk_score,
                     # Durable full addresses live only in the retention-managed DB.
                     "ip_addresses": [mask_ip(value) for value in (incident.ip_addresses or [])],
                     "source_nodes": incident.source_nodes,

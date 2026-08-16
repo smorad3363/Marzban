@@ -53,11 +53,17 @@ def test_device_limit_migration_recovers_from_mysql_partial_ddl():
             "device_slots",
             "device_limit_user_states",
             "device_limit_incidents",
+            "device_client_observations",
         } <= tables
         settings = connection.execute(
-            text("SELECT enabled, enforcement_mode FROM device_limit_settings WHERE id = 1")
+            text(
+                "SELECT enabled, enforcement_mode, device_slots_enabled, "
+                "ip_detection_enabled, client_fingerprint_enabled, "
+                "min_successful_connections, handoff_grace_seconds "
+                "FROM device_limit_settings WHERE id = 1"
+            )
         ).one()
-        assert settings == (False, "hybrid")
+        assert settings == (False, "hybrid", True, True, False, 3, 90)
         create_sql = connection.execute(
             text("SHOW CREATE TABLE device_limit_settings")
         ).one()[1].upper()

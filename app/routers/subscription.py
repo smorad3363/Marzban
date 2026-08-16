@@ -190,6 +190,7 @@ def user_subscription_with_client_type(
 ):
     """Provides a subscription link based on the specified client type (e.g., Clash, V2Ray)."""
     user = _subscription_user(dbuser)
+    crud.update_user_sub(db, dbuser, user_agent)
 
     response_headers = {
         "content-disposition": f'attachment; filename="{user.username}"',

@@ -87,11 +87,46 @@ def test_existing_user_count_limit_blocks_create_and_delete_frees_slot(session):
 
     with pytest.raises(policy.MarzhelpPolicyError) as exc:
         policy.validate_create(session, admin.id, plan())
-    assert exc.value.code == "weighted_capacity_exceeded"
+    assert exc.value.code == "max_users_exceeded"
 
     session.delete(session.query(User).filter(User.username == "counted-two").one())
     session.commit()
     assert policy.validate_create(session, admin.id, plan()) is not None
+
+
+def test_unlimited_traffic_does_not_bypass_account_limit(session):
+    admin, _ = add_admin(session, max_users=1)
+    session.add(User(username="unlimited-existing", admin_id=admin.id, data_limit=None))
+    session.commit()
+
+    with pytest.raises(policy.MarzhelpPolicyError) as exc:
+        policy.validate_create(session, admin.id, plan(data_limit=0))
+    assert exc.value.code == "max_users_exceeded"
+
+
+def test_provisioning_volume_rejects_overspend_atomically(session):
+    admin, settings = add_admin(
+        session,
+        provisioning_volume_limit=20 * GB,
+    )
+    with pytest.raises(policy.MarzhelpPolicyError) as exc:
+        policy.validate_create(session, admin.id, plan(data_limit=50 * GB))
+    assert exc.value.code == "provisioning_volume_exceeded"
+    session.rollback()
+    assert settings.provisioning_volume_used == 0
+
+    policy.record_quota_rejection(exc.value, session)
+    rejection = session.query(MarzhelpAccountingTransaction).one()
+    assert rejection.operation_type == "provisioning_volume"
+    assert rejection.volume_delta == 0
+    assert rejection.renewal_delta == 0
+    assert rejection.result == "rejected"
+    assert rejection.details == {
+        "code": "provisioning_volume_exceeded",
+        "requested_delta": 50 * GB,
+        "used": 0,
+        "limit": 20 * GB,
+    }
 
 
 def test_delete_is_idempotent_and_records_actual_usage(session):
@@ -116,8 +151,8 @@ def test_delete_is_idempotent_and_records_actual_usage(session):
     assert session.query(MarzhelpAccountingTransaction).count() == 1
 
 
-def test_exactly_twenty_create_or_renew_operations(session):
-    admin, _ = add_admin(session, allowance=20)
+def test_create_and_renewal_quotas_are_independent(session):
+    admin, _ = add_admin(session, allowance=12, renewal_limit=8)
     for _ in range(12):
         policy.validate_create(session, admin.id, plan())
         session.commit()
@@ -138,9 +173,13 @@ def test_exactly_twenty_create_or_renew_operations(session):
         user.data_limit = modification.data_limit
         session.commit()
 
-    assert session.get(MarzhelpAdminSettings, admin.id).user_limit == 0
+    settings = session.get(MarzhelpAdminSettings, admin.id)
+    assert settings.user_limit == 0
+    assert settings.renewals_used == 8
     with pytest.raises(policy.MarzhelpPolicyError, match="allowance"):
         policy.validate_create(session, admin.id, plan())
+    with pytest.raises(policy.MarzhelpPolicyError, match="renewal quota"):
+        policy.validate_update(session, user, plan(data_limit=11 * GB))
 
 
 def test_failed_operation_rollback_does_not_consume_allowance(session):
@@ -198,7 +237,7 @@ def test_unlimited_traffic_rejected_on_create_edit_and_next_plan(session):
 
 
 def test_conversion_to_unlimited_counts_as_renewal(session):
-    admin, _ = add_admin(session, allowance=1)
+    admin, _ = add_admin(session, allowance=1, renewal_limit=1)
     user = User(
         username="upgrade-to-unlimited",
         admin_id=admin.id,
@@ -212,7 +251,9 @@ def test_conversion_to_unlimited_counts_as_renewal(session):
     renewal, consumed = policy.validate_update(session, user, plan(data_limit=0))
 
     assert renewal and consumed
-    assert session.get(MarzhelpAdminSettings, admin.id).user_limit == 0
+    settings = session.get(MarzhelpAdminSettings, admin.id)
+    assert settings.user_limit == 1
+    assert settings.renewals_used == 1
 
 
 def test_created_traffic_counts_usage_and_resets_for_existing_unlimited_users(session):
@@ -262,7 +303,7 @@ def test_maximum_duration_create_and_renewal(session):
 
 
 def test_weighted_capacity_counts_existing_users_and_requested_limit(session):
-    admin, settings = add_admin(session, max_users=10)
+    admin, settings = add_admin(session, max_users=10, device_capacity_limit=10)
     session.add_all(
         [
             User(username="weighted-two", admin_id=admin.id, concurrent_user_limit=2),
@@ -282,7 +323,7 @@ def test_weighted_capacity_counts_existing_users_and_requested_limit(session):
 
 
 def test_weighted_capacity_edit_applies_only_delta(session):
-    admin, settings = add_admin(session, max_users=10)
+    admin, settings = add_admin(session, max_users=10, device_capacity_limit=10)
     user = User(
         username="weighted-edit",
         admin_id=admin.id,
@@ -399,7 +440,7 @@ def test_inbound_permissions_filter_and_protect_users(session, monkeypatch):
 
 
 def test_deleting_weighted_user_releases_active_capacity(session):
-    admin, settings = add_admin(session, max_users=6)
+    admin, settings = add_admin(session, max_users=6, device_capacity_limit=6)
     user = User(
         username="weighted-delete",
         admin_id=admin.id,
@@ -423,7 +464,7 @@ def test_concurrent_weighted_creates_cannot_exceed_capacity(session, monkeypatch
     inbounds = [{"tag": "capacity", "protocol": "vless", "network": "tcp", "tls": "none"}]
     monkeypatch.setattr(policy.xray.config, "inbounds_by_protocol", {ProxyTypes.VLESS: inbounds})
     monkeypatch.setattr(policy.xray.config, "inbounds_by_tag", {"capacity": inbounds[0]})
-    admin, _ = add_admin(session, max_users=4)
+    admin, _ = add_admin(session, max_users=4, device_capacity_limit=4)
     Session = session.info["session_factory"]
 
     def attempt(index: int):
@@ -452,3 +493,37 @@ def test_concurrent_weighted_creates_cannot_exceed_capacity(session, monkeypatch
 
     assert sorted(results) == [False, True]
     assert policy.capacity_used(session, admin.id) == 3
+
+
+def test_concurrent_creates_with_one_account_slot_only_one_succeeds(session, monkeypatch):
+    inbounds = [{"tag": "account", "protocol": "vless", "network": "tcp", "tls": "none"}]
+    monkeypatch.setattr(policy.xray.config, "inbounds_by_protocol", {ProxyTypes.VLESS: inbounds})
+    monkeypatch.setattr(policy.xray.config, "inbounds_by_tag", {"account": inbounds[0]})
+    admin, _ = add_admin(session, max_users=1)
+    Session = session.info["session_factory"]
+
+    def attempt(index: int):
+        db = Session()
+        try:
+            crud.create_user(
+                db,
+                UserCreate(
+                    username=f"account-slot-{index}",
+                    proxies={"vless": {}},
+                    inbounds={"vless": ["account"]},
+                    concurrent_user_limit=1,
+                ),
+                admin=db.get(Admin, admin.id),
+            )
+            return True
+        except policy.MarzhelpPolicyError:
+            db.rollback()
+            return False
+        finally:
+            db.close()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(attempt, range(2)))
+
+    assert sorted(results) == [False, True]
+    assert policy.user_count_used(session, admin.id) == 1

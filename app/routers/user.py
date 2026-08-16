@@ -80,7 +80,7 @@ def add_user(
         db.rollback()
         raise HTTPException(status_code=409, detail="User already exists")
 
-    bg.add_task(xray.operations.add_user, dbuser=dbuser)
+    bg.add_task(xray.operations.add_user_by_id, user_id=dbuser.id)
     user = UserResponse.model_validate(dbuser)
     report.user_created(user=user, user_id=dbuser.id, by=admin, user_admin=dbuser.admin)
     AuditLogService.log(
@@ -146,7 +146,7 @@ def modify_user(
     audit_action = classify_user_change(previous_value, new_value)
 
     if user.status in [UserStatus.active, UserStatus.on_hold]:
-        bg.add_task(xray.operations.update_user, dbuser=dbuser)
+        bg.add_task(xray.operations.update_user_by_id, user_id=dbuser.id)
     else:
         bg.add_task(xray.operations.remove_user, dbuser=dbuser)
 

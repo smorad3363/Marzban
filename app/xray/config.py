@@ -469,7 +469,11 @@ class XRayConfig(dict):
                 db_models.DeviceSlot.slot_index,
                 db_models.DeviceSlot.credentials,
                 func.lower(db_models.Proxy.type),
-            ).all()
+            )
+            if device_limit_settings and not device_limit_settings.device_slots_enabled:
+                slot_rows = []
+            else:
+                slot_rows = slot_rows.all()
 
             for row in slot_rows:
                 protocol_settings = (row.credentials or {}).get(row.type)

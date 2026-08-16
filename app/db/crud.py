@@ -462,7 +462,7 @@ def create_user(db: Session, user: UserCreate, admin: Admin = None) -> User:
     db.flush()
     sync_device_slots(db, dbuser)
     marzhelp_policy.record_create(
-        db, dbuser, policy_settings is not None and policy_settings.user_limit is not None
+        db, dbuser, policy_settings is not None
     )
     db.commit()
     db.refresh(dbuser)
@@ -603,7 +603,7 @@ def update_user(
 
     sync_device_slots(db, dbuser)
 
-    if renewal:
+    if renewal or int(getattr(dbuser, "_marzhelp_volume_delta", 0)) != 0:
         db.flush()
         marzhelp_policy.record_renewal(db, dbuser, allowance_consumed)
 
@@ -726,8 +726,12 @@ def update_user_sub(db: Session, dbuser: User, user_agent: str) -> User:
     Returns:
         User: The updated user object.
     """
+    from app.device_limit.clients import MAX_RAW_USER_AGENT, observe_subscription_client
+
+    safe_user_agent = (user_agent or "")[:MAX_RAW_USER_AGENT]
     dbuser.sub_updated_at = datetime.utcnow()
-    dbuser.sub_last_user_agent = user_agent
+    dbuser.sub_last_user_agent = safe_user_agent
+    observe_subscription_client(db, dbuser, safe_user_agent)
 
     db.commit()
     db.refresh(dbuser)
@@ -1108,7 +1112,19 @@ def upsert_marzhelp_admin_policy(
         db.add(settings)
 
     used_capacity = marzhelp_policy.capacity_used(db, admin_id)
-    if policy.max_users is not None and used_capacity > policy.max_users:
+    current_users = marzhelp_policy.user_count_used(db, admin_id)
+    if policy.max_users is not None and current_users > policy.max_users:
+        raise marzhelp_policy.MarzhelpPolicyError(
+            "user_limit_below_usage",
+            (
+                "MarzHelp: maximum users cannot be lower than current user count "
+                f"({current_users})"
+            ),
+        )
+    if (
+        policy.device_capacity_limit is not None
+        and used_capacity > policy.device_capacity_limit
+    ):
         raise marzhelp_policy.MarzhelpPolicyError(
             "capacity_below_usage",
             (
@@ -1117,12 +1133,28 @@ def upsert_marzhelp_admin_policy(
             ),
         )
     settings.capacity_used = used_capacity
+    settings.user_count_used = current_users
+    used_volume = marzhelp_policy.provisioned_volume_used(db, admin_id)
+    if (
+        policy.provisioning_volume_limit is not None
+        and used_volume > policy.provisioning_volume_limit
+    ):
+        raise marzhelp_policy.MarzhelpPolicyError(
+            "volume_limit_below_usage",
+            (
+                "MarzHelp: provisioning volume cannot be lower than current allocation "
+                f"({used_volume})"
+            ),
+        )
+    settings.provisioning_volume_used = used_volume
 
     values = policy.model_dump(
         exclude={
             "allowed_inbounds",
             "allowed_user_limits",
             "allowed_subscription_modes",
+            "provisioning_volume_used",
+            "renewals_used",
         }
     )
     for field, value in values.items():
@@ -1182,7 +1214,11 @@ def partial_update_admin(db: Session, dbadmin: Admin, modified_admin: AdminParti
     return dbadmin
 
 
-def remove_admin(db: Session, dbadmin: Admin) -> Admin:
+def remove_admin(
+    db: Session,
+    dbadmin: Admin,
+    strategy: str = "keep_users",
+) -> int:
     """
     Removes an admin from the database.
 
@@ -1191,8 +1227,28 @@ def remove_admin(db: Session, dbadmin: Admin) -> Admin:
         dbadmin (Admin): The admin object to be removed.
 
     Returns:
-        Admin: The removed admin object.
+        int: Number of users affected by the selected strategy.
     """
+    if strategy not in {"delete_users", "disable_users", "keep_users"}:
+        raise ValueError("Unknown admin deletion strategy")
+    owned_users = (
+        db.query(User)
+        .filter(User.admin_id == dbadmin.id)
+        .order_by(User.id)
+        .with_for_update()
+        .all()
+    )
+    if strategy == "delete_users":
+        for dbuser in owned_users:
+            db.delete(dbuser)
+    else:
+        for dbuser in owned_users:
+            if strategy == "disable_users":
+                dbuser.status = UserStatus.disabled
+                dbuser.last_status_change = datetime.utcnow()
+            dbuser.admin = None
+            dbuser.admin_id = None
+
     # Canonical MarzHelp rows with admin foreign keys must be removed in the
     # same transaction before the Marzban admin row. Audit/deletion ledgers are
     # intentionally retained because they have no destructive foreign key.
@@ -1212,7 +1268,7 @@ def remove_admin(db: Session, dbadmin: Admin) -> Admin:
     ).delete()
     db.delete(dbadmin)
     db.commit()
-    return dbadmin
+    return len(owned_users)
 
 
 def get_admin_by_id(db: Session, id: int) -> Admin:

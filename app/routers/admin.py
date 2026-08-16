@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import case, func
 from sqlalchemy.exc import IntegrityError
@@ -8,10 +8,12 @@ from sqlalchemy.exc import IntegrityError
 from app import xray
 from app.db import Session, crud, get_db
 from app.dependencies import get_admin_by_username, validate_admin
-from app.db.models import MarzhelpAdminSettings, User
+from app.db.models import Admin as DBAdmin, MarzhelpAdminSettings, User
 from app.models.admin import (
     Admin,
     AdminCapabilities,
+    AdminDeleteRequest,
+    AdminQuotaSummary,
     AdminCreate,
     AdminModify,
     ManagedAdmin,
@@ -38,6 +40,7 @@ router = APIRouter(tags=["Admin"], prefix="/api", responses={401: responses._401
 
 
 def managed_admin_response(
+    db: Session,
     dbadmin,
     settings=None,
     user_count: int = 0,
@@ -57,6 +60,9 @@ def managed_admin_response(
         user_count=user_count,
         capacity_used=capacity_used,
         policy=policy,
+        quota=AdminQuotaSummary.model_validate(
+            marzhelp_policy.quota_summary(db, dbadmin.id)
+        ),
     )
 
 
@@ -205,6 +211,7 @@ def modify_admin(
 )
 def remove_admin(
     request: Request,
+    values: AdminDeleteRequest = Body(default=AdminDeleteRequest()),
     dbadmin: Admin = Depends(get_admin_by_username),
     db: Session = Depends(get_db),
     current_admin: Admin = Depends(Admin.check_sudo_admin),
@@ -219,7 +226,13 @@ def remove_admin(
     target_id = dbadmin.id
     target_name = dbadmin.username
     previous_value = admin_audit_state(dbadmin)
-    crud.remove_admin(db, dbadmin)
+    affected_users = crud.remove_admin(db, dbadmin, values.strategy)
+    startup_config = xray.config.include_db_users()
+    if xray.core.started:
+        xray.core.restart(startup_config)
+    for node_id, node in list(xray.nodes.items()):
+        if node.connected:
+            xray.operations.restart_node(node_id, startup_config)
     AuditLogService.log(
         db,
         current_admin,
@@ -229,6 +242,7 @@ def remove_admin(
         target_id=target_id,
         target_name=target_name,
         previous_value=previous_value,
+        details={"strategy": values.strategy, "affected_users": affected_users},
         request=request,
     )
     return {"detail": "Admin removed successfully"}
@@ -257,7 +271,7 @@ def get_admin_capabilities(
     if settings is None:
         return AdminCapabilities()
     used = marzhelp_policy.capacity_used(db, dbadmin.id)
-    maximum = settings.max_users
+    maximum = settings.device_capacity_limit
     return AdminCapabilities(
         all_inbounds=settings.all_inbounds,
         allowed_inbounds=settings.allowed_inbounds,
@@ -268,6 +282,9 @@ def get_admin_capabilities(
         capacity_used=used,
         capacity_limit=maximum,
         capacity_remaining=(max(int(maximum) - used, 0) if maximum is not None else None),
+        quota=AdminQuotaSummary.model_validate(
+            marzhelp_policy.quota_summary(db, dbadmin.id)
+        ),
     )
 
 
@@ -341,6 +358,7 @@ def get_managed_admins(
     return ManagedAdminList(
         admins=[
             managed_admin_response(
+                db,
                 item,
                 settings_by_admin.get(item.id),
                 user_counts.get(item.id, 0),
@@ -352,6 +370,38 @@ def get_managed_admins(
         offset=offset,
         limit=limit,
     )
+
+
+@router.post("/admin-management/repair-orphans")
+def repair_orphaned_users(
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.check_sudo_admin),
+):
+    valid_admin_ids = db.query(DBAdmin.id)
+    orphaned = (
+        db.query(User)
+        .filter(
+            User.admin_id.is_not(None),
+            ~User.admin_id.in_(valid_admin_ids),
+        )
+        .with_for_update()
+        .all()
+    )
+    for dbuser in orphaned:
+        dbuser.admin_id = None
+        dbuser.admin = None
+    db.commit()
+    AuditLogService.log(
+        db,
+        admin,
+        "admin.orphan_repair",
+        "users",
+        f"Admin {admin.username} repaired {len(orphaned)} orphaned users",
+        details={"count": len(orphaned)},
+        request=request,
+    )
+    return {"repaired": len(orphaned)}
 
 
 @router.post(
@@ -377,7 +427,7 @@ def create_managed_admin(
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="Admin already exists")
-    response = managed_admin_response(dbadmin, settings, 0, 0)
+    response = managed_admin_response(db, dbadmin, settings, 0, 0)
     AuditLogService.log(
         db,
         admin,
@@ -427,6 +477,7 @@ def modify_managed_admin(
     db.refresh(settings)
     user_count = db.query(func.count(User.id)).filter(User.admin_id == dbadmin.id).scalar() or 0
     response = managed_admin_response(
+        db,
         dbadmin,
         settings,
         user_count,

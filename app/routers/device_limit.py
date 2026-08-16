@@ -12,11 +12,12 @@ from app.db.models import (
     DeviceLimitUserState,
     DeviceSlot,
     MarzhelpAdminSettings,
+    User,
 )
 from app.dependencies import get_validated_user
-from app.device_limit.constants import PenaltyStatus
+from app.device_limit.constants import DeviceEventState, PenaltyStatus
 from app.device_limit.engine import engine, mask_ip
-from app.device_limit.slots import slot_subscription_url
+from app.device_limit.slots import slot_subscription_url, sync_device_slots
 from app.models.admin import Admin
 from app.models.device_limit import (
     DeviceLimitIncidentList,
@@ -27,6 +28,7 @@ from app.models.device_limit import (
     DeviceLimitSettingsUpdate,
     DeviceLimitStateResponse,
     DeviceLimitUserSummary,
+    DeviceClientObservationResponse,
     DeviceSlotModify,
     DeviceSlotResponse,
 )
@@ -56,6 +58,16 @@ def _can_view_full_ip(db: Session, admin: Admin) -> bool:
 
 
 def _slot_response(username: str, slot: DeviceSlot, full_ip: bool) -> DeviceSlotResponse:
+    observations = []
+    for item in sorted(
+        slot.client_observations,
+        key=lambda observation: observation.last_seen_at,
+        reverse=True,
+    )[:10]:
+        response = DeviceClientObservationResponse.model_validate(item)
+        if not full_ip:
+            response = response.model_copy(update={"raw_user_agent": None})
+        observations.append(response)
     return DeviceSlotResponse(
         id=slot.id,
         slot_index=slot.slot_index,
@@ -65,6 +77,7 @@ def _slot_response(username: str, slot: DeviceSlot, full_ip: bool) -> DeviceSlot
         last_ip=(slot.last_ip if full_ip or not slot.last_ip else mask_ip(slot.last_ip)),
         subscription_url=slot_subscription_url(username, slot),
         created_at=slot.created_at,
+        client_observations=observations,
     )
 
 
@@ -86,11 +99,37 @@ def update_settings(
     settings = _settings(db)
     was_enabled = settings.enabled
     previous = DeviceLimitSettingsResponse.model_validate(settings).model_dump()
-    for key, value in values.model_dump().items():
+    update_values = values.model_dump(exclude_none=True)
+    update_values["hit_threshold"] = values.min_successful_connections
+    update_values["enforcement_mode"] = (
+        "hybrid"
+        if values.device_slots_enabled and values.ip_detection_enabled
+        else "ip"
+        if values.ip_detection_enabled
+        else "slots"
+    )
+    slots_changed = settings.device_slots_enabled != values.device_slots_enabled
+    for key, value in update_values.items():
         setattr(settings, key, value)
+    if slots_changed:
+        for chunk_start in range(0, db.query(User.id).count(), 500):
+            users = (
+                db.query(User)
+                .filter(User.concurrent_user_limit.is_not(None))
+                .order_by(User.id)
+                .offset(chunk_start)
+                .limit(500)
+                .all()
+            )
+            for dbuser in users:
+                sync_device_slots(db, dbuser)
     db.commit()
     db.refresh(settings)
-    engine.configure(settings.enabled, settings.enforcement_mode)
+    engine.configure(
+        settings.enabled,
+        settings.enforcement_mode,
+        settings.ip_detection_enabled,
+    )
     AuditLogService.log(
         db,
         admin,
@@ -211,7 +250,7 @@ def user_summary(
     addresses, sources, _ = engine.live_snapshot(
         dbuser.id,
         settings.active_window_seconds,
-        settings.hit_threshold,
+        settings.min_successful_connections,
     )
     full_ip = _can_view_full_ip(db, admin)
     state = db.get(DeviceLimitUserState, dbuser.id)
@@ -232,6 +271,20 @@ def user_summary(
             _slot_response(dbuser.username, slot, full_ip)
             for slot in sorted(dbuser.device_slots, key=lambda item: item.slot_index)
             if slot.enabled
+        ],
+        user_client_observations=[
+            DeviceClientObservationResponse.model_validate(item).model_copy(
+                update={} if full_ip else {"raw_user_agent": None}
+            )
+            for item in sorted(
+                (
+                    observation
+                    for observation in dbuser.device_client_observations
+                    if observation.slot_key == 0
+                ),
+                key=lambda observation: observation.last_seen_at,
+                reverse=True,
+            )[:10]
         ],
     )
 
@@ -291,7 +344,13 @@ def reset_strikes(
     db.query(DeviceLimitIncident).filter(
         DeviceLimitIncident.user_id == dbuser.id,
         DeviceLimitIncident.resolved_at.is_(None),
-    ).update({DeviceLimitIncident.resolved_at: datetime.utcnow()}, synchronize_session=False)
+    ).update(
+        {
+            DeviceLimitIncident.resolved_at: datetime.utcnow(),
+            DeviceLimitIncident.event_state: DeviceEventState.resolved.value,
+        },
+        synchronize_session=False,
+    )
     db.commit()
     db.refresh(state)
     engine.clear_user_activity(dbuser.id)
@@ -306,6 +365,52 @@ def reset_strikes(
         request=request,
     )
     return state
+
+
+@router.delete("/warnings/{incident_id}")
+def delete_warning(
+    incident_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
+    incident = db.get(DeviceLimitIncident, incident_id)
+    if incident is None or incident.event_state != DeviceEventState.warning.value:
+        raise HTTPException(status_code=404, detail="Device warning not found")
+    if not admin.is_sudo:
+        dbadmin = crud.get_admin(db, admin.username)
+        if dbadmin is None or incident.admin_id != dbadmin.id:
+            raise HTTPException(status_code=403, detail="You're not allowed")
+    user_id = incident.user_id
+    username = incident.username
+    db.delete(incident)
+    if user_id is not None:
+        remaining = (
+            db.query(DeviceLimitIncident.id)
+            .filter(
+                DeviceLimitIncident.user_id == user_id,
+                DeviceLimitIncident.id != incident_id,
+                DeviceLimitIncident.event_state == DeviceEventState.warning.value,
+                DeviceLimitIncident.resolved_at.is_(None),
+            )
+            .first()
+        )
+        state = db.get(DeviceLimitUserState, user_id)
+        if remaining is None and state and state.penalty_status == PenaltyStatus.warning.value:
+            state.penalty_status = PenaltyStatus.clear.value
+            state.last_reason = None
+    db.commit()
+    AuditLogService.log(
+        db,
+        admin,
+        "device_limit.warning_delete",
+        "device_limit_incident",
+        f"Admin {admin.username} deleted device warning for {username}",
+        target_id=incident_id,
+        target_name=username,
+        request=request,
+    )
+    return {"detail": "Device warning deleted"}
 
 
 @router.post("/users/{username}/unblock", response_model=DeviceLimitStateResponse)
@@ -331,7 +436,13 @@ def unblock_user(
     db.query(DeviceLimitIncident).filter(
         DeviceLimitIncident.user_id == dbuser.id,
         DeviceLimitIncident.resolved_at.is_(None),
-    ).update({DeviceLimitIncident.resolved_at: datetime.utcnow()}, synchronize_session=False)
+    ).update(
+        {
+            DeviceLimitIncident.resolved_at: datetime.utcnow(),
+            DeviceLimitIncident.event_state: DeviceEventState.resolved.value,
+        },
+        synchronize_session=False,
+    )
     db.commit()
     db.refresh(state)
     engine.clear_user_activity(dbuser.id)

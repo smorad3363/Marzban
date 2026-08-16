@@ -35,7 +35,7 @@ import CopyToClipboard from "react-copy-to-clipboard";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 import { fetch } from "service/http";
-import { DeviceLimitState, DeviceLimitUserSummary } from "types/DeviceLimit";
+import { DeviceClientObservation, DeviceLimitState, DeviceLimitUserSummary } from "types/DeviceLimit";
 import { User } from "types/User";
 
 const iconProps = { baseStyle: { w: 4, h: 4 } };
@@ -47,6 +47,21 @@ const CopiedIcon = chakra(CheckIcon, iconProps);
 
 const isPenalty = (state?: DeviceLimitState | null) =>
   Boolean(state && state.penalty_status !== "clear");
+
+const ClientDetails: FC<{ observation: DeviceClientObservation; locale: string }> = ({ observation, locale }) => {
+  const { t } = useTranslation();
+  const formatDate = (value: string) => new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "short" }).format(new Date(`${value}Z`));
+  return (
+    <SimpleGrid columns={{ base: 1, sm: 2, lg: 4 }} gap={2} mt={2} p={2.5} bg="rgba(2,6,23,.28)" borderRadius="9px">
+      <Box><Text color="gray.400" fontSize="xs">{t("deviceLimit.client")}</Text><Text dir="ltr" fontFamily="mono" fontSize="xs">{observation.client_name} {observation.client_version || ""}</Text></Box>
+      <Box><Text color="gray.400" fontSize="xs">{t("deviceLimit.platform")}</Text><Text dir="ltr" fontFamily="mono" fontSize="xs">{observation.platform || observation.os_token || "—"}</Text></Box>
+      <Box><Text color="gray.400" fontSize="xs">{t("deviceLimit.lastSeen")}</Text><Text dir="ltr" fontFamily="mono" fontSize="xs">{formatDate(observation.last_seen_at)}</Text></Box>
+      <Box><Text color="gray.400" fontSize="xs">{t("deviceLimit.subscriptionSeen")}</Text><Text dir="ltr" fontFamily="mono" fontSize="xs">{observation.seen_count}</Text></Box>
+      {observation.network_stack && <Box gridColumn={{ sm: "span 2" }}><Text color="gray.400" fontSize="xs">{t("deviceLimit.networkStack")}</Text><Text dir="ltr" fontFamily="mono" fontSize="xs">{observation.network_stack}</Text></Box>}
+      {observation.raw_user_agent && <Box gridColumn={{ sm: "span 2" }} minW={0}><Text color="gray.400" fontSize="xs">User-Agent</Text><Text dir="ltr" fontFamily="mono" fontSize="xs" overflowWrap="anywhere">{observation.raw_user_agent}</Text></Box>}
+    </SimpleGrid>
+  );
+};
 
 export const UserDeviceLimit: FC<{ user: User }> = ({ user }) => {
   const { t, i18n } = useTranslation();
@@ -158,18 +173,27 @@ export const UserDeviceLimit: FC<{ user: User }> = ({ user }) => {
                     {summary.slots.map((slot) => {
                       const link = slot.subscription_url.startsWith("/") ? window.location.origin + slot.subscription_url : slot.subscription_url;
                       return (
-                        <HStack key={slot.id} py={2} justify="space-between" align="center" gap={3} minW={0}>
-                          <Box minW={0}>
-                            <Text fontWeight="700">{slot.label || t("deviceLimit.deviceNumber", { count: slot.slot_index })}</Text>
-                            <Text dir="ltr" color="gray.400" fontFamily="mono" fontSize="xs" mt={1} noOfLines={1} sx={{ unicodeBidi: "isolate" }}>{slot.last_ip || t("deviceLimit.neverSeen")}</Text>
-                          </Box>
-                          <CopyToClipboard text={link} onCopy={() => setCopiedSlot(slot.slot_index)}>
-                            <Button minH="44px" variant="outline" borderColor="#476858" leftIcon={copiedSlot === slot.slot_index ? <CopiedIcon /> : <CopyIcon />}>{t(copiedSlot === slot.slot_index ? "usersTable.copied" : "deviceLimit.copySlotLink")}</Button>
-                          </CopyToClipboard>
-                        </HStack>
+                        <Box key={slot.id} py={2} minW={0}>
+                          <HStack justify="space-between" align="center" gap={3} minW={0}>
+                            <Box minW={0}>
+                              <Text fontWeight="700">{slot.label || t("deviceLimit.deviceNumber", { count: slot.slot_index })}</Text>
+                              <Text dir="ltr" color="gray.400" fontFamily="mono" fontSize="xs" mt={1} noOfLines={1} sx={{ unicodeBidi: "isolate" }}>{slot.last_ip || t("deviceLimit.neverSeen")}</Text>
+                            </Box>
+                            <CopyToClipboard text={link} onCopy={() => setCopiedSlot(slot.slot_index)}>
+                              <Button minH="44px" variant="outline" borderColor="#476858" leftIcon={copiedSlot === slot.slot_index ? <CopiedIcon /> : <CopyIcon />}>{t(copiedSlot === slot.slot_index ? "usersTable.copied" : "deviceLimit.copySlotLink")}</Button>
+                            </CopyToClipboard>
+                          </HStack>
+                          {slot.client_observations[0] && <ClientDetails observation={slot.client_observations[0]} locale={i18n.language} />}
+                        </Box>
                       );
                     })}
                   </Stack>
+                  {summary.user_client_observations[0] && (
+                    <Box mt={3} pt={3} borderTopWidth="1px" borderColor="rgba(148,163,184,.12)">
+                      <Text fontSize="sm" fontWeight="700">{t("deviceLimit.legacyClientObservation")}</Text>
+                      <ClientDetails observation={summary.user_client_observations[0]} locale={i18n.language} />
+                    </Box>
+                  )}
                 </Box>
               </Stack>
             )}

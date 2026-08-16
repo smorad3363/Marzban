@@ -24,7 +24,18 @@ class PenaltyAction(str, Enum):
 
 class PenaltyStatus(str, Enum):
     clear = "clear"
+    pending_handoff = "pending_handoff"
     warning = "warning"
     temporarily_disabled = "temporarily_disabled"
     permanently_disabled = "permanently_disabled"
     deleted = "deleted"
+
+
+class DeviceEventState(str, Enum):
+    pending_handoff = "pending_handoff"
+    warning = "warning"
+    confirmed_violation = "confirmed_violation"
+    temporarily_disabled = "temporarily_disabled"
+    permanently_disabled = "permanently_disabled"
+    resolved = "resolved"
+    expired = "expired"

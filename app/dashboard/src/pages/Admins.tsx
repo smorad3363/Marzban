@@ -85,6 +85,11 @@ const emptyPolicy = (): AdminPolicy => ({
   expiry_date: null,
   user_limit: null,
   max_users: null,
+  device_capacity_limit: null,
+  provisioning_volume_limit: null,
+  provisioning_volume_used: 0,
+  renewal_limit: null,
+  renewals_used: 0,
   all_inbounds: true,
   allowed_inbounds: [],
   all_user_limits: true,
@@ -317,6 +322,21 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
                   <FormHelperText>{t("admins.maxUsersHelp")}</FormHelperText>
                 </FormControl>
                 <FormControl>
+                  <FormLabel>{t("admins.deviceCapacity")}</FormLabel>
+                  <Input type="number" min={1} dir="ltr" value={form.policy.device_capacity_limit ?? ""} onChange={(e) => setPolicy("device_capacity_limit", nullableNumber(e))} />
+                  <FormHelperText>{t("admins.deviceCapacityHelp")}</FormHelperText>
+                </FormControl>
+                <FormControl>
+                  <FormLabel>{t("admins.provisioningVolume")}</FormLabel>
+                  <Input type="number" min={0} step="0.01" dir="ltr" value={form.policy.provisioning_volume_limit === null ? "" : form.policy.provisioning_volume_limit / GIB} onChange={(e) => setPolicy("provisioning_volume_limit", e.target.value === "" ? null : Math.round(Number(e.target.value) * GIB))} />
+                  <FormHelperText>{t("admins.blankUnlimited")}</FormHelperText>
+                </FormControl>
+                <FormControl>
+                  <FormLabel>{t("admins.renewalLimit")}</FormLabel>
+                  <Input type="number" min={0} dir="ltr" value={form.policy.renewal_limit ?? ""} onChange={(e) => setPolicy("renewal_limit", nullableNumber(e))} />
+                  <FormHelperText>{t("admins.renewalLimitHelp")}</FormHelperText>
+                </FormControl>
+                <FormControl>
                   <FormLabel>{t("admins.maxDuration")}</FormLabel>
                   <Input type="number" min={1} dir="ltr" value={form.policy.max_user_duration_days ?? ""} onChange={(e) => setPolicy("max_user_duration_days", nullableNumber(e))} />
                   <FormHelperText>{t("admins.blankUnlimited")}</FormHelperText>
@@ -501,6 +521,7 @@ export const Admins: FC = () => {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
+  const [deleteStrategy, setDeleteStrategy] = useState<"delete_users" | "disable_users" | "keep_users">("keep_users");
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -517,7 +538,7 @@ export const Admins: FC = () => {
   );
 
   const removeMutation = useMutation(
-    (username: string) => fetch(`/admin/${username}`, { method: "DELETE" }),
+    ({ username, strategy }: { username: string; strategy: typeof deleteStrategy }) => fetch(`/admin/${username}`, { method: "DELETE", body: { strategy } }),
     {
       onSuccess: () => {
         queryClient.invalidateQueries("admin-management");
@@ -539,7 +560,7 @@ export const Admins: FC = () => {
   const canEdit = (item: ManagedAdmin) => !item.is_sudo || item.username === userData.username;
   const openCreate = () => { setSelected(null); formDisclosure.onOpen(); };
   const openEdit = (item: ManagedAdmin) => { setSelected(item); formDisclosure.onOpen(); };
-  const openDelete = (item: ManagedAdmin) => { setSelected(item); deleteDisclosure.onOpen(); };
+  const openDelete = (item: ManagedAdmin) => { setSelected(item); setDeleteStrategy("keep_users"); deleteDisclosure.onOpen(); };
 
   return (
     <AppShell>
@@ -579,14 +600,14 @@ export const Admins: FC = () => {
             <>
               <TableContainer display={{ base: "none", lg: "block" }}>
                 <Table size="sm">
-                  <Thead><Tr><Th>{t("admins.admin")}</Th><Th>{t("admins.access")}</Th><Th>{t("admins.usersCount")}</Th><Th>{t("admins.credit")}</Th><Th>{t("admins.operationLimit")}</Th><Th>{t("admins.maxDuration")}</Th><Th>{t("admins.expiryDate")}</Th><Th textAlign="end">{t("admins.actions")}</Th></Tr></Thead>
+                  <Thead><Tr><Th>{t("admins.admin")}</Th><Th>{t("admins.access")}</Th><Th>{t("admins.usersCount")}</Th><Th>{t("admins.provisioningRemaining")}</Th><Th>{t("admins.renewalsRemaining")}</Th><Th>{t("admins.maxDuration")}</Th><Th>{t("admins.expiryDate")}</Th><Th textAlign="end">{t("admins.actions")}</Th></Tr></Thead>
                   <Tbody>{admins.map((item) => (
                     <Tr key={item.username}>
                       <Td><Text color="white" fontWeight="650">{item.username}</Text><Text fontSize="xs" color="gray.400">{item.telegram_id ? `Telegram: ${item.telegram_id}` : t("admins.noContact")}</Text></Td>
                       <Td><Badge bg={item.is_sudo ? "rgba(168, 85, 247, .18)" : "whiteAlpha.100"} color={item.is_sudo ? "purple.200" : "gray.200"} borderWidth="1px" borderColor={item.is_sudo ? "rgba(192, 132, 252, .4)" : "whiteAlpha.200"}>{t(item.is_sudo ? "admins.sudo" : "admins.adminRole")}</Badge></Td>
-                      <Td>{item.capacity_used} / {item.policy.max_users ?? t("unlimited")}</Td>
-                      <Td>{item.policy.total_traffic === null ? t("unlimited") : formatBytes(Math.max(item.policy.total_traffic - item.policy.used_traffic, 0))}</Td>
-                      <Td>{item.policy.user_limit ?? t("unlimited")}</Td>
+                      <Td>{item.quota.current_users} / {item.quota.max_users ?? t("unlimited")}</Td>
+                      <Td>{item.quota.remaining_provisioning_volume === null ? t("unlimited") : formatBytes(item.quota.remaining_provisioning_volume)}</Td>
+                      <Td>{item.quota.renewals_remaining ?? t("unlimited")}</Td>
                       <Td>{item.policy.max_user_duration_days ? `${item.policy.max_user_duration_days} ${t("days")}` : t("unlimited")}</Td>
                       <Td>{item.policy.expiry_date || t("unlimited")}</Td>
                       <Td><HStack justify="end"><IconButton aria-label={t("edit")} size="sm" variant="ghost" icon={<EditIcon />} isDisabled={!canEdit(item)} onClick={() => openEdit(item)} /><IconButton aria-label={t("delete")} size="sm" variant="ghost" colorScheme="red" icon={<RemoveIcon />} isDisabled={item.is_sudo} onClick={() => openDelete(item)} /></HStack></Td>
@@ -599,7 +620,7 @@ export const Admins: FC = () => {
                 {admins.map((item) => (
                   <Box key={item.username} p={4}>
                     <HStack justify="space-between" align="start"><Box><Text color="white" fontWeight="700">{item.username}</Text><Badge mt={1} bg={item.is_sudo ? "rgba(168, 85, 247, .18)" : "whiteAlpha.100"} color={item.is_sudo ? "purple.200" : "gray.200"} borderWidth="1px" borderColor={item.is_sudo ? "rgba(192, 132, 252, .4)" : "whiteAlpha.200"}>{t(item.is_sudo ? "admins.sudo" : "admins.adminRole")}</Badge></Box><HStack><IconButton aria-label={t("edit")} size="sm" variant="ghost" icon={<EditIcon />} isDisabled={!canEdit(item)} onClick={() => openEdit(item)} /><IconButton aria-label={t("delete")} size="sm" variant="ghost" colorScheme="red" icon={<RemoveIcon />} isDisabled={item.is_sudo} onClick={() => openDelete(item)} /></HStack></HStack>
-                    <SimpleGrid columns={2} gap={3} mt={4} fontSize="sm"><Box><Text color="gray.400" fontSize="xs">{t("admins.usersCount")}</Text><Text color="gray.100" mt={1}>{item.capacity_used} / {item.policy.max_users ?? t("unlimited")}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.credit")}</Text><Text color="gray.100" mt={1}>{item.policy.total_traffic === null ? t("unlimited") : formatBytes(Math.max(item.policy.total_traffic - item.policy.used_traffic, 0))}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.operationLimit")}</Text><Text color="gray.100" mt={1}>{item.policy.user_limit ?? t("unlimited")}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.maxDuration")}</Text><Text color="gray.100" mt={1}>{item.policy.max_user_duration_days ? `${item.policy.max_user_duration_days} ${t("days")}` : t("unlimited")}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.expiryDate")}</Text><Text color="gray.100" mt={1}>{item.policy.expiry_date || t("unlimited")}</Text></Box></SimpleGrid>
+                    <SimpleGrid columns={2} gap={3} mt={4} fontSize="sm"><Box><Text color="gray.400" fontSize="xs">{t("admins.usersCount")}</Text><Text color="gray.100" mt={1}>{item.quota.current_users} / {item.quota.max_users ?? t("unlimited")}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.provisioningRemaining")}</Text><Text color="gray.100" mt={1}>{item.quota.remaining_provisioning_volume === null ? t("unlimited") : formatBytes(item.quota.remaining_provisioning_volume)}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.renewalsRemaining")}</Text><Text color="gray.100" mt={1}>{item.quota.renewals_remaining ?? t("unlimited")}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.maxDuration")}</Text><Text color="gray.100" mt={1}>{item.policy.max_user_duration_days ? `${item.policy.max_user_duration_days} ${t("days")}` : t("unlimited")}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.expiryDate")}</Text><Text color="gray.100" mt={1}>{item.policy.expiry_date || t("unlimited")}</Text></Box></SimpleGrid>
                   </Box>
                 ))}
               </Stack>
@@ -612,7 +633,7 @@ export const Admins: FC = () => {
         </Card>
         <AdminFormModal isOpen={formDisclosure.isOpen} admin={selected} onClose={formDisclosure.onClose} />
         <AlertDialog isOpen={deleteDisclosure.isOpen} leastDestructiveRef={cancelRef} onClose={deleteDisclosure.onClose}>
-          <AlertDialogOverlay bg="rgba(0, 0, 0, .72)"><AlertDialogContent bg="#111d17" color="gray.100" borderWidth="1px" borderColor="#33483b" borderRadius="12px"><AlertDialogHeader>{t("admins.deleteTitle")}</AlertDialogHeader><AlertDialogBody>{t("admins.deleteConfirm", { username: selected?.username })}</AlertDialogBody><AlertDialogFooter borderTopWidth="1px" borderColor="#33483b" gap={3}><Button ref={cancelRef} variant="ghost" onClick={deleteDisclosure.onClose}>{t("cancel")}</Button><Button colorScheme="red" isLoading={removeMutation.isLoading} onClick={() => selected && removeMutation.mutate(selected.username)}>{t("delete")}</Button></AlertDialogFooter></AlertDialogContent></AlertDialogOverlay>
+          <AlertDialogOverlay bg="rgba(0, 0, 0, .72)"><AlertDialogContent bg="#111d17" color="gray.100" borderWidth="1px" borderColor="#33483b" borderRadius="12px"><AlertDialogHeader>{t("admins.deleteTitle")}</AlertDialogHeader><AlertDialogBody><Text mb={3}>{t("admins.deleteConfirm", { username: selected?.username })}</Text><FormControl><FormLabel>{t("admins.deleteStrategy")}</FormLabel><Select value={deleteStrategy} onChange={(event) => setDeleteStrategy(event.target.value as typeof deleteStrategy)}><option value="keep_users">{t("admins.keepUsers")}</option><option value="disable_users">{t("admins.disableUsers")}</option><option value="delete_users">{t("admins.deleteUsers")}</option></Select><FormHelperText>{t(`admins.deleteStrategyHelp.${deleteStrategy}`)}</FormHelperText></FormControl></AlertDialogBody><AlertDialogFooter borderTopWidth="1px" borderColor="#33483b" gap={3}><Button ref={cancelRef} variant="ghost" onClick={deleteDisclosure.onClose}>{t("cancel")}</Button><Button colorScheme="red" isLoading={removeMutation.isLoading} onClick={() => selected && removeMutation.mutate({ username: selected.username, strategy: deleteStrategy })}>{t("delete")}</Button></AlertDialogFooter></AlertDialogContent></AlertDialogOverlay>
         </AlertDialog>
     </AppShell>
   );

@@ -108,6 +108,20 @@ def add_user(dbuser: "DBUser"):
                         _add_user_to_inbound(node.api, inbound_tag, account)
 
 
+def add_user_by_id(user_id: int):
+    """Load committed relationships in a fresh session before background sync.
+
+    Passing request-scoped ORM objects to a FastAPI background task can leave
+    proxies, slots or ownership detached and previously produced incomplete
+    delegated-admin accounts/EOF failures.
+    """
+
+    with GetDB() as db:
+        dbuser = crud.get_user_by_id(db, user_id)
+        if dbuser is not None:
+            add_user(dbuser)
+
+
 def remove_user(dbuser: "DBUser"):
     emails = {f"{dbuser.id}.{dbuser.username}"}
     emails.update(
@@ -169,6 +183,13 @@ def update_user(dbuser: "DBUser"):
         for node in list(xray.nodes.values()):
             if node.connected and node.started:
                 _replace_inbound_users(node.api, inbound_tag, all_emails, account_tuple)
+
+
+def update_user_by_id(user_id: int):
+    with GetDB() as db:
+        dbuser = crud.get_user_by_id(db, user_id)
+        if dbuser is not None:
+            update_user(dbuser)
 
 
 def remove_node(node_id: int):

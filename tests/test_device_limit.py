@@ -1,10 +1,14 @@
+from contextlib import contextmanager
+from datetime import datetime, timedelta
 from uuid import uuid4
 
 import pytest
+from fastapi import HTTPException, Request
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.db.base import Base
+from app.db import crud
 from app.db.models import (
     Admin,
     MarzhelpAdminSettings,
@@ -12,11 +16,21 @@ from app.db.models import (
     Proxy,
     User,
     MarzhelpAdminUserLimitPermission,
+    DeviceLimitUserState,
+    DeviceLimitIncident,
+    DeviceLimitSettings,
 )
+from app.device_limit.clients import observe_subscription_client, parse_user_agent
 from app.device_limit.constants import SubscriptionMode
 from app.device_limit.engine import DeviceLimitEngine, mask_ip
 from app.device_limit.slots import slot_email, sync_device_slots
 from app.models.user import UserStatus
+from app.models.user import UserCreate
+from app.models.device_limit import DeviceLimitSettingsUpdate
+from app.models.admin import Admin as AdminSchema
+from app.models.proxy import ProxyTypes
+from app.routers.device_limit import delete_warning
+from app.xray import operations
 from app.utils import marzhelp_policy
 
 
@@ -26,6 +40,7 @@ def session(tmp_path):
     Base.metadata.create_all(engine)
     Session = sessionmaker(bind=engine, expire_on_commit=False)
     db = Session()
+    db.info["session_factory"] = Session
     yield db
     db.close()
     engine.dispose()
@@ -48,6 +63,293 @@ def test_xray_access_parser_is_bounded_and_requires_hit_threshold():
     assert sources == {"node:7"}
     assert per_slot == {2: {"8.8.8.8"}}
     assert mask_ip("8.8.8.8") == "8.8.***.***"
+
+
+def test_user_agent_parser_and_patch_update_identity():
+    android = parse_user_agent("v2rayNG/1.10.32")
+    android_patch = parse_user_agent("v2rayNG/1.10.33")
+    apple = parse_user_agent("Streisand/48 CFNetwork/3860.700.1 Darwin/25.6.0")
+
+    assert (android.client_name, android.client_version, android.platform) == (
+        "v2rayNG",
+        "1.10.32",
+        "Android",
+    )
+    assert android.normalized_identity == android_patch.normalized_identity
+    assert apple.client_name == "Streisand"
+    assert apple.network_stack == "CFNetwork/3860.700.1"
+    assert apple.os_token == "Darwin/25.6.0"
+    assert apple.platform == "Apple"
+
+
+def test_slot_client_observations_are_aggregated(session):
+    user = User(
+        username="observed-client",
+        status=UserStatus.active,
+        concurrent_user_limit=1,
+        proxies=[Proxy(type="vless", settings={"id": str(uuid4()), "flow": ""})],
+    )
+    session.add(user)
+    session.flush()
+    sync_device_slots(session, user)
+    user._device_slot_index = 1
+
+    first = observe_subscription_client(session, user, "v2rayNG/1.10.32")
+    second = observe_subscription_client(session, user, "v2rayNG/1.10.33")
+    session.commit()
+
+    assert first.id == second.id
+    assert second.seen_count == 2
+    assert second.client_version == "1.10.33"
+
+
+def test_delegated_admin_cannot_delete_another_admin_warning(session):
+    owner = Admin(username="warning-owner", hashed_password="x")
+    attacker = Admin(username="warning-attacker", hashed_password="x")
+    user = User(username="warning-user", status=UserStatus.active, admin=owner)
+    session.add_all((owner, attacker, user))
+    session.flush()
+    incident = DeviceLimitIncident(
+        user_id=user.id,
+        admin_id=owner.id,
+        username=user.username,
+        stage=1,
+        action="warn",
+        configured_limit=1,
+        observed_count=2,
+        event_state="warning",
+        reason="test",
+    )
+    session.add(incident)
+    session.commit()
+
+    request = Request({"type": "http", "method": "DELETE", "path": "/", "headers": []})
+    with pytest.raises(HTTPException) as exc:
+        delete_warning(
+            incident.id,
+            request,
+            db=session,
+            admin=AdminSchema.model_validate(attacker),
+        )
+
+    assert exc.value.status_code == 403
+    assert session.get(DeviceLimitIncident, incident.id) is not None
+
+
+def test_stale_old_ip_is_handoff_but_two_fresh_ips_are_concurrent(monkeypatch):
+    tracker = DeviceLimitEngine()
+    tracker.configure(True, "hybrid", True)
+    clock = {"now": 1000.0}
+    monkeypatch.setattr("app.device_limit.engine.time.time", lambda: clock["now"])
+
+    ip_a = "\n".join(
+        f"8.8.8.8:{51000 + index} accepted tcp:x:443 email: 42.demo"
+        for index in range(3)
+    )
+    ip_b = "\n".join(
+        f"1.1.1.1:{52000 + index} accepted tcp:x:443 email: 42.demo"
+        for index in range(3)
+    )
+    tracker.record_log(ip_a)
+    clock["now"] = 1002.0
+    tracker.record_log(ip_b)
+    historical, _, _, fresh, _ = tracker._snapshot_user_detailed(42, 300, 1, 3)
+    assert historical == {"8.8.8.8", "1.1.1.1"}
+    assert fresh == {"1.1.1.1"}
+
+    state = DeviceLimitUserState(user_id=42)
+    tracker._begin_pending(state, historical, {"master"}, 70, datetime.utcnow())
+    tracker._clear_pending(state)
+    assert state.violation_count in (None, 0)
+    assert state.penalty_status == "clear"
+
+    clock["now"] = 1003.0
+    tracker.record_log(ip_a)
+    tracker.record_log(ip_b)
+    _, _, _, fresh, _ = tracker._snapshot_user_detailed(42, 300, 1, 3)
+    assert fresh == {"8.8.8.8", "1.1.1.1"}
+
+
+@pytest.mark.parametrize(
+    ("slots", "ip", "client"),
+    [
+        (True, False, False),
+        (False, True, False),
+        (True, True, False),
+        (True, False, True),
+        (True, True, True),
+    ],
+)
+def test_independent_capability_combinations_validate(slots, ip, client):
+    values = DeviceLimitSettingsUpdate(
+        enabled=True,
+        device_slots_enabled=slots,
+        ip_detection_enabled=ip,
+        client_fingerprint_enabled=client,
+        check_interval_seconds=60,
+        active_window_seconds=300,
+        min_successful_connections=3,
+        strike_reset_seconds=2592000,
+        full_ip_retention_days=7,
+        incident_retention_days=90,
+        audit_retention_days=180,
+    )
+    assert (
+        values.device_slots_enabled,
+        values.ip_detection_enabled,
+        values.client_fingerprint_enabled,
+    ) == (slots, ip, client)
+
+
+def test_disabled_client_and_slot_signals_do_not_affect_risk(session):
+    user = User(username="risk-signals", status=UserStatus.active)
+    session.add(user)
+    session.flush()
+    observe_subscription_client(session, user, "v2rayNG/1.10.32")
+    observe_subscription_client(
+        session,
+        user,
+        "Streisand/48 CFNetwork/3860.700.1 Darwin/25.6.0",
+    )
+    session.commit()
+
+    tracker = DeviceLimitEngine()
+    settings = DeviceLimitSettings(
+        id=1,
+        device_slots_enabled=False,
+        client_fingerprint_enabled=False,
+        active_window_seconds=300,
+    )
+    per_slot = {1: {"8.8.8.8"}, 2: {"8.8.8.8"}}
+    risk, signals = tracker._risk_for_user(
+        session,
+        user.id,
+        settings,
+        {"8.8.8.8"},
+        per_slot,
+        datetime.utcnow(),
+    )
+    assert risk == 0
+    assert signals["client_family_count"] == 0
+    assert signals["platform_count"] == 0
+    assert signals["active_slot_count"] == 0
+
+    settings.client_fingerprint_enabled = True
+    risk, signals = tracker._risk_for_user(
+        session,
+        user.id,
+        settings,
+        {"8.8.8.8"},
+        per_slot,
+        datetime.utcnow(),
+    )
+    assert risk == 25
+    assert signals["client_family_count"] == 2
+    assert signals["platform_count"] == 2
+    assert signals["active_slot_count"] == 0
+
+
+def test_delegated_admin_xray_sync_reloads_committed_user(session, monkeypatch):
+    inbound = {"tag": "delegated", "protocol": "vless", "network": "tcp", "tls": "none"}
+    monkeypatch.setattr(operations.xray.config, "inbounds_by_protocol", {ProxyTypes.VLESS: [inbound]})
+    monkeypatch.setattr(operations.xray.config, "inbounds_by_tag", {"delegated": inbound})
+    admin = Admin(username="delegated-owner", hashed_password="x", is_sudo=False)
+    session.add(admin)
+    session.flush()
+    session.add(MarzhelpAdminSettings(admin_id=admin.id))
+    session.commit()
+    dbuser = crud.create_user(
+        session,
+        UserCreate(
+            username="delegated-created",
+            proxies={"vless": {}},
+            inbounds={"vless": ["delegated"]},
+            concurrent_user_limit=1,
+        ),
+        admin=admin,
+    )
+    user_id = dbuser.id
+    Session = session.info["session_factory"]
+    session.expunge_all()
+    captured = {}
+
+    @contextmanager
+    def fresh_db():
+        db = Session()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    def capture(loaded):
+        captured["admin_id"] = loaded.admin_id
+        captured["proxy_types"] = sorted(item.type for item in loaded.proxies)
+        captured["slots"] = [slot.slot_index for slot in loaded.device_slots if slot.enabled]
+        captured["credentials"] = loaded.device_slots[0].credentials
+
+    monkeypatch.setattr(operations, "GetDB", fresh_db)
+    monkeypatch.setattr(operations, "add_user", capture)
+    operations.add_user_by_id(user_id)
+
+    assert captured["admin_id"] == admin.id
+    assert captured["proxy_types"] == ["vless"]
+    assert captured["slots"] == [1]
+    assert "vless" in captured["credentials"]
+
+
+def test_warning_cleanup_does_not_remove_confirmed_punishment(session, monkeypatch):
+    now = datetime.utcnow()
+    user = User(username="warning-cleanup", status=UserStatus.disabled)
+    session.add(user)
+    session.flush()
+    session.add(DeviceLimitSettings(id=1, enabled=True, warning_auto_delete_seconds=3600))
+    session.add(
+        DeviceLimitUserState(
+            user_id=user.id,
+            penalty_status="temporarily_disabled",
+            violation_count=1,
+        )
+    )
+    warning = DeviceLimitIncident(
+        user_id=user.id,
+        username=user.username,
+        stage=1,
+        action="warn",
+        configured_limit=1,
+        observed_count=2,
+        event_state="warning",
+        reason="warning",
+        expires_at=now - timedelta(seconds=1),
+        created_at=now - timedelta(hours=2),
+    )
+    punishment = DeviceLimitIncident(
+        user_id=user.id,
+        username=user.username,
+        stage=2,
+        action="temporary_disable",
+        configured_limit=1,
+        observed_count=2,
+        event_state="temporarily_disabled",
+        reason="punishment",
+        created_at=now - timedelta(hours=2),
+    )
+    session.add_all([warning, punishment])
+    session.commit()
+    warning_id = warning.id
+    punishment_id = punishment.id
+    user_id = user.id
+
+    @contextmanager
+    def current_db():
+        yield session
+
+    monkeypatch.setattr("app.device_limit.engine.GetDB", current_db)
+    DeviceLimitEngine().retention_cleanup()
+    session.expire_all()
+
+    assert session.get(DeviceLimitIncident, warning_id) is None
+    assert session.get(DeviceLimitIncident, punishment_id) is not None
+    assert session.get(DeviceLimitUserState, user_id).penalty_status == "temporarily_disabled"
 
 
 def test_finite_limit_creates_independent_standard_credentials(session):

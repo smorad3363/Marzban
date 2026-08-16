@@ -843,7 +843,7 @@ services:
       mysql:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/marzhelp/compatibility', timeout=2)"]
+      test: ["CMD", "python", "/code/scripts/healthcheck.py", "--mode", "internal", "--timeout", "2"]
       start_period: 10s
       interval: 10s
       timeout: 3s
@@ -976,6 +976,20 @@ EOF
 
 up_marzban() {
     $COMPOSE -f $COMPOSE_FILE -p "$APP_NAME" up -d --remove-orphans
+}
+
+verify_marzban_health() {
+    local container_id
+    for _ in $(seq 1 15); do
+        container_id=$($COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" ps -q marzban 2>/dev/null)
+        if [ -n "$container_id" ] && docker exec "$container_id" python \
+            /code/scripts/healthcheck.py --mode all --timeout 3; then
+            return 0
+        fi
+        sleep 1
+    done
+    colorized_echo red "Marzban internal/public health check failed"
+    return 1
 }
 
 follow_marzban_logs() {
@@ -1139,6 +1153,9 @@ install_command() {
         exit 1
     fi
     up_marzban
+    if ! verify_marzban_health; then
+        exit 1
+    fi
     follow_marzban_logs
 }
 
@@ -1560,8 +1577,8 @@ update_command() {
     local ready="false"
     for _ in $(seq 1 15); do
         container_id=$($COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" ps -q marzban 2>/dev/null)
-        if [ -n "$container_id" ] && docker exec "$container_id" python -c \
-            "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/marzhelp/compatibility', timeout=2)" \
+        if [ -n "$container_id" ] && docker exec "$container_id" python \
+            /code/scripts/healthcheck.py --mode all --timeout 3 \
             >/dev/null 2>&1; then
             ready="true"
             break

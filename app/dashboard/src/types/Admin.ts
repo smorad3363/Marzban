@@ -10,6 +10,11 @@ export type AdminPolicy = {
   expiry_date: string | null;
   user_limit: number | null;
   max_users: number | null;
+  device_capacity_limit: number | null;
+  provisioning_volume_limit: number | null;
+  provisioning_volume_used: number;
+  renewal_limit: number | null;
+  renewals_used: number;
   all_inbounds: boolean;
   allowed_inbounds: string[];
   all_user_limits: boolean;
@@ -34,6 +39,19 @@ export type ManagedAdmin = {
   user_count: number;
   capacity_used: number;
   policy: AdminPolicy;
+  quota: AdminQuotaSummary;
+};
+
+export type AdminQuotaSummary = {
+  current_users: number;
+  max_users: number | null;
+  remaining_user_slots: number | null;
+  provisioned_volume: number;
+  provisioning_volume_limit: number | null;
+  remaining_provisioning_volume: number | null;
+  renewals_used: number;
+  renewal_limit: number | null;
+  renewals_remaining: number | null;
 };
 
 export type ManagedAdminList = {
@@ -43,7 +61,7 @@ export type ManagedAdminList = {
   limit: number;
 };
 
-export type ManagedAdminPayload = Omit<ManagedAdmin, "users_usage" | "user_count" | "capacity_used"> & {
+export type ManagedAdminPayload = Omit<ManagedAdmin, "users_usage" | "user_count" | "capacity_used" | "quota"> & {
   password?: string;
 };
 
@@ -57,4 +75,5 @@ export type AdminCapabilities = {
   capacity_used: number;
   capacity_limit: number | null;
   capacity_remaining: number | null;
+  quota: AdminQuotaSummary;
 };

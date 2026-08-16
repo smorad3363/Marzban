@@ -11,9 +11,15 @@ from app.device_limit.constants import PenaltyAction, PenaltyStatus
 class DeviceLimitSettingsResponse(BaseModel):
     enabled: bool
     enforcement_mode: Literal["ip", "slots", "hybrid"]
+    device_slots_enabled: bool
+    ip_detection_enabled: bool
+    client_fingerprint_enabled: bool
     check_interval_seconds: int
     active_window_seconds: int
     hit_threshold: int
+    min_successful_connections: int
+    handoff_grace_seconds: int
+    warning_auto_delete_seconds: int
     strike_reset_seconds: int
     full_ip_retention_days: int
     incident_retention_days: int
@@ -25,10 +31,16 @@ class DeviceLimitSettingsResponse(BaseModel):
 
 class DeviceLimitSettingsUpdate(BaseModel):
     enabled: bool
-    enforcement_mode: Literal["ip", "slots", "hybrid"] = "hybrid"
+    enforcement_mode: Literal["ip", "slots", "hybrid"] | None = None
+    device_slots_enabled: bool = True
+    ip_detection_enabled: bool = True
+    client_fingerprint_enabled: bool = False
     check_interval_seconds: int = Field(ge=10, le=3600)
     active_window_seconds: int = Field(ge=30, le=86400)
-    hit_threshold: int = Field(ge=1, le=100)
+    hit_threshold: int | None = Field(default=None, ge=1, le=100)
+    min_successful_connections: int = Field(default=3, ge=1, le=100)
+    handoff_grace_seconds: int = Field(default=90, ge=0, le=600)
+    warning_auto_delete_seconds: int = Field(default=86400, ge=0, le=31536000)
     strike_reset_seconds: int = Field(ge=300, le=31536000)
     full_ip_retention_days: int = Field(ge=1, le=30)
     incident_retention_days: int = Field(ge=7, le=3650)
@@ -39,7 +51,34 @@ class DeviceLimitSettingsUpdate(BaseModel):
     def validate_window(self):
         if self.active_window_seconds < self.check_interval_seconds:
             raise ValueError("Active window must be at least the check interval")
+        if self.enabled and not (
+            self.device_slots_enabled
+            or self.ip_detection_enabled
+            or self.client_fingerprint_enabled
+        ):
+            raise ValueError("Enable at least one device capability")
+        if (
+            self.hit_threshold is not None
+            and "min_successful_connections" not in self.model_fields_set
+        ):
+            self.min_successful_connections = self.hit_threshold
         return self
+
+
+class DeviceClientObservationResponse(BaseModel):
+    id: int
+    slot_id: int | None
+    slot_key: int
+    client_name: str
+    client_version: str | None
+    platform: str | None
+    os_token: str | None
+    network_stack: str | None
+    raw_user_agent: str | None
+    first_seen_at: datetime
+    last_seen_at: datetime
+    seen_count: int
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DeviceLimitPenaltyStageInput(BaseModel):
@@ -82,6 +121,7 @@ class DeviceSlotResponse(BaseModel):
     last_ip: str | None
     subscription_url: str
     created_at: datetime
+    client_observations: list[DeviceClientObservationResponse] = Field(default_factory=list)
 
 
 class DeviceSlotModify(BaseModel):
@@ -97,6 +137,10 @@ class DeviceLimitStateResponse(BaseModel):
     last_seen_at: datetime | None = None
     active_ip_count: int = 0
     last_reason: str | None = None
+    pending_handoff_started_at: datetime | None = None
+    pending_ip_addresses: list[str] | None = None
+    pending_source_nodes: list[str] | None = None
+    pending_risk_score: int | None = None
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -111,7 +155,11 @@ class DeviceLimitIncidentResponse(BaseModel):
     observed_count: int
     ip_addresses: list[str] | None
     source_nodes: list[str] | None
+    event_state: str
+    risk_score: int | None
+    signal_summary: dict | None
     reason: str
+    expires_at: datetime | None
     resolved_at: datetime | None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
@@ -133,3 +181,4 @@ class DeviceLimitUserSummary(BaseModel):
     live_source_nodes: list[str]
     state: DeviceLimitStateResponse
     slots: list[DeviceSlotResponse]
+    user_client_observations: list[DeviceClientObservationResponse] = Field(default_factory=list)

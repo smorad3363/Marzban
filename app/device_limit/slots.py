@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from app.db.models import DeviceSlot
+from app.db.models import DeviceLimitSettings, DeviceSlot
 from app.models.proxy import ProxySettings, ProxyTypes
 from app.utils.jwt import create_device_slot_token
 from config import XRAY_SUBSCRIPTION_PATH, XRAY_SUBSCRIPTION_URL_PREFIX
@@ -59,7 +59,9 @@ def sync_device_slots(db: "Session", dbuser: "User") -> list[DeviceSlot]:
     remove stale credential emails without requiring a core restart.
     """
 
-    desired = int(dbuser.concurrent_user_limit or 0)
+    settings = db.get(DeviceLimitSettings, 1)
+    slots_enabled = settings is None or bool(settings.device_slots_enabled)
+    desired = int(dbuser.concurrent_user_limit or 0) if slots_enabled else 0
     existing = {slot.slot_index: slot for slot in dbuser.device_slots}
     highest = max([desired, *existing.keys()], default=desired)
 

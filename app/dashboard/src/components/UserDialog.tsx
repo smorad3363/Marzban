@@ -283,6 +283,17 @@ const unrestrictedCapabilities: AdminCapabilities = {
   capacity_used: 0,
   capacity_limit: null,
   capacity_remaining: null,
+  quota: {
+    current_users: 0,
+    max_users: null,
+    remaining_user_slots: null,
+    provisioned_volume: 0,
+    provisioning_volume_limit: null,
+    remaining_provisioning_volume: null,
+    renewals_used: 0,
+    renewal_limit: null,
+    renewals_remaining: null,
+  },
 };
 
 export const UserDialog: FC<UserDialogProps> = () => {
@@ -355,10 +366,11 @@ export const UserDialog: FC<UserDialogProps> = () => {
       allowed_subscription_modes: selectedOwner.policy.allowed_subscription_modes,
       view_full_client_ip: selectedOwner.policy.view_full_client_ip,
       capacity_used: selectedOwner.capacity_used,
-      capacity_limit: selectedOwner.policy.max_users,
-      capacity_remaining: selectedOwner.policy.max_users === null
+      capacity_limit: selectedOwner.policy.device_capacity_limit,
+      capacity_remaining: selectedOwner.policy.device_capacity_limit === null
         ? null
-        : Math.max(selectedOwner.policy.max_users - selectedOwner.capacity_used, 0),
+        : Math.max(selectedOwner.policy.device_capacity_limit - selectedOwner.capacity_used, 0),
+      quota: selectedOwner.quota,
     }
     : capabilitiesQuery.data || unrestrictedCapabilities;
   const allowedInboundTags = effectiveCapabilities.all_inbounds
@@ -746,11 +758,11 @@ export const UserDialog: FC<UserDialogProps> = () => {
                           >
                             <option value="">{t("userDialog.currentSudoOwner")}</option>
                             {adminsQuery.data?.filter((admin) => !admin.is_sudo).map((admin) => {
-                              const isFull = admin.policy.max_users !== null &&
-                                admin.capacity_used >= admin.policy.max_users;
+                              const isFull = admin.quota.max_users !== null &&
+                                admin.quota.current_users >= admin.quota.max_users;
                               return (
                                 <option key={admin.username} value={admin.username} disabled={isFull}>
-                                  {admin.username} ({admin.capacity_used} / {admin.policy.max_users ?? t("unlimited")})
+                                  {admin.username} ({admin.quota.current_users} / {admin.quota.max_users ?? t("unlimited")})
                                 </option>
                               );
                             })}
@@ -759,7 +771,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                             {selectedOwner
                               ? t("userDialog.ownerCapacity", {
                                 current: selectedOwner.capacity_used,
-                                max: selectedOwner.policy.max_users ?? t("unlimited"),
+                                max: selectedOwner.policy.device_capacity_limit ?? t("unlimited"),
                               })
                               : t("userDialog.ownerAdminHelp")}
                           </FormHelperText>

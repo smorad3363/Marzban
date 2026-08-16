@@ -49,6 +49,7 @@ const TuneIcon = chakra(AdjustmentsHorizontalIcon, { baseStyle: { w: 5, h: 5 } }
 const WarningIcon = chakra(ExclamationTriangleIcon, { baseStyle: { w: 5, h: 5 } });
 const RefreshIcon = chakra(ArrowPathIcon, { baseStyle: { w: 4, h: 4 } });
 const PAGE_SIZE = 20;
+const riskKey = (value: number) => value >= 80 ? "high" : value >= 50 ? "medium" : "low";
 
 const secondsToMinutes = (seconds: number | null) =>
   seconds === null ? "" : String(Math.round(seconds / 60));
@@ -152,26 +153,39 @@ const SettingsSection: FC<{
         </HStack>
 
         <Box p={{ base: 4, md: 5 }}>
+          <Text fontWeight="800" mb={3}>{t("deviceLimit.capabilities")}</Text>
+          <SimpleGrid columns={{ base: 1, md: 3 }} gap={3} mb={5}>
+            {([
+              ["device_slots_enabled", "deviceLimit.capabilitySlots", "deviceLimit.capabilitySlotsHelp"],
+              ["ip_detection_enabled", "deviceLimit.capabilityIp", "deviceLimit.capabilityIpHelp"],
+              ["client_fingerprint_enabled", "deviceLimit.capabilityClient", "deviceLimit.capabilityClientHelp"],
+            ] as const).map(([key, label, help]) => (
+              <FormControl key={key} p={3} borderWidth="1px" borderColor={form[key] ? "rgba(34,197,94,.48)" : "#33483b"} borderRadius="10px" bg={form[key] ? "rgba(34,197,94,.06)" : "transparent"}>
+                <Checkbox colorScheme="primary" isChecked={form[key]} onChange={(event) => setForm((current) => ({ ...current, [key]: event.target.checked }))}>
+                  {t(label)}
+                </Checkbox>
+                <FormHelperText color="gray.400">{t(help)}</FormHelperText>
+              </FormControl>
+            ))}
+          </SimpleGrid>
+          <Text fontWeight="800" mb={3}>{t("deviceLimit.detectionTiming")}</Text>
           <SimpleGrid columns={{ base: 1, md: 2, xl: 3 }} gap={5}>
-            <FormControl>
-              <FormLabel>{t("deviceLimit.enforcementMode")}</FormLabel>
-              <Select value={form.enforcement_mode} onChange={(event) => setForm((current) => ({ ...current, enforcement_mode: event.target.value as DeviceLimitSettings["enforcement_mode"] }))}>
-                <option value="hybrid">{t("deviceLimit.modeHybrid")}</option>
-                <option value="ip">{t("deviceLimit.modeIp")}</option>
-                <option value="slots">{t("deviceLimit.modeSlots")}</option>
-              </Select>
-            </FormControl>
-            <FormControl>
+            <FormControl isDisabled={!form.ip_detection_enabled}>
               <FormLabel>{t("deviceLimit.checkInterval")}</FormLabel>
               <Input dir="ltr" type="number" min={10} max={3600} value={form.check_interval_seconds} onChange={(event) => numberField("check_interval_seconds", event.target.value)} />
             </FormControl>
-            <FormControl>
+            <FormControl isDisabled={!form.ip_detection_enabled}>
               <FormLabel>{t("deviceLimit.activeWindow")}</FormLabel>
               <Input dir="ltr" type="number" min={30} max={86400} value={form.active_window_seconds} onChange={(event) => numberField("active_window_seconds", event.target.value)} />
             </FormControl>
-            <FormControl>
+            <FormControl isDisabled={!form.ip_detection_enabled}>
               <FormLabel>{t("deviceLimit.hitThreshold")}</FormLabel>
-              <Input dir="ltr" type="number" min={1} max={100} value={form.hit_threshold} onChange={(event) => numberField("hit_threshold", event.target.value)} />
+              <Input dir="ltr" type="number" min={1} max={100} value={form.min_successful_connections} onChange={(event) => numberField("min_successful_connections", event.target.value)} />
+              <FormHelperText color="gray.400">{t("deviceLimit.hitThresholdHelp")}</FormHelperText>
+            </FormControl>
+            <FormControl isDisabled={!form.ip_detection_enabled}>
+              <FormLabel>{t("deviceLimit.handoffGrace")}</FormLabel>
+              <Input dir="ltr" type="number" min={0} max={600} value={form.handoff_grace_seconds} onChange={(event) => numberField("handoff_grace_seconds", event.target.value)} />
             </FormControl>
             <FormControl>
               <FormLabel>{t("deviceLimit.strikeResetDays")}</FormLabel>
@@ -188,6 +202,11 @@ const SettingsSection: FC<{
             <FormControl>
               <FormLabel>{t("deviceLimit.auditRetention")}</FormLabel>
               <Input dir="ltr" type="number" min={30} max={3650} value={form.audit_retention_days} onChange={(event) => numberField("audit_retention_days", event.target.value)} />
+            </FormControl>
+            <FormControl>
+              <FormLabel>{t("deviceLimit.warningCleanupHours")}</FormLabel>
+              <Input dir="ltr" type="number" min={0} max={8760} value={Math.round(form.warning_auto_delete_seconds / 3600)} onChange={(event) => setForm((current) => ({ ...current, warning_auto_delete_seconds: Number(event.target.value) * 3600 }))} />
+              <FormHelperText color="gray.400">{t("deviceLimit.zeroDisabled")}</FormHelperText>
             </FormControl>
             <FormControl p={3} borderWidth="1px" borderColor={form.auto_delete_enabled ? "rgba(239,68,68,.48)" : "#33483b"} borderRadius="10px">
               <Checkbox colorScheme="red" isChecked={form.auto_delete_enabled} onChange={(event) => setForm((current) => ({ ...current, auto_delete_enabled: event.target.checked }))}>
@@ -245,6 +264,8 @@ const SettingsSection: FC<{
 
 const IncidentSection: FC = () => {
   const { t, i18n } = useTranslation();
+  const toast = useToast();
+  const queryClient = useQueryClient();
   const [page, setPage] = useState(0);
   const [unresolved, setUnresolved] = useState(false);
   const query = useQuery<DeviceLimitIncidentList, Error>(
@@ -255,6 +276,15 @@ const IncidentSection: FC = () => {
   const incidents = query.data?.incidents || [];
   const total = query.data?.total || 0;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const deleteWarning = useMutation(
+    (incidentId: number) => fetch(`/device-limit/warnings/${incidentId}`, { method: "DELETE" }),
+    {
+      onSuccess: () => {
+        queryClient.invalidateQueries("device-limit-incidents");
+        toast({ title: t("deviceLimit.warningDeleted"), status: "success", duration: 2500 });
+      },
+    }
+  );
 
   return (
     <Card mt={5} bg="#0e1914" color="gray.100" borderWidth="1px" borderColor="#345346" borderRadius={{ base: "16px", md: "20px" }} boxShadow="panel" overflow="hidden">
@@ -286,6 +316,13 @@ const IncidentSection: FC = () => {
                     <Badge colorScheme="yellow" variant="outline">{t("deviceLimit.stage", { count: incident.stage })}</Badge>
                   </HStack>
                   <Text color="gray.300" fontSize="sm" mt={2} lineHeight="1.7">{incident.reason}</Text>
+                  <HStack mt={2} spacing={2}>
+                    <Badge variant="outline" colorScheme="cyan">{t(`deviceLimit.eventState.${incident.event_state}`)}</Badge>
+                    {incident.risk_score !== null && <Badge variant="outline" colorScheme="orange">{t(`deviceLimit.riskLevel.${riskKey(incident.risk_score)}`)}</Badge>}
+                    {incident.event_state === "warning" && !incident.resolved_at && (
+                      <Button size="xs" variant="ghost" colorScheme="red" isLoading={deleteWarning.isLoading} onClick={() => deleteWarning.mutate(incident.id)}>{t("deviceLimit.deleteWarning")}</Button>
+                    )}
+                  </HStack>
                 </Box>
                 <Text dir="ltr" color="gray.400" fontSize="xs">{new Intl.DateTimeFormat(i18n.language, { dateStyle: "medium", timeStyle: "short" }).format(new Date(`${incident.created_at}Z`))}</Text>
               </HStack>

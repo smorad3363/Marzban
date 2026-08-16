@@ -9,11 +9,10 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from typing import Any
 from uuid import uuid4
-
 from sqlalchemy import case, func, or_, update
 from sqlalchemy.orm import Session
 
-from app import xray
+from app import logger, xray
 from app.device_limit.constants import SubscriptionMode
 from app.db.models import (
     Admin,
@@ -26,9 +25,20 @@ from app.db.models import (
 
 
 class MarzhelpPolicyError(ValueError):
-    def __init__(self, code: str, message: str):
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        audit_admin_id: int | None = None,
+        audit_operation_type: str | None = None,
+        audit_details: dict[str, Any] | None = None,
+    ):
         super().__init__(message)
         self.code = code
+        self.audit_admin_id = audit_admin_id
+        self.audit_operation_type = audit_operation_type
+        self.audit_details = audit_details
 
 
 def calculate_delete_refund(data_limit: int | None, actual_used_traffic: int | None) -> int:
@@ -126,6 +136,70 @@ def capacity_used(db: Session, admin_id: int, excluded_user_id: int | None = Non
     return int(db.query(func.coalesce(func.sum(weight), 0)).filter(*filters).scalar() or 0)
 
 
+def user_count_used(db: Session, admin_id: int, excluded_user_id: int | None = None) -> int:
+    filters = [User.admin_id == admin_id]
+    if excluded_user_id is not None:
+        filters.append(User.id != excluded_user_id)
+    return int(db.query(func.count(User.id)).filter(*filters).scalar() or 0)
+
+
+def provisioned_volume_used(
+    db: Session,
+    admin_id: int,
+    excluded_user_id: int | None = None,
+) -> int:
+    filters = [User.admin_id == admin_id]
+    if excluded_user_id is not None:
+        filters.append(User.id != excluded_user_id)
+    return int(
+        db.query(func.coalesce(func.sum(func.coalesce(User.data_limit, 0)), 0))
+        .filter(*filters)
+        .scalar()
+        or 0
+    )
+
+
+def quota_summary(db: Session, admin_id: int) -> dict[str, int | None]:
+    settings = _settings(db, admin_id)
+    users = user_count_used(db, admin_id)
+    volume = provisioned_volume_used(db, admin_id)
+    if settings is None:
+        return {
+            "current_users": users,
+            "max_users": None,
+            "remaining_user_slots": None,
+            "provisioned_volume": volume,
+            "provisioning_volume_limit": None,
+            "remaining_provisioning_volume": None,
+            "renewals_used": 0,
+            "renewal_limit": None,
+            "renewals_remaining": None,
+        }
+    return {
+        "current_users": users,
+        "max_users": settings.max_users,
+        "remaining_user_slots": (
+            max(int(settings.max_users) - users, 0)
+            if settings.max_users is not None
+            else None
+        ),
+        "provisioned_volume": volume,
+        "provisioning_volume_limit": settings.provisioning_volume_limit,
+        "remaining_provisioning_volume": (
+            max(int(settings.provisioning_volume_limit) - volume, 0)
+            if settings.provisioning_volume_limit is not None
+            else None
+        ),
+        "renewals_used": int(settings.renewals_used or 0),
+        "renewal_limit": settings.renewal_limit,
+        "renewals_remaining": (
+            max(int(settings.renewal_limit) - int(settings.renewals_used or 0), 0)
+            if settings.renewal_limit is not None
+            else None
+        ),
+    }
+
+
 def allowed_inbound_tags(db: Session, admin: Admin) -> set[str] | None:
     """Return None for unrestricted access, otherwise exact allowed tags."""
 
@@ -211,8 +285,11 @@ def _adjust_capacity(
         actual = capacity_used(db, settings.admin_id)
         baseline = max(stored, actual)
         target = max(baseline + delta, 0)
-        if settings.max_users is not None and target > int(settings.max_users):
-            remaining = max(int(settings.max_users) - baseline, 0)
+        if (
+            settings.device_capacity_limit is not None
+            and target > int(settings.device_capacity_limit)
+        ):
+            remaining = max(int(settings.device_capacity_limit) - baseline, 0)
             raise MarzhelpPolicyError(
                 "weighted_capacity_exceeded",
                 (
@@ -226,8 +303,8 @@ def _adjust_capacity(
                 MarzhelpAdminSettings.admin_id == settings.admin_id,
                 MarzhelpAdminSettings.capacity_used == stored,
                 or_(
-                    MarzhelpAdminSettings.max_users.is_(None),
-                    target <= MarzhelpAdminSettings.max_users,
+                    MarzhelpAdminSettings.device_capacity_limit.is_(None),
+                    target <= MarzhelpAdminSettings.device_capacity_limit,
                 ),
             )
             .values(capacity_used=target, updated_at=func.now())
@@ -235,11 +312,165 @@ def _adjust_capacity(
         if result.rowcount == 1:
             settings.capacity_used = target
             return
-        db.expire(settings, ["capacity_used", "max_users"])
+        db.expire(settings, ["capacity_used", "device_capacity_limit"])
 
     raise MarzhelpPolicyError(
         "capacity_conflict",
         "MarzHelp: user capacity changed concurrently; retry the request",
+    )
+
+
+def _adjust_user_count(db: Session, settings: MarzhelpAdminSettings, delta: int) -> None:
+    if delta == 0:
+        return
+    for _ in range(3):
+        db.expire(settings, ["user_count_used"])
+        stored = int(settings.user_count_used or 0)
+        actual = user_count_used(db, settings.admin_id)
+        baseline = max(stored, actual)
+        target = max(baseline + delta, 0)
+        if settings.max_users is not None and target > int(settings.max_users):
+            logger.warning(
+                "quota_rejected admin_id=%s dimension=max_users requested_delta=%s used=%s limit=%s",
+                settings.admin_id,
+                delta,
+                baseline,
+                settings.max_users,
+            )
+            raise MarzhelpPolicyError(
+                "max_users_exceeded",
+                "MarzHelp: maximum user-account quota is exhausted",
+                audit_admin_id=settings.admin_id,
+                audit_operation_type="max_users",
+                audit_details={
+                    "requested_delta": delta,
+                    "used": baseline,
+                    "limit": int(settings.max_users),
+                },
+            )
+        result = db.execute(
+            update(MarzhelpAdminSettings)
+            .where(
+                MarzhelpAdminSettings.admin_id == settings.admin_id,
+                MarzhelpAdminSettings.user_count_used == stored,
+                or_(
+                    MarzhelpAdminSettings.max_users.is_(None),
+                    target <= MarzhelpAdminSettings.max_users,
+                ),
+            )
+            .values(user_count_used=target, updated_at=func.now())
+        )
+        if result.rowcount == 1:
+            settings.user_count_used = target
+            logger.info(
+                "quota_consumed admin_id=%s dimension=max_users delta=%s used=%s",
+                settings.admin_id,
+                delta,
+                target,
+            )
+            return
+        db.expire(settings, ["user_count_used", "max_users"])
+    raise MarzhelpPolicyError(
+        "user_count_conflict",
+        "MarzHelp: user quota changed concurrently; retry the request",
+    )
+
+
+def _adjust_volume(db: Session, settings: MarzhelpAdminSettings, delta: int) -> None:
+    if delta == 0:
+        return
+    for _ in range(3):
+        db.expire(settings, ["provisioning_volume_used"])
+        stored = int(settings.provisioning_volume_used or 0)
+        actual = provisioned_volume_used(db, settings.admin_id)
+        baseline = max(stored, actual)
+        target = max(baseline + delta, 0)
+        if (
+            settings.provisioning_volume_limit is not None
+            and target > int(settings.provisioning_volume_limit)
+        ):
+            logger.warning(
+                "quota_rejected admin_id=%s dimension=provisioning_volume requested_delta=%s used=%s limit=%s",
+                settings.admin_id,
+                delta,
+                baseline,
+                settings.provisioning_volume_limit,
+            )
+            raise MarzhelpPolicyError(
+                "provisioning_volume_exceeded",
+                "MarzHelp: provisioning volume quota is exhausted",
+                audit_admin_id=settings.admin_id,
+                audit_operation_type="provisioning_volume",
+                audit_details={
+                    "requested_delta": delta,
+                    "used": baseline,
+                    "limit": int(settings.provisioning_volume_limit),
+                },
+            )
+        result = db.execute(
+            update(MarzhelpAdminSettings)
+            .where(
+                MarzhelpAdminSettings.admin_id == settings.admin_id,
+                MarzhelpAdminSettings.provisioning_volume_used == stored,
+                or_(
+                    MarzhelpAdminSettings.provisioning_volume_limit.is_(None),
+                    target <= MarzhelpAdminSettings.provisioning_volume_limit,
+                ),
+            )
+            .values(provisioning_volume_used=target, updated_at=func.now())
+        )
+        if result.rowcount == 1:
+            settings.provisioning_volume_used = target
+            logger.info(
+                "quota_consumed admin_id=%s dimension=provisioning_volume delta=%s used=%s",
+                settings.admin_id,
+                delta,
+                target,
+            )
+            return
+        db.expire(settings, ["provisioning_volume_used", "provisioning_volume_limit"])
+    raise MarzhelpPolicyError(
+        "provisioning_volume_conflict",
+        "MarzHelp: provisioning volume changed concurrently; retry the request",
+    )
+
+
+def _consume_renewal(db: Session, settings: MarzhelpAdminSettings) -> None:
+    if settings.renewal_limit is None:
+        return
+    result = db.execute(
+        update(MarzhelpAdminSettings)
+        .where(
+            MarzhelpAdminSettings.admin_id == settings.admin_id,
+            MarzhelpAdminSettings.renewals_used < MarzhelpAdminSettings.renewal_limit,
+        )
+        .values(
+            renewals_used=MarzhelpAdminSettings.renewals_used + 1,
+            updated_at=func.now(),
+        )
+    )
+    if result.rowcount != 1:
+        logger.warning(
+            "quota_rejected admin_id=%s dimension=renewal used=%s limit=%s",
+            settings.admin_id,
+            settings.renewals_used,
+            settings.renewal_limit,
+        )
+        raise MarzhelpPolicyError(
+            "renewal_quota_exhausted",
+            "MarzHelp: renewal quota is exhausted",
+            audit_admin_id=settings.admin_id,
+            audit_operation_type="renewal",
+            audit_details={
+                "requested_delta": 1,
+                "used": int(settings.renewals_used or 0),
+                "limit": int(settings.renewal_limit),
+            },
+        )
+    db.expire(settings, ["renewals_used"])
+    logger.info(
+        "quota_consumed admin_id=%s dimension=renewal delta=1",
+        settings.admin_id,
     )
 
 
@@ -384,6 +615,9 @@ def _record(
     username: str | None,
     traffic_delta: int = 0,
     allowance_delta: int = 0,
+    volume_delta: int = 0,
+    renewal_delta: int = 0,
+    result: str = "consumed",
     details: dict[str, Any] | None = None,
 ) -> None:
     db.add(
@@ -395,9 +629,47 @@ def _record(
             username=username,
             traffic_delta=traffic_delta,
             allowance_delta=allowance_delta,
+            volume_delta=volume_delta,
+            renewal_delta=renewal_delta,
+            result=result,
             details=details,
         )
     )
+
+
+def record_quota_rejection(error: MarzhelpPolicyError, db: Session | None = None) -> None:
+    """Persist API quota rejections after the failed request transaction rolls back."""
+
+    if error.audit_admin_id is None or error.audit_operation_type is None:
+        return
+    owns_session = db is None
+    if owns_session:
+        from app.db import SessionLocal
+
+        db = SessionLocal()
+    assert db is not None
+    try:
+        _record(
+            db,
+            f"rejected:{uuid4().hex}",
+            error.audit_operation_type,
+            error.audit_admin_id,
+            None,
+            None,
+            result="rejected",
+            details={"code": error.code, **(error.audit_details or {})},
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception(
+            "quota_rejection_audit_failed admin_id=%s code=%s",
+            error.audit_admin_id,
+            error.code,
+        )
+    finally:
+        if owns_session:
+            db.close()
 
 
 def validate_create(db: Session, admin_id: int | None, user: Any) -> MarzhelpAdminSettings | None:
@@ -413,6 +685,7 @@ def validate_create(db: Session, admin_id: int | None, user: Any) -> MarzhelpAdm
     concurrent_user_limit = getattr(user, "concurrent_user_limit", None)
     _validate_inbounds(settings, _requested_inbound_tags(user))
     _validate_concurrent_user_limit(settings, concurrent_user_limit)
+    _adjust_user_count(db, settings, 1)
     _adjust_capacity(db, settings, capacity_weight(concurrent_user_limit))
 
     data_limit = _effective_data_limit(user.data_limit)
@@ -421,6 +694,12 @@ def validate_create(db: Session, admin_id: int | None, user: Any) -> MarzhelpAdm
     _validate_subscription_mode(settings, data_limit, concurrent_user_limit)
     _validate_expiration(settings, expire, getattr(user, "on_hold_expire_duration", None))
     _validate_traffic_credit(db, settings, data_limit)
+    if settings.provisioning_volume_limit is not None and data_limit is None:
+        raise MarzhelpPolicyError(
+            "unlimited_provisioning_forbidden",
+            "MarzHelp: unlimited user traffic is not allowed with finite provisioning volume",
+        )
+    _adjust_volume(db, settings, int(data_limit or 0))
 
     next_plan = getattr(user, "next_plan", None)
     if next_plan is not None:
@@ -433,9 +712,10 @@ def validate_create(db: Session, admin_id: int | None, user: Any) -> MarzhelpAdm
     return settings
 
 
-def record_create(db: Session, dbuser: User, allowance_consumed: bool) -> None:
-    if not allowance_consumed or dbuser.admin_id is None:
+def record_create(db: Session, dbuser: User, quota_enforced: bool) -> None:
+    if not quota_enforced or dbuser.admin_id is None:
         return
+    settings = _settings(db, dbuser.admin_id)
     _record(
         db,
         f"create:{dbuser.id}",
@@ -443,7 +723,8 @@ def record_create(db: Session, dbuser: User, allowance_consumed: bool) -> None:
         dbuser.admin_id,
         dbuser.id,
         dbuser.username,
-        allowance_delta=-1,
+        allowance_delta=-1 if settings is not None and settings.user_limit is not None else 0,
+        volume_delta=int(dbuser.data_limit or 0),
         details={"data_limit": dbuser.data_limit, "expire": dbuser.expire},
     )
 
@@ -519,6 +800,7 @@ def validate_update(db: Session, dbuser: User, modify: Any) -> tuple[bool, bool]
     old_capacity = capacity_weight(dbuser.concurrent_user_limit)
     new_capacity = capacity_weight(concurrent_user_limit)
     _adjust_capacity(db, settings, new_capacity - old_capacity)
+    old_data_limit = _effective_data_limit(dbuser.data_limit)
     data_limit = (
         _effective_data_limit(modify.data_limit)
         if modify.data_limit is not None
@@ -534,6 +816,15 @@ def validate_update(db: Session, dbuser: User, modify: Any) -> tuple[bool, bool]
     _validate_subscription_mode(settings, data_limit, concurrent_user_limit)
     _validate_expiration(settings, expire, on_hold_duration)
     _validate_traffic_credit(db, settings, data_limit, excluded_user_id=dbuser.id)
+    if settings.provisioning_volume_limit is not None and data_limit is None:
+        raise MarzhelpPolicyError(
+            "unlimited_provisioning_forbidden",
+            "MarzHelp: unlimited user traffic is not allowed with finite provisioning volume",
+        )
+    volume_delta = int(data_limit or 0) - int(old_data_limit or 0)
+    _adjust_volume(db, settings, volume_delta)
+    dbuser._marzhelp_volume_delta = volume_delta
+    dbuser._marzhelp_is_renewal = renewal
 
     if modify.next_plan is not None:
         next_data_limit = _effective_data_limit(modify.next_plan.data_limit)
@@ -542,24 +833,38 @@ def validate_update(db: Session, dbuser: User, modify: Any) -> tuple[bool, bool]
         _validate_expiration(settings, _effective_expire(modify.next_plan.expire))
 
     if renewal:
-        _consume_allowance(db, settings)
-    return renewal, settings.user_limit is not None
+        _consume_renewal(db, settings)
+        dbuser._marzhelp_renewal_sequence = int(settings.renewals_used or 0)
+    return renewal, True
 
 
-def record_renewal(db: Session, dbuser: User, allowance_consumed: bool) -> None:
-    if not allowance_consumed or dbuser.admin_id is None:
+def record_renewal(db: Session, dbuser: User, quota_enforced: bool) -> None:
+    if not quota_enforced or dbuser.admin_id is None:
         return
     # Absolute plan updates are naturally idempotent: retrying an already-applied
     # value is not classified as another renewal.
-    key = f"renew:{dbuser.id}:{uuid4().hex}"
+    renewal = bool(getattr(dbuser, "_marzhelp_is_renewal", True))
+    operation = "renew" if renewal else "volume_adjustment"
+    sequence = (
+        db.query(func.count(MarzhelpAccountingTransaction.id))
+        .filter(
+            MarzhelpAccountingTransaction.admin_id == dbuser.admin_id,
+            MarzhelpAccountingTransaction.user_id == dbuser.id,
+            MarzhelpAccountingTransaction.operation_type == operation,
+        )
+        .scalar()
+        or 0
+    ) + 1
+    key = f"{operation}:{dbuser.id}:{sequence}:{dbuser.data_limit}:{dbuser.expire}"
     _record(
         db,
         key,
-        "renew",
+        operation,
         dbuser.admin_id,
         dbuser.id,
         dbuser.username,
-        allowance_delta=-1,
+        volume_delta=int(getattr(dbuser, "_marzhelp_volume_delta", 0)),
+        renewal_delta=1 if renewal else 0,
         details={"data_limit": dbuser.data_limit, "expire": dbuser.expire},
     )
 
@@ -588,8 +893,17 @@ def validate_next_plan_activation(db: Session, dbuser: User) -> bool:
     _validate_subscription_mode(settings, data_limit, dbuser.concurrent_user_limit)
     _validate_expiration(settings, expire)
     _validate_traffic_credit(db, settings, data_limit, excluded_user_id=dbuser.id)
-    _consume_allowance(db, settings)
-    return settings.user_limit is not None
+    if settings.provisioning_volume_limit is not None and data_limit is None:
+        raise MarzhelpPolicyError(
+            "unlimited_provisioning_forbidden",
+            "MarzHelp: unlimited user traffic is not allowed with finite provisioning volume",
+        )
+    volume_delta = int(data_limit or 0) - int(_effective_data_limit(dbuser.data_limit) or 0)
+    _adjust_volume(db, settings, volume_delta)
+    _consume_renewal(db, settings)
+    dbuser._marzhelp_volume_delta = volume_delta
+    dbuser._marzhelp_is_renewal = True
+    return True
 
 
 def validate_reset(db: Session, dbuser: User) -> None:
@@ -653,11 +967,20 @@ def validate_transfer(db: Session, dbuser: User, new_admin_id: int) -> None:
         )
         _validate_expiration(settings, dbuser.expire, dbuser.on_hold_expire_duration)
         _validate_traffic_credit(db, settings, dbuser.data_limit)
+        if settings.provisioning_volume_limit is not None and dbuser.data_limit is None:
+            raise MarzhelpPolicyError(
+                "unlimited_provisioning_forbidden",
+                "MarzHelp: unlimited user traffic is not allowed with finite provisioning volume",
+            )
         if owner_changes:
+            _adjust_user_count(db, settings, 1)
             _adjust_capacity(db, settings, capacity_weight(dbuser.concurrent_user_limit))
+            _adjust_volume(db, settings, int(dbuser.data_limit or 0))
     previous_settings = _settings(db, dbuser.admin_id, lock=True)
     if owner_changes and previous_settings is not None:
+        _adjust_user_count(db, previous_settings, -1)
         _adjust_capacity(db, previous_settings, -capacity_weight(dbuser.concurrent_user_limit))
+        _adjust_volume(db, previous_settings, -int(dbuser.data_limit or 0))
 
 
 def capture_delete(db: Session, dbuser: User) -> int:
@@ -675,7 +998,9 @@ def capture_delete(db: Session, dbuser: User) -> int:
         return 0
 
     if settings is not None:
+        _adjust_user_count(db, settings, -1)
         _adjust_capacity(db, settings, -capacity_weight(dbuser.concurrent_user_limit))
+        _adjust_volume(db, settings, -int(dbuser.data_limit or 0))
 
     used = max(int(dbuser.lifetime_used_traffic or 0), 0)
     refund = calculate_delete_refund(dbuser.data_limit, used)
@@ -696,6 +1021,7 @@ def capture_delete(db: Session, dbuser: User) -> int:
         dbuser.id,
         dbuser.username,
         traffic_delta=refund,
+        volume_delta=-int(dbuser.data_limit or 0),
         details={
             "allocated_traffic": dbuser.data_limit,
             "actual_used_traffic": used,

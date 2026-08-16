@@ -132,12 +132,18 @@ class MarzhelpAdminSettings(Base):
     used_traffic = Column(BigInteger, nullable=False, default=0)
     expiry_date = Column(Date, nullable=True)
     status = Column(JSON, nullable=True)
-    # Remaining successful create/renew operations. NULL means unrestricted.
+    # Remaining successful create operations. NULL means unrestricted.
     user_limit = Column(BigInteger, nullable=True)
-    # Maximum weighted concurrent-user capacity. NULL means unrestricted.
+    # Maximum owned user accounts. NULL means unrestricted.
     max_users = Column(BigInteger, nullable=True)
-    # Transactional reservation counter; reconciled against active users.
+    user_count_used = Column(BigInteger, nullable=False, default=0)
+    # Legacy weighted concurrent-device capacity is preserved independently.
+    device_capacity_limit = Column(BigInteger, nullable=True)
     capacity_used = Column(BigInteger, nullable=False, default=0)
+    provisioning_volume_limit = Column(BigInteger, nullable=True)
+    provisioning_volume_used = Column(BigInteger, nullable=False, default=0)
+    renewal_limit = Column(BigInteger, nullable=True)
+    renewals_used = Column(BigInteger, nullable=False, default=0)
     all_inbounds = Column(Boolean, nullable=False, default=True)
     all_user_limits = Column(Boolean, nullable=False, default=True)
     max_user_duration_days = Column(Integer, nullable=True)
@@ -224,10 +230,18 @@ class DeviceLimitSettings(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=False, default=1)
     enabled = Column(Boolean, nullable=False, default=False)
+    # Kept for input/backward compatibility only. Runtime behavior uses the
+    # independent capability flags below.
     enforcement_mode = Column(String(24), nullable=False, default="hybrid")
+    device_slots_enabled = Column(Boolean, nullable=False, default=True)
+    ip_detection_enabled = Column(Boolean, nullable=False, default=True)
+    client_fingerprint_enabled = Column(Boolean, nullable=False, default=False)
     check_interval_seconds = Column(Integer, nullable=False, default=60)
     active_window_seconds = Column(Integer, nullable=False, default=300)
     hit_threshold = Column(Integer, nullable=False, default=3)
+    min_successful_connections = Column(Integer, nullable=False, default=3)
+    handoff_grace_seconds = Column(Integer, nullable=False, default=90)
+    warning_auto_delete_seconds = Column(Integer, nullable=False, default=86400)
     strike_reset_seconds = Column(Integer, nullable=False, default=2592000)
     full_ip_retention_days = Column(Integer, nullable=False, default=7)
     incident_retention_days = Column(Integer, nullable=False, default=90)
@@ -278,6 +292,56 @@ class DeviceSlot(Base):
     )
 
     user = relationship("User", back_populates="device_slots")
+    client_observations = relationship(
+        "DeviceClientObservation",
+        back_populates="slot",
+        lazy="selectin",
+    )
+
+
+class DeviceClientObservation(Base):
+    """Aggregated, bounded subscription-client observation per slot/user."""
+
+    __tablename__ = "device_client_observations"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "slot_key",
+            "normalized_identity",
+            name="uq_device_client_observation_identity",
+        ),
+        Index(
+            "ix_device_client_observation_user_slot_seen",
+            "user_id",
+            "slot_key",
+            "last_seen_at",
+        ),
+        Index(
+            "ix_device_client_observation_user_seen",
+            "user_id",
+            "last_seen_at",
+        ),
+        Index("ix_device_client_observation_slot", "slot_id"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    slot_id = Column(Integer, ForeignKey("device_slots.id", ondelete="SET NULL"), nullable=True)
+    # 0 is the honest user-level fallback for legacy subscription tokens.
+    slot_key = Column(Integer, nullable=False, default=0)
+    normalized_identity = Column(String(64), nullable=False)
+    client_name = Column(String(64), nullable=False, default="Unknown")
+    client_version = Column(String(64), nullable=True)
+    platform = Column(String(64), nullable=True)
+    os_token = Column(String(128), nullable=True)
+    network_stack = Column(String(128), nullable=True)
+    raw_user_agent = Column(String(512), nullable=False)
+    first_seen_at = Column(DateTime, nullable=False, default=utc_now_naive)
+    last_seen_at = Column(DateTime, nullable=False, default=utc_now_naive)
+    seen_count = Column(BigInteger, nullable=False, default=1)
+
+    slot = relationship("DeviceSlot", back_populates="client_observations")
+    user = relationship("User", back_populates="device_client_observations")
 
 
 class DeviceLimitUserState(Base):
@@ -296,6 +360,11 @@ class DeviceLimitUserState(Base):
     last_seen_at = Column(DateTime, nullable=True)
     active_ip_count = Column(Integer, nullable=False, default=0)
     last_reason = Column(Text, nullable=True)
+    pending_handoff_started_at = Column(DateTime, nullable=True)
+    pending_ip_addresses = Column(JSON, nullable=True)
+    pending_source_nodes = Column(JSON, nullable=True)
+    pending_risk_score = Column(Integer, nullable=True)
+    pending_last_fresh_at = Column(DateTime, nullable=True)
     updated_at = Column(
         DateTime,
         nullable=False,
@@ -312,6 +381,12 @@ class DeviceLimitIncident(Base):
         Index("ix_device_limit_incidents_user_created", "user_id", "created_at"),
         Index("ix_device_limit_incidents_admin_created", "admin_id", "created_at"),
         Index("ix_device_limit_incidents_created", "created_at"),
+        Index(
+            "ix_device_limit_incidents_warning_expiry",
+            "event_state",
+            "resolved_at",
+            "expires_at",
+        ),
     )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -324,7 +399,11 @@ class DeviceLimitIncident(Base):
     observed_count = Column(Integer, nullable=False)
     ip_addresses = Column(JSON, nullable=True)
     source_nodes = Column(JSON, nullable=True)
+    event_state = Column(String(32), nullable=False, default="confirmed_violation")
+    risk_score = Column(Integer, nullable=True)
+    signal_summary = Column(JSON, nullable=True)
     reason = Column(Text, nullable=False)
+    expires_at = Column(DateTime, nullable=True)
     resolved_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=utc_now_naive)
 
@@ -401,6 +480,9 @@ class MarzhelpAccountingTransaction(Base):
     username = Column(String(34), nullable=True)
     traffic_delta = Column(BigInteger, nullable=False, default=0)
     allowance_delta = Column(Integer, nullable=False, default=0)
+    volume_delta = Column(BigInteger, nullable=False, default=0)
+    renewal_delta = Column(Integer, nullable=False, default=0)
+    result = Column(String(16), nullable=False, default="consumed")
     details = Column(JSON, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
 
@@ -412,6 +494,12 @@ class User(Base):
     username = Column(String(34, collation='NOCASE'), unique=True, index=True)
     proxies = relationship("Proxy", back_populates="user", cascade="all, delete-orphan")
     device_slots = relationship("DeviceSlot", back_populates="user", cascade="all, delete-orphan")
+    device_client_observations = relationship(
+        "DeviceClientObservation",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
     device_limit_state = relationship(
         "DeviceLimitUserState",
         back_populates="user",

@@ -10,7 +10,7 @@ from fastapi.routing import APIRoute
 
 from config import ALLOWED_ORIGINS, DOCS, XRAY_SUBSCRIPTION_PATH
 
-__version__ = "4.6.3"
+__version__ = "4.7.0"
 
 app = FastAPI(
     title="Network Control API",
@@ -38,11 +38,15 @@ from app.routers import api_router  # noqa
 app.include_router(api_router)
 
 
-from app.utils.marzhelp_policy import MarzhelpPolicyError  # noqa: E402
+from app.utils.marzhelp_policy import (  # noqa: E402
+    MarzhelpPolicyError,
+    record_quota_rejection,
+)
 
 
 @app.exception_handler(MarzhelpPolicyError)
 def marzhelp_policy_exception_handler(request: Request, exc: MarzhelpPolicyError):
+    record_quota_rejection(exc)
     return JSONResponse(
         status_code=status.HTTP_409_CONFLICT,
         content={"detail": str(exc), "code": exc.code},

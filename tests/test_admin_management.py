@@ -5,11 +5,13 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db import crud
 from app.db.base import Base
+from app.db.models import User
 from app.models.admin import (
     AdminCreate,
     AdminModify,
     MarzhelpAdminPolicy,
 )
+from app.models.user import UserStatus
 
 
 @pytest.fixture()
@@ -99,3 +101,28 @@ def test_selected_permission_modes_require_values():
         MarzhelpAdminPolicy(all_inbounds=False)
     with pytest.raises(ValidationError):
         MarzhelpAdminPolicy(all_user_limits=False)
+
+
+@pytest.mark.parametrize("strategy", ["delete_users", "disable_users", "keep_users"])
+def test_admin_deletion_strategies_leave_no_unmanageable_owner(session, strategy):
+    admin = crud.create_admin(
+        session,
+        AdminCreate(username=f"owner-{strategy}", password="secret", is_sudo=False),
+    )
+    user = User(
+        username=f"user-{strategy}",
+        admin_id=admin.id,
+        status=UserStatus.active,
+    )
+    session.add(user)
+    session.commit()
+
+    assert crud.remove_admin(session, admin, strategy) == 1
+    remaining = session.query(User).filter(User.username == user.username).first()
+    if strategy == "delete_users":
+        assert remaining is None
+    else:
+        assert remaining is not None
+        assert remaining.admin_id is None
+        expected = UserStatus.disabled if strategy == "disable_users" else UserStatus.active
+        assert remaining.status == expected
