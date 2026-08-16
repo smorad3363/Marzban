@@ -30,7 +30,7 @@ marzban_docker_image() {
 colorized_echo() {
     local color=$1
     local text=$2
-    
+
     case $color in
         "red")
         printf "\e[91m${text}\e[0m\n";;
@@ -102,7 +102,7 @@ install_package () {
     if [ -z $PKG_MANAGER ]; then
         detect_and_update_package_manager
     fi
-    
+
     PACKAGE=$1
     colorized_echo blue "Installing $PACKAGE"
     if [[ "$OS" == "Ubuntu"* ]] || [[ "$OS" == "Debian"* ]]; then
@@ -443,4 +443,1273 @@ backup_service() {
     } >> "$ENV_FILE"
 
     colorized_echo green "Backup service configuration saved in $ENV_FILE."
-˜}|∂âûÀk∫wµÁ@ÄÄÅô§4(4(4(ÄÄÄÅ•òÅçΩµµÖπêÄµÿÅç’…∞Äò¯ΩëïÿΩπ’±∞ÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅ•òÅç’…∞Äµ0ÄàëÂ≈}’…∞àÄµºÄΩ’Õ»Ω±ΩçÖ∞Ωâ•∏ΩÂƒÏÅ—°ï∏4(ÄÄÄÄÄÄÄÄÄÄÄÅç°µΩêÄ≠‡ÄΩ’Õ»Ω±ΩçÖ∞Ωâ•∏ΩÂƒ4(ÄÄÄÄÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅù…ïï∏ÄâÂƒÅ•πÕ—Ö±±ïêÅÕ’ççïÕÕô’±±‰Ñà4(ÄÄÄÄÄÄÄÅï±Õî4(ÄÄÄÄÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâÖ•±ïêÅ—ºÅëΩ›π±ΩÖêÅÂƒÅ’Õ•πúÅç’…∞∏ÅA±ïÖÕîÅç°ïç¨ÅÂΩ’»Å•π—ï…πï–ÅçΩππïç—•Ω∏∏à4(ÄÄÄÄÄÄÄÄÄÄÄÅï·•–Äƒ4(ÄÄÄÄÄÄÄÅô§4(ÄÄÄÅï±•òÅçΩµµÖπêÄµÿÅ›ùï–Äò¯ΩëïÿΩπ’±∞ÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅ•òÅ›ùï–Äµ<ÄΩ’Õ»Ω±ΩçÖ∞Ωâ•∏ΩÂƒÄàëÂ≈}’…∞àÏÅ—°ï∏4(ÄÄÄÄÄÄÄÄÄÄÄÅç°µΩêÄ≠‡ÄΩ’Õ»Ω±ΩçÖ∞Ωâ•∏ΩÂƒ4(ÄÄÄÄÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅù…ïï∏ÄâÂƒÅ•πÕ—Ö±±ïêÅÕ’ççïÕÕô’±±‰Ñà4(ÄÄÄÄÄÄÄÅï±Õî4(ÄÄÄÄÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâÖ•±ïêÅ—ºÅëΩ›π±ΩÖêÅÂƒÅ’Õ•πúÅ›ùï–∏ÅA±ïÖÕîÅç°ïç¨ÅÂΩ’»Å•π—ï…πï–ÅçΩππïç—•Ω∏∏à4(ÄÄÄÄÄÄÄÄÄÄÄÅï·•–Äƒ4(ÄÄÄÄÄÄÄÅô§4(ÄÄÄÅô§4(4(4(ÄÄÄÅ•òÄÑÅïç°ºÄàëAQ àÅÅù…ï¿ÄµƒÄàΩ’Õ»Ω±ΩçÖ∞Ωâ•∏àÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅï·¡Ω…–ÅAQ ÙàΩ’Õ»Ω±ΩçÖ∞Ωâ•∏ËëAQ à4(ÄÄÄÅô§4(4(4(ÄÄÄÅ°ÖÕ†Äµ»4(4(ÄÄÄÅ•òÅçΩµµÖπêÄµÿÅÂƒÄò¯ΩëïÿΩπ’±∞ÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅù…ïï∏ÄâÂƒÅ•ÃÅ…ïÖë‰Å—ºÅ’Õî∏à4(ÄÄÄÅï±•òÅlÄµ‡ÄàΩ’Õ»Ω±ΩçÖ∞Ωâ•∏ΩÂƒàÅtÏÅ—°ï∏4(4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅÂï±±Ω‹ÄâÂƒÅ•ÃÅ•πÕ—Ö±±ïêÅÖ–ÄΩ’Õ»Ω±ΩçÖ∞Ωâ•∏ΩÂƒÅâ’–ÅπΩ–ÅôΩ’πêÅ•∏ÅAQ ∏à4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅÂï±±Ω‹ÄâeΩ‘ÅçÖ∏ÅÖëêÄΩ’Õ»Ω±ΩçÖ∞Ωâ•∏Å—ºÅÂΩ’»ÅAQ ÅïπŸ•…Ωπµïπ–ÅŸÖ…•Öâ±î∏à4(ÄÄÄÅï±Õî4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâÂƒÅ•πÕ—Ö±±Ö—•Ω∏ÅôÖ•±ïê∏ÅA±ïÖÕîÅ—…‰ÅÖùÖ•∏ÅΩ»Å•πÕ—Ö±∞ÅµÖπ’Ö±±‰∏à4(ÄÄÄÄÄÄÄÅï·•–Äƒ4(ÄÄÄÅô§4)Ù4(4(4)ëΩ›π}µÖ…ÈâÖ∏†§ÅÏ4(ÄÄÄÄë=5A=MÄµòÄë=5A=M}%1Äµ¿ÄàëAA}95àÅëΩ›∏4)Ù4(4(4(4)Õ°Ω›}µÖ…ÈâÖπ}±ΩùÃ†§ÅÏ4(ÄÄÄÄë=5A=MÄµòÄë=5A=M}%1Äµ¿ÄàëAA}95àÅ±ΩùÃ4)Ù4(4)ôΩ±±Ω›}µÖ…ÈâÖπ}±ΩùÃ†§ÅÏ4(ÄÄÄÄë=5A=MÄµòÄë=5A=M}%1Äµ¿ÄàëAA}95àÅ±ΩùÃÄµò4)Ù4(4)µÖ…ÈâÖπ}ç±§†§ÅÏ4(ÄÄÄÄë=5A=MÄµòÄë=5A=M}%1Äµ¿ÄàëAA}95àÅï·ïåÄµîÅ1%}AI=}95ÙâµÖ…ÈâÖ∏Åç±§àÅµÖ…ÈâÖ∏ÅµÖ…ÈâÖ∏µç±§Äàë à4)Ù4(4(4)•Õ}µÖ…ÈâÖπ}’¿†§ÅÏ4(ÄÄÄÅ•òÅlÄµËÄàê†ë=5A=MÄµòÄë=5A=M}%1Å¡ÃÄµƒÄµÑ§àÅtÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅ…ï—’…∏Äƒ4(ÄÄÄÅï±Õî4(ÄÄÄÄÄÄÄÅ…ï—’…∏Ä¿4(ÄÄÄÅô§4)Ù4(4)’π•πÕ—Ö±±}çΩµµÖπê†§ÅÏ4(ÄÄÄÅç°ïç≠}…’ππ•πù}ÖÕ}…ΩΩ–4(ÄÄÄÄåÅ°ïç¨Å•òÅµÖ…ÈâÖ∏Å•ÃÅ•πÕ—Ö±±ïê4(ÄÄÄÅ•òÄÑÅ•Õ}µÖ…ÈâÖπ}•πÕ—Ö±±ïêÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâ5Ö…ÈâÖ∏ùÃÅπΩ–Å•πÕ—Ö±±ïêÑà4(ÄÄÄÄÄÄÄÅï·•–Äƒ4(ÄÄÄÅô§4(ÄÄÄÄ4(ÄÄÄÅ…ïÖêÄµ¿ÄâºÅÂΩ‘Å…ïÖ±±‰Å›Öπ–Å—ºÅ’π•πÕ—Ö±∞Å5Ö…ÈâÖ∏¸Ä°‰Ω∏§Äà4(ÄÄÄÅ•òÅmlÄÑÄëIA1dÄı¯ÅymeÂtêÅutÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄââΩ…—ïêà4(ÄÄÄÄÄÄÄÅï·•–Äƒ4(ÄÄÄÅô§4(ÄÄÄÄ4(ÄÄÄÅëï—ïç—}çΩµ¡ΩÕî4(ÄÄÄÅ•òÅ•Õ}µÖ…ÈâÖπ}’¿ÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅëΩ›π}µÖ…ÈâÖ∏4(ÄÄÄÅô§4(ÄÄÄÅ’π•πÕ—Ö±±}µÖ…ÈâÖπ}Õç…•¡–4(ÄÄÄÅ’π•πÕ—Ö±±}µÖ…ÈâÖ∏4(ÄÄÄÅ’π•πÕ—Ö±±}µÖ…ÈâÖπ}ëΩç≠ï…}•µÖùïÃ4(ÄÄÄÄ4(ÄÄÄÅ…ïÖêÄµ¿ÄâºÅÂΩ‘Å›Öπ–Å—ºÅ…ïµΩŸîÅ5Ö…ÈâÖ∏ùÃÅëÖ—ÑÅô•±ïÃÅ—ΩºÄ†ëQ}%H§¸Ä°‰Ω∏§Äà4(ÄÄÄÅ•òÅmlÄÑÄëIA1dÄı¯ÅymeÂtêÅutÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅù…ïï∏Äâ5Ö…ÈâÖ∏Å’π•πÕ—Ö±±ïêÅÕ’ççïÕÕô’±±‰à4(ÄÄÄÅï±Õî4(ÄÄÄÄÄÄÄÅ’π•πÕ—Ö±±}µÖ…ÈâÖπ}ëÖ—Ö}ô•±ïÃ4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅù…ïï∏Äâ5Ö…ÈâÖ∏Å’π•πÕ—Ö±±ïêÅÕ’ççïÕÕô’±±‰à4(ÄÄÄÅô§4)Ù4(4)’π•πÕ—Ö±±}µÖ…ÈâÖπ}Õç…•¡–†§ÅÏ4(ÄÄÄÅ•òÅlÄµòÄàΩ’Õ»Ω±ΩçÖ∞Ωâ•∏ΩµÖ…ÈâÖ∏àÅtÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅÂï±±Ω‹ÄâIïµΩŸ•πúÅµÖ…ÈâÖ∏ÅÕç…•¡–à4(ÄÄÄÄÄÄÄÅ…¥ÄàΩ’Õ»Ω±ΩçÖ∞Ωâ•∏ΩµÖ…ÈâÖ∏à4(ÄÄÄÅô§4)Ù4(4)’π•πÕ—Ö±±}µÖ…ÈâÖ∏†§ÅÏ4(ÄÄÄÅ•òÅlÄµêÄàëAA}%HàÅtÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅÂï±±Ω‹ÄâIïµΩŸ•πúÅë•…ïç—Ω…‰ËÄëAA}%Hà4(ÄÄÄÄÄÄÄÅ…¥Äµ»ÄàëAA}%Hà4(ÄÄÄÅô§4)Ù4(4)’π•πÕ—Ö±±}µÖ…ÈâÖπ}ëΩç≠ï…}•µÖùïÃ†§ÅÏ4(ÄÄÄÅ•µÖùïÃÙê°ëΩç≠ï»Å•µÖùïÃÅÅù…ï¿ÅµÖ…ÈâÖ∏ÅÅÖ›¨ÄùÌ¡…•π–ÄêÕÙú§4(ÄÄÄÄ4(ÄÄÄÅ•òÅlÄµ∏Äàë•µÖùïÃàÅtÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅÂï±±Ω‹ÄâIïµΩŸ•πúÅΩç≠ï»Å•µÖùïÃÅΩòÅ5Ö…ÈâÖ∏à4(ÄÄÄÄÄÄÄÅôΩ»Å•µÖùîÅ•∏Äë•µÖùïÃÏÅëº4(ÄÄÄÄÄÄÄÄÄÄÄÅ•òÅëΩç≠ï»Å…µ§Äàë•µÖùîàÄ¯ΩëïÿΩπ’±∞Ä»¯òƒÏÅ—°ï∏4(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅÂï±±Ω‹Äâ%µÖùîÄë•µÖùîÅ…ïµΩŸïêà4(ÄÄÄÄÄÄÄÄÄÄÄÅô§4(ÄÄÄÄÄÄÄÅëΩπî4(ÄÄÄÅô§4)Ù4(4)’π•πÕ—Ö±±}µÖ…ÈâÖπ}ëÖ—Ö}ô•±ïÃ†§ÅÏ4(ÄÄÄÅ•òÅlÄµêÄàëQ}%HàÅtÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅÂï±±Ω‹ÄâIïµΩŸ•πúÅë•…ïç—Ω…‰ËÄëQ}%Hà4(ÄÄÄÄÄÄÄÅ…¥Äµ»ÄàëQ}%Hà4(ÄÄÄÅô§4)Ù4(4)…ïÕ—Ö…—}çΩµµÖπê†§ÅÏ4(ÄÄÄÅ°ï±¿†§ÅÏ4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâUÕÖùîËÅµÖ…ÈâÖ∏Å…ïÕ—Ö…–ÅmΩ¡—•ΩπÕtà4(ÄÄÄÄÄÄÄÅïç°º4(ÄÄÄÄÄÄÄÅïç°ºÄâ=AQ%=9LËà4(ÄÄÄÄÄÄÄÅïç°ºÄàÄÄµ†∞Ä¥µ°ï±¿ÄÄÄÄÄÄÄÅë•Õ¡±Ö‰Å—°•ÃÅ°ï±¿ÅµïÕÕÖùîà4(ÄÄÄÄÄÄÄÅïç°ºÄàÄÄµ∏∞Ä¥µπºµ±ΩùÃÄÄÄÄÅëºÅπΩ–ÅôΩ±±Ω‹Å±ΩùÃÅÖô—ï»ÅÕ—Ö…—•πúà4(ÄÄÄÅÙ4(ÄÄÄÄ4(ÄÄÄÅ±ΩçÖ∞ÅπΩ}±ΩùÃıôÖ±Õî4(ÄÄÄÅ›°•±îÅmlÄàêåàÄµù–Ä¿ÅutÏÅëº4(ÄÄÄÄÄÄÄÅçÖÕîÄàêƒàÅ•∏4(ÄÄÄÄÄÄÄÄÄÄÄÄµπ¥µπºµ±ΩùÃ§4(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅπΩ}±ΩùÃı—…’î4(ÄÄÄÄÄÄÄÄÄÄÄÄÏÏ4(ÄÄÄÄÄÄÄÄÄÄÄÄµ°¥µ°ï±¿§4(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅ°ï±¿4(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅï·•–Ä¿4(ÄÄÄÄÄÄÄÄÄÄÄÄÏÏ4(ÄÄÄÄÄÄÄÄÄÄÄÄ®§4(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅïç°ºÄâ……Ω»ËÅ%πŸÖ±•êÅΩ¡—•Ω∏ËÄêƒàÄ¯ò»4(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅ°ï±¿4(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅï·•–Ä¿4(ÄÄÄÄÄÄÄÄÄÄÄÄÏÏ4(ÄÄÄÄÄÄÄÅïÕÖå4(ÄÄÄÄÄÄÄÅÕ°•ô–4(ÄÄÄÅëΩπî4(ÄÄÄÄ4(ÄÄÄÄåÅ°ïç¨Å•òÅµÖ…ÈâÖ∏Å•ÃÅ•πÕ—Ö±±ïê4(ÄÄÄÅ•òÄÑÅ•Õ}µÖ…ÈâÖπ}•πÕ—Ö±±ïêÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâ5Ö…ÈâÖ∏ùÃÅπΩ–Å•πÕ—Ö±±ïêÑà4(ÄÄÄÄÄÄÄÅï·•–Äƒ4(ÄÄÄÅô§4(ÄÄÄÄ4(ÄÄÄÅëï—ïç—}çΩµ¡ΩÕî4(ÄÄÄÄ4(ÄÄÄÅëΩ›π}µÖ…ÈâÖ∏4(ÄÄÄÅ’¡}µÖ…ÈâÖ∏4(ÄÄÄÅ•òÅlÄàëπΩ}±ΩùÃàÄÙÅôÖ±ÕîÅtÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅôΩ±±Ω›}µÖ…ÈâÖπ}±ΩùÃ4(ÄÄÄÅô§4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅù…ïï∏Äâ5Ö…ÈâÖ∏ÅÕ’ççïÕÕô’±±‰Å…ïÕ—Ö…—ïêÑà4)Ù4)±ΩùÕ}çΩµµÖπê†§ÅÏ4(ÄÄÄÅ°ï±¿†§ÅÏ4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâUÕÖùîËÅµÖ…ÈâÖ∏Å±ΩùÃÅmΩ¡—•ΩπÕtà4(ÄÄÄÄÄÄÄÅïç°ºÄàà4(ÄÄÄÄÄÄÄÅïç°ºÄâ=AQ%=9LËà4(ÄÄÄÄÄÄÄÅïç°ºÄàÄÄµ†∞Ä¥µ°ï±¿ÄÄÄÄÄÄÄÅë•Õ¡±Ö‰Å—°•ÃÅ°ï±¿ÅµïÕÕÖùîà4(ÄÄÄÄÄÄÄÅïç°ºÄàÄÄµ∏∞Ä¥µπºµôΩ±±Ω‹ÄÄÅëºÅπΩ–ÅÕ°Ω‹ÅôΩ±±Ω‹Å±ΩùÃà4(ÄÄÄÅÙ4(ÄÄÄÄ4(ÄÄÄÅ±ΩçÖ∞ÅπΩ}ôΩ±±Ω‹ıôÖ±Õî4(ÄÄÄÅ›°•±îÅmlÄàêåàÄµù–Ä¿ÅutÏÅëº4(ÄÄÄÄÄÄÄÅçÖÕîÄàêƒàÅ•∏4(ÄÄÄÄÄÄÄÄÄÄÄÄµπ¥µπºµôΩ±±Ω‹§4(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅπΩ}ôΩ±±Ω‹ı—…’î4(ÄÄÄÄÄÄÄÄÄÄÄÄÏÏ4(ÄÄÄÄÄÄÄÄÄÄÄÄµ°¥µ°ï±¿§4(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅ°ï±¿4(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅï·•–Ä¿4(ÄÄÄÄÄÄÄÄÄÄÄÄÏÏ4(ÄÄÄÄÄÄÄÄÄÄÄÄ®§4(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅïç°ºÄâ……Ω»ËÅ%πŸÖ±•êÅΩ¡—•Ω∏ËÄêƒàÄ¯ò»4(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅ°ï±¿4(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅï·•–Ä¿4(ÄÄÄÄÄÄÄÄÄÄÄÄÏÏ4(ÄÄÄÄÄÄÄÅïÕÖå4(ÄÄÄÄÄÄÄÅÕ°•ô–4(ÄÄÄÅëΩπî4(ÄÄÄÄ4(ÄÄÄÄåÅ°ïç¨Å•òÅµÖ…ÈâÖ∏Å•ÃÅ•πÕ—Ö±±ïê4(ÄÄÄÅ•òÄÑÅ•Õ}µÖ…ÈâÖπ}•πÕ—Ö±±ïêÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâ5Ö…ÈâÖ∏ùÃÅπΩ–Å•πÕ—Ö±±ïêÑà4(ÄÄÄÄÄÄÄÅï·•–Äƒ4(ÄÄÄÅô§4(ÄÄÄÄ4(ÄÄÄÅëï—ïç—}çΩµ¡ΩÕî4(ÄÄÄÄ4(ÄÄÄÅ•òÄÑÅ•Õ}µÖ…ÈâÖπ}’¿ÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâ5Ö…ÈâÖ∏Å•ÃÅπΩ–Å’¿∏à4(ÄÄÄÄÄÄÄÅï·•–Äƒ4(ÄÄÄÅô§4(ÄÄÄÄ4(ÄÄÄÅ•òÅlÄàëπΩ}ôΩ±±Ω‹àÄÙÅ—…’îÅtÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅÕ°Ω›}µÖ…ÈâÖπ}±ΩùÃ4(ÄÄÄÅï±Õî4(ÄÄÄÄÄÄÄÅôΩ±±Ω›}µÖ…ÈâÖπ}±ΩùÃ4(ÄÄÄÅô§4)Ù4(4)ëΩ›π}çΩµµÖπê†§ÅÏ4(ÄÄÄÄ4(ÄÄÄÄåÅ°ïç¨Å•òÅµÖ…ÈâÖ∏Å•ÃÅ•πÕ—Ö±±ïê4(ÄÄÄÅ•òÄÑÅ•Õ}µÖ…ÈâÖπ}•πÕ—Ö±±ïêÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâ5Ö…ÈâÖ∏ùÃÅπΩ–Å•πÕ—Ö±±ïêÑà4(ÄÄÄÄÄÄÄÅï·•–Äƒ4(ÄÄÄÅô§4(ÄÄÄÄ4(ÄÄÄÅëï—ïç—}çΩµ¡ΩÕî4(ÄÄÄÄ4(ÄÄÄÅ•òÄÑÅ•Õ}µÖ…ÈâÖπ}’¿ÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâ5Ö…ÈâÖ∏ùÃÅÖ±…ïÖë‰ÅëΩ›∏à4(ÄÄÄÄÄÄÄÅï·•–Äƒ4(ÄÄÄÅô§4(ÄÄÄÄ4(ÄÄÄÅëΩ›π}µÖ…ÈâÖ∏4)Ù4(4)ç±•}çΩµµÖπê†§ÅÏ4(ÄÄÄÄåÅ°ïç¨Å•òÅµÖ…ÈâÖ∏Å•ÃÅ•πÕ—Ö±±ïê4(ÄÄÄÅ•òÄÑÅ•Õ}µÖ…ÈâÖπ}•πÕ—Ö±±ïêÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâ5Ö…ÈâÖ∏ùÃÅπΩ–Å•πÕ—Ö±±ïêÑà4(ÄÄÄÄÄÄÄÅï·•–Äƒ4(ÄÄÄÅô§4(ÄÄÄÄ4(ÄÄÄÅëï—ïç—}çΩµ¡ΩÕî4(ÄÄÄÄ4(ÄÄÄÅ•òÄÑÅ•Õ}µÖ…ÈâÖπ}’¿ÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâ5Ö…ÈâÖ∏Å•ÃÅπΩ–Å’¿∏à4(ÄÄÄÄÄÄÄÅï·•–Äƒ4(ÄÄÄÅô§4(ÄÄÄÄ4(ÄÄÄÅµÖ…ÈâÖπ}ç±§Äàë à4)Ù4(4)’¡}çΩµµÖπê†§ÅÏ4(ÄÄÄÅ°ï±¿†§ÅÏ4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâUÕÖùîËÅµÖ…ÈâÖ∏Å’¿ÅmΩ¡—•ΩπÕtà4(ÄÄÄÄÄÄÄÅïç°ºÄàà4(ÄÄÄÄÄÄÄÅïç°ºÄâ=AQ%=9LËà4(ÄÄÄÄÄÄÄÅïç°ºÄàÄÄµ†∞Ä¥µ°ï±¿ÄÄÄÄÄÄÄÅë•Õ¡±Ö‰Å—°•ÃÅ°ï±¿ÅµïÕÕÖùîà4(ÄÄÄÄÄÄÄÅïç°ºÄàÄÄµ∏∞Ä¥µπºµ±ΩùÃÄÄÄÄÅëºÅπΩ–ÅôΩ±±Ω‹Å±ΩùÃÅÖô—ï»ÅÕ—Ö…—•πúà4(ÄÄÄÅÙ4(ÄÄÄÄ4(ÄÄÄÅ±ΩçÖ∞ÅπΩ}±ΩùÃıôÖ±Õî4(ÄÄÄÅ›°•±îÅmlÄàêåàÄµù–Ä¿ÅutÏÅëº4(ÄÄÄÄÄÄÄÅçÖÕîÄàêƒàÅ•∏4(ÄÄÄÄÄÄÄÄÄÄÄÄµπ¥µπºµ±ΩùÃ§4(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅπΩ}±ΩùÃı—…’î4(ÄÄÄÄÄÄÄÄÄÄÄÄÏÏ4(ÄÄÄÄÄÄÄÄÄÄÄÄµ°¥µ°ï±¿§4(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅ°ï±¿4(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅï·•–Ä¿4(ÄÄÄÄÄÄÄÄÄÄÄÄÏÏ4(ÄÄÄÄÄÄÄÄÄÄÄÄ®§4(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅïç°ºÄâ……Ω»ËÅ%πŸÖ±•êÅΩ¡—•Ω∏ËÄêƒàÄ¯ò»4(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅ°ï±¿4(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅï·•–Ä¿4(ÄÄÄÄÄÄÄÄÄÄÄÄÏÏ4(ÄÄÄÄÄÄÄÅïÕÖå4(ÄÄÄÄÄÄÄÅÕ°•ô–4(ÄÄÄÅëΩπî4(ÄÄÄÄ4(ÄÄÄÄåÅ°ïç¨Å•òÅµÖ…ÈâÖ∏Å•ÃÅ•πÕ—Ö±±ïê4(ÄÄÄÅ•òÄÑÅ•Õ}µÖ…ÈâÖπ}•πÕ—Ö±±ïêÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâ5Ö…ÈâÖ∏ùÃÅπΩ–Å•πÕ—Ö±±ïêÑà4(ÄÄÄÄÄÄÄÅï·•–Äƒ4(ÄÄÄÅô§4(ÄÄÄÄ4(ÄÄÄÅëï—ïç—}çΩµ¡ΩÕî4(ÄÄÄÄ4(ÄÄÄÅ•òÅ•Õ}µÖ…ÈâÖπ}’¿ÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâ5Ö…ÈâÖ∏ùÃÅÖ±…ïÖë‰Å’¿à4(ÄÄÄÄÄÄÄÅï·•–Äƒ4(ÄÄÄÅô§4(ÄÄÄÄ4(ÄÄÄÅ’¡}µÖ…ÈâÖ∏4(ÄÄÄÅ•òÅlÄàëπΩ}±ΩùÃàÄÙÅôÖ±ÕîÅtÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅôΩ±±Ω›}µÖ…ÈâÖπ}±ΩùÃ4(ÄÄÄÅô§4)Ù4(4)’¡ëÖ—ï}çΩµµÖπê†§ÅÏ(ÄÄÄÅ°ï±¿†§ÅÏ(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâUÕÖùîËÅµÖ…ÈâÖ∏Å’¡ëÖ—îÅl¥µŸï…Õ•Ω∏ÄÒŸï…Õ•Ω∏˘tà(ÄÄÄÄÄÄÄÅïç°ºÄàà(ÄÄÄÄÄÄÄÅïç°ºÄâ=AQ%=9LËà(ÄÄÄÄÄÄÄÅïç°ºÄàÄÄµÿ∞Ä¥µŸï…Õ•Ω∏ÄÄÄÅ’¡ëÖ—îÅ—ºÅÖ∏Åï·Öç–ÅŸï…Õ•Ω∏ÅΩ»Å•µµ’—Öâ±îÅÕ°Ñ¥®Å•µÖùîÅ—Öúà(ÄÄÄÄÄÄÄÅïç°ºÄàÄÄµ†∞Ä¥µ°ï±¿ÄÄÄÄÄÄÅë•Õ¡±Ö‰Å—°•ÃÅ°ï±¿ÅµïÕÕÖùîà(ÄÄÄÅÙ((ÄÄÄÅ±ΩçÖ∞Å…ï≈’ïÕ—ïë}Ÿï…Õ•Ω∏Ùâ±Ö—ïÕ–à(ÄÄÄÅ›°•±îÅmlÄàêåàÄµù–Ä¿ÅutÏÅëº(ÄÄÄÄÄÄÄÅçÖÕîÄàêƒàÅ•∏(ÄÄÄÄÄÄÄÄÄÄÄÄµŸ¥µŸï…Õ•Ω∏§(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅ•òÅlÄµËÄàëÏ»ËµÙàÅtÏÅ—°ï∏(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâ……Ω»ËÄ¥µŸï…Õ•Ω∏Å…ï≈’•…ïÃÅÑÅŸÖ±’î∏à(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅï·•–Äƒ(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅô§(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅ…ï≈’ïÕ—ïë}Ÿï…Õ•Ω∏Ùàê»à(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅÕ°•ô–Ä»(ÄÄÄÄÄÄÄÄÄÄÄÄÏÏ(ÄÄÄÄÄÄÄÄÄÄÄÄµ°¥µ°ï±¿§(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅ°ï±¿(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅï·•–Ä¿(ÄÄÄÄÄÄÄÄÄÄÄÄÏÏ(ÄÄÄÄÄÄÄÄÄÄÄÄ®§(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâ……Ω»ËÅ%πŸÖ±•êÅΩ¡—•Ω∏ËÄêƒà(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅ°ï±¿(ÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÅï·•–Äƒ(ÄÄÄÄÄÄÄÄÄÄÄÄÏÏ(ÄÄÄÄÄÄÄÅïÕÖå(ÄÄÄÅëΩπî((ÄÄÄÅ•òÅmlÄÑÄàë…ï≈’ïÕ—ïë}Ÿï…Õ•Ω∏àÄı¯ÅymµiÑµË¿¥‰π|µt¨êÅutÏÅ—°ï∏(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâ……Ω»ËÅ%πŸÖ±•êÅŸï…Õ•Ω∏Å—ÖúËÄë…ï≈’ïÕ—ïë}Ÿï…Õ•Ω∏à(ÄÄÄÄÄÄÄÅï·•–Äƒ(ÄÄÄÅô§((ÄÄÄÅç°ïç≠}…’ππ•πù}ÖÕ}…ΩΩ–(ÄÄÄÄåÅ°ïç¨Å•òÅµÖ…ÈâÖ∏Å•ÃÅ•πÕ—Ö±±ïê4(ÄÄÄÅ•òÄÑÅ•Õ}µÖ…ÈâÖπ}•πÕ—Ö±±ïêÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâ5Ö…ÈâÖ∏ùÃÅπΩ–Å•πÕ—Ö±±ïêÑà4(ÄÄÄÄÄÄÄÅï·•–Äƒ4(ÄÄÄÅô§4(ÄÄÄÄ4(ÄÄÄÅëï—ïç—}çΩµ¡ΩÕî4(ÄÄÄÄ4(ÄÄÄÅ’¡ëÖ—ï}µÖ…ÈâÖπ}Õç…•¡–(ÄÄÄÅ•òÄÑÅçΩµµÖπêÄµÿÅÂƒÄ¯ΩëïÿΩπ’±∞Ä»¯òƒÏÅ—°ï∏(ÄÄÄÄÄÄÄÅ•πÕ—Ö±±}Âƒ(ÄÄÄÅô§((ÄÄÄÅ±ΩçÖ∞Å¡…ïŸ•Ω’Õ}•µÖùî(ÄÄÄÅ±ΩçÖ∞Å—Ö…ùï—}•µÖùî(ÄÄÄÅ¡…ïŸ•Ω’Õ}•µÖùîÙê°ÂƒÄµ»ÄúπÕï…Ÿ•çïÃπµÖ…ÈâÖ∏π•µÖùîúÄàë=5A=M}%1à§(ÄÄÄÅ—Ö…ùï—}•µÖùîÙê°µÖ…ÈâÖπ}ëΩç≠ï…}•µÖùîÄàë…ï≈’ïÕ—ïë}Ÿï…Õ•Ω∏à§(ÄÄÄÅÂƒÄµ§ÄàπÕï…Ÿ•çïÃπµÖ…ÈâÖ∏π•µÖùîÄÙÅpàëÌ—Ö…ùï—}•µÖùïıpààÄàë=5A=M}%1à((ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅâ±’îÄâA’±±•πúÅ5Ö…ÈâÖ∏ÅŸï…Õ•Ω∏ÄëÌ…ï≈’ïÕ—ïë}Ÿï…Õ•ΩπÙà(ÄÄÄÅ•òÄÑÅ’¡ëÖ—ï}µÖ…ÈâÖ∏ÏÅ—°ï∏(ÄÄÄÄÄÄÄÅÂƒÄµ§ÄàπÕï…Ÿ•çïÃπµÖ…ÈâÖ∏π•µÖùîÄÙÅpàëÌ¡…ïŸ•Ω’Õ}•µÖùïıpààÄàë=5A=M}%1à(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâU¡ëÖ—îÅôÖ•±ïê∏ÅIïÕ—Ω…ïêÅ¡…ïŸ•Ω’ÃÅ•µÖùîËÄëÌ¡…ïŸ•Ω’Õ}•µÖùïÙà(ÄÄÄÄÄÄÄÅï·•–Äƒ(ÄÄÄÅô§(ÄÄÄÄ4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅâ±’îÄâIïÕ—Ö…—•πúÅ5Ö…ÈâÖ∏ùÃÅÕï…Ÿ•çïÃà(ÄÄÄÅëΩ›π}µÖ…ÈâÖ∏(ÄÄÄÅ’¡}µÖ…ÈâÖ∏((ÄÄÄÅ±ΩçÖ∞ÅçΩπ—Ö•πï…}•ê(ÄÄÄÅ±ΩçÖ∞Å…ïÖë‰ÙâôÖ±Õîà(ÄÄÄÅôΩ»Å|Å•∏Äê°ÕïƒÄƒÄƒ‘§ÏÅëº(ÄÄÄÄÄÄÄÅçΩπ—Ö•πï…}•êÙê†ë=5A=MÄµòÄàë=5A=M}%1àÄµ¿ÄàëAA}95àÅ¡ÃÄµƒÅµÖ…ÈâÖ∏Ä»¯ΩëïÿΩπ’±∞§(ÄÄÄÄÄÄÄÅ•òÅlÄµ∏ÄàëçΩπ—Ö•πï…}•êàÅtÄòòÅëΩç≠ï»Åï·ïåÄàëçΩπ—Ö•πï…}•êàÅ¡Â—°Ω∏ÄµåÅp(ÄÄÄÄÄÄÄÄÄÄÄÄâ•µ¡Ω…–Å’…±±•àπ…ï≈’ïÕ–ÏÅ’…±±•àπ…ï≈’ïÕ–π’…±Ω¡ï∏†ù°——¿Ëººƒ»‹∏¿∏¿∏ƒË‡¿¿¿ΩÖ¡§ΩµÖ…È°ï±¿ΩçΩµ¡Ö—•â•±•—‰ú∞Å—•µïΩ’–Ù»§àÅp(ÄÄÄÄÄÄÄÄÄÄÄÄ¯ΩëïÿΩπ’±∞Ä»¯òƒÏÅ—°ï∏(ÄÄÄÄÄÄÄÄÄÄÄÅ…ïÖë‰Ùâ—…’îà(ÄÄÄÄÄÄÄÄÄÄÄÅâ…ïÖ¨(ÄÄÄÄÄÄÄÅô§(ÄÄÄÄÄÄÄÅÕ±ïï¿Äƒ(ÄÄÄÅëΩπî((ÄÄÄÅ•òÅlÄàë…ïÖë‰àÄÑÙÄâ—…’îàÅtÏÅ—°ï∏(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâU¡ëÖ—îÅ°ïÖ±—†Åç°ïç¨ÅôÖ•±ïê∏ÅIïÕ—Ω…•πúÅ¡…ïŸ•Ω’ÃÅ•µÖùîËÄëÌ¡…ïŸ•Ω’Õ}•µÖùïÙà(ÄÄÄÄÄÄÄÅëΩ›π}µÖ…ÈâÖ∏(ÄÄÄÄÄÄÄÅÂƒÄµ§ÄàπÕï…Ÿ•çïÃπµÖ…ÈâÖ∏π•µÖùîÄÙÅpàëÌ¡…ïŸ•Ω’Õ}•µÖùïıpààÄàë=5A=M}%1à(ÄÄÄÄÄÄÄÅ’¡}µÖ…ÈâÖ∏(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâU¡ëÖ—îÅôÖ•±ïêÅÖπêÅ—°îÅ¡…ïŸ•Ω’ÃÅÖ¡¡±•çÖ—•Ω∏Å•µÖùîÅ›ÖÃÅ…ïÕ—Ω…ïê∏ÅÖ—ÖâÖÕîÅµ•ù…Ö—•ΩπÃÅ›ï…îÅπΩ–ÅëΩ›πù…Öëïê∏à(ÄÄÄÄÄÄÄÅï·•–Äƒ(ÄÄÄÅô§((ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅù…ïï∏Äâ5Ö…ÈâÖ∏Å’¡ëÖ—ïêÅÕ’ççïÕÕô’±±‰Å—ºÄëÌ…ï≈’ïÕ—ïë}Ÿï…Õ•ΩπÙà)Ù(4)’¡ëÖ—ï}µÖ…ÈâÖπ}Õç…•¡–†§ÅÏ4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅâ±’îÄâU¡ëÖ—•πúÅµÖ…ÈâÖ∏ÅÕç…•¡–à4(ÄÄÄÅç’…∞ÄµÕM0Äàë5Ii	9}MI%AQ}UI0àÅÅ•πÕ—Ö±∞Äµ¥Ä‹‘‘ÄΩëïÿΩÕ—ë•∏ÄΩ’Õ»Ω±ΩçÖ∞Ωâ•∏ΩµÖ…ÈâÖ∏4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅù…ïï∏ÄâµÖ…ÈâÖ∏ÅÕç…•¡–Å’¡ëÖ—ïêÅÕ’ççïÕÕô’±±‰à4)Ù4(4)’¡ëÖ—ï}µÖ…ÈâÖ∏†§ÅÏ(ÄÄÄÄë=5A=MÄµòÄë=5A=M}%1Äµ¿ÄàëAA}95àÅ¡’±∞)Ù()…Ω±±âÖç≠}çΩµµÖπê†§ÅÏ(ÄÄÄÅ•òÅlÄàêåàÄµπîÄƒÅtÅÒÅlÄàêƒàÄÙÄàµ†àÅtÅÒÅlÄàêƒàÄÙÄà¥µ°ï±¿àÅtÏÅ—°ï∏(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâUÕÖùîËÅµÖ…ÈâÖ∏Å…Ω±±âÖç¨ÄÒŸï…Õ•Ω∏¯à(ÄÄÄÄÄÄÄÅïç°ºÄâ·Öµ¡±îËÅµÖ…ÈâÖ∏Å…Ω±±âÖç¨Åÿ–∏Ã∏¿à(ÄÄÄÄÄÄÄÅlÄàêåàÄµïƒÄƒÅtÄòòÅï·•–Ä¿(ÄÄÄÄÄÄÄÅï·•–Äƒ(ÄÄÄÅô§((ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅÂï±±Ω‹ÄâIΩ±±•πúÅâÖç¨Å—°îÅÖ¡¡±•çÖ—•Ω∏Å•µÖùîÅ—ºÄêƒ∏ÅÖ—ÖâÖÕîÅµ•ù…Ö—•ΩπÃÅÖ…îÅπΩ–ÅëΩ›πù…Öëïê∏à(ÄÄÄÅ’¡ëÖ—ï}çΩµµÖπêÄ¥µŸï…Õ•Ω∏Äàêƒà)Ù(4)ç°ïç≠}ïë•—Ω»†§ÅÏ4(ÄÄÄÅ•òÅlÄµËÄàë%Q=HàÅtÏÅ—°ï∏4(ÄÄÄÄÄÄÄÅ•òÅçΩµµÖπêÄµÿÅπÖπºÄ¯ΩëïÿΩπ’±∞Ä»¯òƒÏÅ—°ï∏4(ÄÄÄÄÄÄÄÄÄÄÄÅ%Q=HÙâπÖπºà4(ÄÄÄÄÄÄÄÄÄÄÄÅï±•òÅçΩµµÖπêÄµÿÅŸ§Ä¯ΩëïÿΩπ’±∞Ä»¯òƒÏÅ—°ï∏4(ÄÄÄÄÄÄÄÄÄÄÄÅ%Q=HÙâŸ§à4(ÄÄÄÄÄÄÄÅï±Õî4(ÄÄÄÄÄÄÄÄÄÄÄÅëï—ïç—}ΩÃ4(ÄÄÄÄÄÄÄÄÄÄÄÅ•πÕ—Ö±±}¡Öç≠ÖùîÅπÖπº4(ÄÄÄÄÄÄÄÄÄÄÄÅ%Q=HÙâπÖπºà4(ÄÄÄÄÄÄÄÅô§4(ÄÄÄÅô§4)Ù4(4(4)ïë•—}çΩµµÖπê†§ÅÏ4(ÄÄÄÅëï—ïç—}ΩÃ4(ÄÄÄÅç°ïç≠}ïë•—Ω»4(ÄÄÄÅ•òÅlÄµòÄàë=5A=M}%1àÅtÏÅ—°ï∏4(ÄÄÄÄÄÄÄÄë%Q=HÄàë=5A=M}%1à4(ÄÄÄÅï±Õî4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâΩµ¡ΩÕîÅô•±îÅπΩ–ÅôΩ’πêÅÖ–Äë=5A=M}%1à4(ÄÄÄÄÄÄÄÅï·•–Äƒ4(ÄÄÄÅô§4)Ù4(4)ïë•—}ïπŸ}çΩµµÖπê†§ÅÏ4(ÄÄÄÅëï—ïç—}ΩÃ4(ÄÄÄÅç°ïç≠}ïë•—Ω»4(ÄÄÄÅ•òÅlÄµòÄàë9Y}%1àÅtÏÅ—°ï∏4(ÄÄÄÄÄÄÄÄë%Q=HÄàë9Y}%1à4(ÄÄÄÅï±Õî4(ÄÄÄÄÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅ…ïêÄâπŸ•…Ωπµïπ–Åô•±îÅπΩ–ÅôΩ’πêÅÖ–Äë9Y}%1à4(ÄÄÄÄÄÄÄÅï·•–Äƒ4(ÄÄÄÅô§4)Ù4(4)’ÕÖùî†§ÅÏ4(ÄÄÄÅ±ΩçÖ∞ÅÕç…•¡—}πÖµîÙàëÏ¿åå®ΩÙà4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅâ±’îÄàÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙà4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅµÖùïπ—ÑÄàÄÄÄÄÄÄÄÄÄÄÅ5Ö…ÈâÖ∏Å!ï±¿à4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅâ±’îÄàÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙà4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅçÂÖ∏ÄâUÕÖùîËà4(ÄÄÄÅïç°ºÄàÄÄëÌÕç…•¡—}πÖµïÙÅmçΩµµÖπëtà4(ÄÄÄÅïç°º4(4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅçÂÖ∏ÄâΩµµÖπëÃËà4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅÂï±±Ω‹ÄàÄÅ’¿ÄÄÄÄÄÄÄÄÄÄÄÄÄÄê°—¡’–ÅÕù»¿ßäLÅM—Ö…–ÅÕï…Ÿ•çïÃà4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅÂï±±Ω‹ÄàÄÅëΩ›∏ÄÄÄÄÄÄÄÄÄÄÄÄê°—¡’–ÅÕù»¿ßäLÅM—Ω¿ÅÕï…Ÿ•çïÃà4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅÂï±±Ω‹ÄàÄÅ…ïÕ—Ö…–ÄÄÄÄÄÄÄÄÄê°—¡’–ÅÕù»¿ßäLÅIïÕ—Ö…–ÅÕï…Ÿ•çïÃà4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅÂï±±Ω‹ÄàÄÅÕ—Ö—’ÃÄÄÄÄÄÄÄÄÄÄê°—¡’–ÅÕù»¿ßäLÅM°Ω‹ÅÕ—Ö—’Ãà4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅÂï±±Ω‹ÄàÄÅ±ΩùÃÄÄÄÄÄÄÄÄÄÄÄÄê°—¡’–ÅÕù»¿ßäLÅM°Ω‹Å±ΩùÃà4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅÂï±±Ω‹ÄàÄÅç±§ÄÄÄÄÄÄÄÄÄÄÄÄÄê°—¡’–ÅÕù»¿ßäLÅ5Ö…ÈâÖ∏Å1$à4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅÂï±±Ω‹ÄàÄÅ•πÕ—Ö±∞ÄÄÄÄÄÄÄÄÄê°—¡’–ÅÕù»¿ßäLÅ%πÕ—Ö±∞Å5Ö…ÈâÖ∏à4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅÂï±±Ω‹ÄàÄÅ’¡ëÖ—îÄÄÄÄÄÄÄÄÄÄê°—¡’–ÅÕù»¿ßäLÅU¡ëÖ—îÅ—ºÅ±Ö—ïÕ–ÅΩ»ÅÖ∏Åï·Öç–ÅŸï…Õ•Ω∏à(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅÂï±±Ω‹ÄàÄÅ…Ω±±âÖç¨ÄÄÄÄÄÄÄÄê°—¡’–ÅÕù»¿ßäLÅIΩ±∞ÅâÖç¨Å—ºÅÖ∏Åï·Öç–ÅŸï…Õ•Ω∏à(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅÂï±±Ω‹ÄàÄÅ’π•πÕ—Ö±∞ÄÄÄÄÄÄÄê°—¡’–ÅÕù»¿ßäLÅUπ•πÕ—Ö±∞Å5Ö…ÈâÖ∏à4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅÂï±±Ω‹ÄàÄÅ•πÕ—Ö±∞µÕç…•¡–ÄÄê°—¡’–ÅÕù»¿ßäLÅ%πÕ—Ö±∞Å5Ö…ÈâÖ∏ÅÕç…•¡–à4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅÂï±±Ω‹ÄàÄÅâÖç≠’¿ÄÄÄÄÄÄÄÄÄÄê°—¡’–ÅÕù»¿ßäLÅ5Öπ’Ö∞ÅâÖç≠’¿Å±Ö’πç†à4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅÂï±±Ω‹ÄàÄÅâÖç≠’¿µÕï…Ÿ•çîÄÄê°—¡’–ÅÕù»¿ßäLÅ5Ö…ÈâÖ∏Å	Öç≠’¡Õï…Ÿ•çîÅ—ºÅâÖç≠’¿Å—ºÅQ∞ÅÖπêÅÑÅπï‹Å©ΩàÅ•∏Åç…Ωπ—Öàà4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅÂï±±Ω‹ÄàÄÅçΩ…îµ’¡ëÖ—îÄÄÄÄÄê°—¡’–ÅÕù»¿ßäLÅU¡ëÖ—îΩ°ÖπùîÅa…Ö‰ÅçΩ…îà4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅÂï±±Ω‹ÄàÄÅïë•–ÄÄÄÄÄÄÄÄÄÄÄÄê°—¡’–ÅÕù»¿ßäLÅë•–ÅëΩç≠ï»µçΩµ¡ΩÕîπÂµ∞Ä°Ÿ•ÑÅπÖπºÅΩ»ÅŸ§Åïë•—Ω»§à4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅÂï±±Ω‹ÄàÄÅïë•–µïπÿÄÄÄÄÄÄÄÄê°—¡’–ÅÕù»¿ßäLÅë•–ÅïπŸ•…Ωπµïπ–Åô•±îÄ°Ÿ•ÑÅπÖπºÅΩ»ÅŸ§Åïë•—Ω»§à4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅÂï±±Ω‹ÄàÄÅ°ï±¿ÄÄÄÄÄÄÄÄÄÄÄÄê°—¡’–ÅÕù»¿ßäLÅM°Ω‹Å—°•ÃÅ°ï±¿ÅµïÕÕÖùîà4(ÄÄÄÄ4(ÄÄÄÄ4(ÄÄÄÅïç°º4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅçÂÖ∏Äâ•…ïç—Ω…•ïÃËà4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅµÖùïπ—ÑÄàÄÅ¡¿Åë•…ïç—Ω…‰ËÄëAA}%Hà4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅµÖùïπ—ÑÄàÄÅÖ—ÑÅë•…ïç—Ω…‰ËÄëQ}%Hà4(ÄÄÄÅçΩ±Ω…•Èïë}ïç°ºÅâ±’îÄàÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙÙà4(ÄÄÄÅïç°º4)Ù4(4)çÖÕîÄàêƒàÅ•∏4(ÄÄÄÅ’¿§4(ÄÄÄÄÄÄÄÅÕ°•ô–ÏÅ’¡}çΩµµÖπêÄàë àÏÏ4(ÄÄÄÅëΩ›∏§4(ÄÄÄÄÄÄÄÅÕ°•ô–ÏÅëΩ›π}çΩµµÖπêÄàë àÏÏ4(ÄÄÄÅ…ïÕ—Ö…–§4(ÄÄÄÄÄÄÄÅÕ°•ô–ÏÅ…ïÕ—Ö…—}çΩµµÖπêÄàë àÏÏ4(ÄÄÄÅÕ—Ö—’Ã§4(ÄÄÄÄÄÄÄÅÕ°•ô–ÏÅÕ—Ö—’Õ}çΩµµÖπêÄàë àÏÏ4(ÄÄÄÅ±ΩùÃ§4(ÄÄÄÄÄÄÄÅÕ°•ô–ÏÅ±ΩùÕ}çΩµµÖπêÄàë àÏÏ4(ÄÄÄÅç±§§4(ÄÄÄÄÄÄÄÅÕ°•ô–ÏÅç±•}çΩµµÖπêÄàë àÏÏ4(ÄÄÄÅâÖç≠’¿§4(ÄÄÄÄÄÄÄÅÕ°•ô–ÏÅâÖç≠’¡}çΩµµÖπêÄàë àÏÏ4(ÄÄÄÅâÖç≠’¿µÕï…Ÿ•çî§4(ÄÄÄÄÄÄÄÅÕ°•ô–ÏÅâÖç≠’¡}Õï…Ÿ•çîÄàë àÏÏ4(ÄÄÄÅ•πÕ—Ö±∞§4(ÄÄÄÄÄÄÄÅÕ°•ô–ÏÅ•πÕ—Ö±±}çΩµµÖπêÄàë àÏÏ4(ÄÄÄÅ’¡ëÖ—î§(ÄÄÄÄÄÄÄÅÕ°•ô–ÏÅ’¡ëÖ—ï}çΩµµÖπêÄàë àÏÏ(ÄÄÄÅ…Ω±±âÖç¨§(ÄÄÄÄÄÄÄÅÕ°•ô–ÏÅ…Ω±±âÖç≠}çΩµµÖπêÄàë àÏÏ(ÄÄÄÅ’π•πÕ—Ö±∞§4(ÄÄÄÄÄÄÄÅÕ°•ô–ÏÅ’π•πÕ—Ö±±}çΩµµÖπêÄàë àÏÏ4(ÄÄÄÅ•πÕ—Ö±∞µÕç…•¡–§4(ÄÄÄÄÄÄÄÅÕ°•ô–ÏÅ•πÕ—Ö±±}µÖ…ÈâÖπ}Õç…•¡—}ô…Ωµ}…ï¡ºÄàë àÏÏ4(ÄÄÄÅçΩ…îµ’¡ëÖ—î§4(ÄÄÄÄÄÄÄÅÕ°•ô–ÏÅ’¡ëÖ—ï}çΩ…ï}çΩµµÖπêÄàë àÏÏ4(ÄÄÄÅïë•–§4(ÄÄÄÄÄÄÄÅÕ°•ô–ÏÅïë•—}çΩµµÖπêÄàë àÏÏ4(ÄÄÄÅïë•–µïπÿ§4(ÄÄÄÄÄÄÄÅÕ°•ô–ÏÅïë•—}ïπŸ}çΩµµÖπêÄàë àÏÏ4(ÄÄÄÅ°ï±¡®§4(ÄÄÄÄÄÄÄÅ’ÕÖùîÏÏ4)ïÕÖå4(
+
+    local backup_command="$(which bash) -c '$APP_NAME backup'"
+    add_cron_job "$cron_schedule" "$backup_command"
+
+    colorized_echo green "Backup service successfully configured."
+    if [[ "$interval_hours" -eq 24 ]]; then
+        colorized_echo cyan "Backups will be sent to Telegram daily (every 24 hours at midnight)."
+    else
+        colorized_echo cyan "Backups will be sent to Telegram every $interval_hours hour(s)."
+    fi
+    colorized_echo green "====================================="
+}
+
+
+add_cron_job() {
+    local schedule="$1"
+    local command="$2"
+    local temp_cron=$(mktemp)
+
+    crontab -l 2>/dev/null > "$temp_cron" || true
+    grep -v "$command" "$temp_cron" > "${temp_cron}.tmp" && mv "${temp_cron}.tmp" "$temp_cron"
+    echo "$schedule $command # marzban-backup-service" >> "$temp_cron"
+
+    if crontab "$temp_cron"; then
+        colorized_echo green "Cron job successfully added."
+    else
+        colorized_echo red "Failed to add cron job. Please check manually."
+    fi
+    rm -f "$temp_cron"
+}
+
+remove_backup_service() {
+    colorized_echo red "in process..."
+
+
+    sed -i '/^# Backup service configuration/d' "$ENV_FILE"
+    sed -i '/BACKUP_SERVICE_ENABLED/d' "$ENV_FILE"
+    sed -i '/BACKUP_TELEGRAM_BOT_KEY/d' "$ENV_FILE"
+    sed -i '/BACKUP_TELEGRAM_CHAT_ID/d' "$ENV_FILE"
+    sed -i '/BACKUP_CRON_SCHEDULE/d' "$ENV_FILE"
+
+    local temp_cron=$(mktemp)
+    crontab -l 2>/dev/null > "$temp_cron"
+
+    sed -i '/# marzban-backup-service/d' "$temp_cron"
+
+    if crontab "$temp_cron"; then
+        colorized_echo green "Backup service task removed from crontab."
+    else
+        colorized_echo red "Failed to update crontab. Please check manually."
+    fi
+
+    rm -f "$temp_cron"
+
+    colorized_echo green "Backup service has been removed."
+}
+
+backup_command() {
+    local backup_dir="$APP_DIR/backup"
+    local temp_dir="/tmp/marzban_backup"
+    local timestamp=$(date +"%Y%m%d%H%M%S")
+    local backup_file="$backup_dir/backup_$timestamp.tar.gz"
+    local error_messages=()
+    local log_file="/var/log/marzban_backup_error.log"
+    > "$log_file"
+    echo "Backup Log - $(date)" > "$log_file"
+
+    if ! command -v rsync >/dev/null 2>&1; then
+        detect_os
+        install_package rsync
+    fi
+
+    rm -rf "$backup_dir"
+    mkdir -p "$backup_dir"
+    mkdir -p "$temp_dir"
+
+    if [ -f "$ENV_FILE" ]; then
+        while IFS='=' read -r key value; do
+            if [[ -z "$key" || "$key" =~ ^# ]]; then
+                continue
+            fi
+            key=$(echo "$key" | xargs)
+            value=$(echo "$value" | xargs)
+            if [[ "$key" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+                export "$key"="$value"
+            else
+                echo "Skipping invalid line in .env: $key=$value" >> "$log_file"
+            fi
+        done < "$ENV_FILE"
+    else
+        error_messages+=("Environment file (.env) not found.")
+        echo "Environment file (.env) not found." >> "$log_file"
+        send_backup_error_to_telegram "${error_messages[*]}" "$log_file"
+        exit 1
+    fi
+
+    local db_type=""
+    local sqlite_file=""
+    if grep -q "image: mariadb" "$COMPOSE_FILE"; then
+        db_type="mariadb"
+        container_name=$(docker compose -f "$COMPOSE_FILE" ps -q mariadb || echo "mariadb")
+
+    elif grep -q "image: mysql" "$COMPOSE_FILE"; then
+        db_type="mysql"
+        container_name=$(docker compose -f "$COMPOSE_FILE" ps -q mysql || echo "mysql")
+
+    elif grep -q "SQLALCHEMY_DATABASE_URL = .*sqlite" "$ENV_FILE"; then
+        db_type="sqlite"
+        sqlite_file=$(grep -Po '(?<=SQLALCHEMY_DATABASE_URL = "sqlite:////).*"' "$ENV_FILE" | tr -d '"')
+        if [[ ! "$sqlite_file" =~ ^/ ]]; then
+            sqlite_file="/$sqlite_file"
+        fi
+
+    fi
+
+    if [ -n "$db_type" ]; then
+        echo "Database detected: $db_type" >> "$log_file"
+        case $db_type in
+            mariadb)
+                if ! docker exec "$container_name" mariadb-dump -u root -p"$MYSQL_ROOT_PASSWORD" --all-databases --ignore-database=mysql --ignore-database=performance_schema --ignore-database=information_schema --ignore-database=sys --events --triggers > "$temp_dir/db_backup.sql" 2>>"$log_file"; then
+                    error_messages+=("MariaDB dump failed.")
+                fi
+                ;;
+            mysql)
+                if ! docker exec "$container_name" mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" marzban --events --triggers  > "$temp_dir/db_backup.sql" 2>>"$log_file"; then
+                    error_messages+=("MySQL dump failed.")
+                fi
+                ;;
+            sqlite)
+                if [ -f "$sqlite_file" ]; then
+                    if ! cp "$sqlite_file" "$temp_dir/db_backup.sqlite" 2>>"$log_file"; then
+                        error_messages+=("Failed to copy SQLite database.")
+                    fi
+                else
+                    error_messages+=("SQLite database file not found at $sqlite_file.")
+                fi
+                ;;
+        esac
+    fi
+
+    cp "$APP_DIR/.env" "$temp_dir/" 2>>"$log_file"
+    cp "$APP_DIR/docker-compose.yml" "$temp_dir/" 2>>"$log_file"
+    rsync -av --exclude 'xray-core' --exclude 'mysql' "$DATA_DIR/" "$temp_dir/marzban_data/" >>"$log_file" 2>&1
+
+    if ! tar -czf "$backup_file" -C "$temp_dir" .; then
+        error_messages+=("Failed to create backup archive.")
+        echo "Failed to create backup archive." >> "$log_file"
+    fi
+
+    rm -rf "$temp_dir"
+
+    if [ ${#error_messages[@]} -gt 0 ]; then
+        send_backup_error_to_telegram "${error_messages[*]}" "$log_file"
+        return
+    fi
+    colorized_echo green "Backup created: $backup_file"
+    send_backup_to_telegram "$backup_file"
+}
+
+
+
+get_xray_core() {
+    identify_the_operating_system_and_architecture
+    clear
+
+    validate_version() {
+        local version="$1"
+
+        local response=$(curl -s "https://api.github.com/repos/XTLS/Xray-core/releases/tags/$version")
+        if echo "$response" | grep -q '"message": "Not Found"'; then
+            echo "invalid"
+        else
+            echo "valid"
+        fi
+    }
+
+    print_menu() {
+        clear
+        echo -e "\033[1;32m==============================\033[0m"
+        echo -e "\033[1;32m      Xray-core Installer     \033[0m"
+        echo -e "\033[1;32m==============================\033[0m"
+        echo -e "\033[1;33mAvailable Xray-core versions:\033[0m"
+        for ((i=0; i<${#versions[@]}; i++)); do
+            echo -e "\033[1;34m$((i + 1)):\033[0m ${versions[i]}"
+        done
+        echo -e "\033[1;32m==============================\033[0m"
+        echo -e "\033[1;35mM:\033[0m Enter a version manually"
+        echo -e "\033[1;31mQ:\033[0m Quit"
+        echo -e "\033[1;32m==============================\033[0m"
+    }
+
+    latest_releases=$(curl -s "https://api.github.com/repos/XTLS/Xray-core/releases?per_page=$LAST_XRAY_CORES")
+
+    versions=($(echo "$latest_releases" | grep -oP '"tag_name": "\K(.*?)(?=")'))
+
+    while true; do
+        print_menu
+        read -p "Choose a version to install (1-${#versions[@]}), or press M to enter manually, Q to quit: " choice
+
+        if [[ "$choice" =~ ^[1-9][0-9]*$ ]] && [ "$choice" -le "${#versions[@]}" ]; then
+            choice=$((choice - 1))
+            selected_version=${versions[choice]}
+            break
+        elif [ "$choice" == "M" ] || [ "$choice" == "m" ]; then
+            while true; do
+                read -p "Enter the version manually (e.g., v1.2.3): " custom_version
+                if [ "$(validate_version "$custom_version")" == "valid" ]; then
+                    selected_version="$custom_version"
+                    break 2
+                else
+                    echo -e "\033[1;31mInvalid version or version does not exist. Please try again.\033[0m"
+                fi
+            done
+        elif [ "$choice" == "Q" ] || [ "$choice" == "q" ]; then
+            echo -e "\033[1;31mExiting.\033[0m"
+            exit 0
+        else
+            echo -e "\033[1;31mInvalid choice. Please try again.\033[0m"
+            sleep 2
+        fi
+    done
+
+    echo -e "\033[1;32mSelected version $selected_version for installation.\033[0m"
+
+    # Check if the required packages are installed
+    if ! command -v unzip >/dev/null 2>&1; then
+        echo -e "\033[1;33mInstalling required packages...\033[0m"
+        detect_os
+        install_package unzip
+    fi
+    if ! command -v wget >/dev/null 2>&1; then
+        echo -e "\033[1;33mInstalling required packages...\033[0m"
+        detect_os
+        install_package wget
+    fi
+
+    mkdir -p $DATA_DIR/xray-core
+    cd $DATA_DIR/xray-core
+
+    xray_filename="Xray-linux-$ARCH.zip"
+    xray_download_url="https://github.com/XTLS/Xray-core/releases/download/${selected_version}/${xray_filename}"
+
+    echo -e "\033[1;33mDownloading Xray-core version ${selected_version}...\033[0m"
+    wget -q -O "${xray_filename}" "${xray_download_url}"
+
+    echo -e "\033[1;33mExtracting Xray-core...\033[0m"
+    unzip -o "${xray_filename}" >/dev/null 2>&1
+    rm "${xray_filename}"
+}
+
+# Function to update the Marzban Main core
+update_core_command() {
+    check_running_as_root
+    get_xray_core
+    # Change the Marzban core
+    xray_executable_path="XRAY_EXECUTABLE_PATH=\"/var/lib/marzban/xray-core/xray\""
+
+    echo "Changing the Marzban core..."
+    # Check if the XRAY_EXECUTABLE_PATH string already exists in the .env file
+    if ! grep -q "^XRAY_EXECUTABLE_PATH=" "$ENV_FILE"; then
+        # If the string does not exist, add it
+        echo "${xray_executable_path}" >> "$ENV_FILE"
+    else
+        # Update the existing XRAY_EXECUTABLE_PATH line
+        sed -i "s~^XRAY_EXECUTABLE_PATH=.*~${xray_executable_path}~" "$ENV_FILE"
+    fi
+
+    # Restart Marzban
+    colorized_echo red "Restarting Marzban..."
+    if restart_command -n >/dev/null 2>&1; then
+        colorized_echo green "Marzban successfully restarted!"
+    else
+        colorized_echo red "Marzban restart failed!"
+    fi
+    colorized_echo blue "Installation of Xray-core version $selected_version completed."
+}
+
+install_marzban() {
+    local marzban_version=$1
+    local database_type=$2
+    if [ "$database_type" != "mysql" ]; then
+        colorized_echo red "Error: This Marzban build supports MySQL only. Use --database mysql."
+        exit 1
+    fi
+    # Fetch releases
+    FILES_URL_PREFIX="$MARZBAN_FILES_URL_PREFIX"
+
+    mkdir -p "$DATA_DIR"
+    mkdir -p "$APP_DIR"
+
+    colorized_echo blue "Setting up docker-compose.yml"
+    docker_file_path="$APP_DIR/docker-compose.yml"
+
+    if [ "$database_type" == "mariadb" ]; then
+        # Generate docker-compose.yml with MariaDB content
+        cat > "$docker_file_path" <<EOF
+services:
+  marzban:
+    image: $(marzban_docker_image "${marzban_version}")
+    restart: always
+    env_file: .env
+    network_mode: host
+    volumes:
+      - /var/lib/marzban:/var/lib/marzban
+      - /var/lib/marzban/logs:/var/lib/marzban-node
+    depends_on:
+      mariadb:
+        condition: service_healthy
+
+  mariadb:
+    image: mariadb:lts
+    env_file: .env
+    network_mode: host
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: \${MYSQL_ROOT_PASSWORD}
+      MYSQL_ROOT_HOST: '%'
+      MYSQL_DATABASE: \${MYSQL_DATABASE}
+      MYSQL_USER: \${MYSQL_USER}
+      MYSQL_PASSWORD: \${MYSQL_PASSWORD}
+    command:
+      - --bind-address=127.0.0.1                  # Restricts access to localhost for increased security
+      - --character_set_server=utf8mb4            # Sets UTF-8 character set for full Unicode support
+      - --collation_server=utf8mb4_unicode_ci     # Defines collation for Unicode
+      - --host-cache-size=0                       # Disables host cache to prevent DNS issues
+      - --innodb-open-files=1024                  # Sets the limit for InnoDB open files
+      - --innodb-buffer-pool-size=256M            # Allocates buffer pool size for InnoDB
+      - --binlog_expire_logs_seconds=1209600      # Sets binary log expiration to 14 days (2 weeks)
+      - --innodb-log-file-size=64M                # Sets InnoDB log file size to balance log retention and performance
+      - --innodb-log-files-in-group=2             # Uses two log files to balance recovery and disk I/O
+      - --innodb-doublewrite=0                    # Disables doublewrite buffer (reduces disk I/O; may increase data loss risk)
+      - --general_log=0                           # Disables general query log to reduce disk usage
+      - --slow_query_log=1                        # Enables slow query log for identifying performance issues
+      - --slow_query_log_file=/var/lib/mysql/slow.log # Logs slow queries for troubleshooting
+      - --long_query_time=2                       # Defines slow query threshold as 2 seconds
+    volumes:
+      - /var/lib/marzban/mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      start_period: 10s
+      start_interval: 3s
+      interval: 10s
+      timeout: 5s
+      retries: 3
+EOF
+        echo "----------------------------"
+        colorized_echo red "Using MariaDB as database"
+        echo "----------------------------"
+        colorized_echo green "File generated at $APP_DIR/docker-compose.yml"
+
+        # Modify .env file
+        colorized_echo blue "Fetching .env file"
+        curl -sL "$FILES_URL_PREFIX/.env.example" -o "$APP_DIR/.env"
+
+        # Comment out the SQLite line
+        sed -i 's~^\(SQLALCHEMY_DATABASE_URL = "sqlite:////var/lib/marzban/db.sqlite3"\)~#\1~' "$APP_DIR/.env"
+
+
+        # Add the MySQL connection string
+        #echo -e '\nSQLALCHEMY_DATABASE_URL = "mysql+pymysql://marzban:password@127.0.0.1:3306/marzban"' >> "$APP_DIR/.env"
+
+        sed -i 's/^# \(XRAY_JSON = .*\)$/\1/' "$APP_DIR/.env"
+        sed -i 's~\(XRAY_JSON = \).*~\1"/var/lib/marzban/xray_config.json"~' "$APP_DIR/.env"
+
+
+        prompt_for_marzban_password
+        MYSQL_ROOT_PASSWORD=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)
+
+        echo "" >> "$ENV_FILE"
+        echo "" >> "$ENV_FILE"
+        echo "# Database configuration" >> "$ENV_FILE"
+        echo "MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD" >> "$ENV_FILE"
+        echo "MYSQL_DATABASE=marzban" >> "$ENV_FILE"
+        echo "MYSQL_USER=marzban" >> "$ENV_FILE"
+        echo "MYSQL_PASSWORD=$MYSQL_PASSWORD" >> "$ENV_FILE"
+
+        SQLALCHEMY_DATABASE_URL="mysql+pymysql://marzban:${MYSQL_PASSWORD}@127.0.0.1:3306/marzban"
+
+        echo "" >> "$ENV_FILE"
+        echo "# SQLAlchemy Database URL" >> "$ENV_FILE"
+        echo "SQLALCHEMY_DATABASE_URL=\"$SQLALCHEMY_DATABASE_URL\"" >> "$ENV_FILE"
+
+        colorized_echo green "File saved in $APP_DIR/.env"
+
+    elif [ "$database_type" == "mysql" ]; then
+        # Generate docker-compose.yml with MySQL content
+        cat > "$docker_file_path" <<EOF
+services:
+  marzban:
+    image: $(marzban_docker_image "${marzban_version}")
+    restart: always
+    env_file: .env
+    network_mode: host
+    volumes:
+      - /var/lib/marzban:/var/lib/marzban
+      - /var/lib/marzban/logs:/var/lib/marzban-node
+    depends_on:
+      mysql:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/marzhelp/compatibility', timeout=2)"]
+      start_period: 10s
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  mysql:
+    image: mysql:8.0
+    env_file: .env
+    network_mode: host
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: \${MYSQL_ROOT_PASSWORD}
+      MYSQL_ROOT_HOST: '%'
+      MYSQL_DATABASE: \${MYSQL_DATABASE}
+      MYSQL_USER: \${MYSQL_USER}
+      MYSQL_PASSWORD: \${MYSQL_PASSWORD}
+    command:
+      - --mysqlx=OFF                             # Disables MySQL X Plugin to save resources if X Protocol isn't used
+      - --bind-address=127.0.0.1                  # Restricts access to localhost for increased security
+      - --character_set_server=utf8mb4            # Sets UTF-8 character set for full Unicode support
+      - --collation_server=utf8mb4_unicode_ci     # Defines collation for Unicode
+      - --host-cache-size=0                       # Disables host cache to prevent DNS issues
+      - --innodb-open-files=1024                  # Sets the limit for InnoDB open files
+      - --innodb-buffer-pool-size=256M            # Allocates buffer pool size for InnoDB
+      - --general_log=0                           # Disables general query log for lower disk usage
+      - --slow_query_log=1                        # Enables slow query log for performance analysis
+      - --slow_query_log_file=/var/lib/mysql/slow.log # Logs slow queries for troubleshooting
+      - --long_query_time=2                       # Defines slow query threshold as 2 seconds
+      - --skip-log-bin                            # Disables binary logging entirely
+    volumes:
+      - /var/lib/marzban/mysql:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "marzban", "--password=\${MYSQL_PASSWORD}"]
+      start_period: 5s
+      interval: 5s
+      timeout: 5s
+      retries: 55
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin:latest
+    restart: always
+    env_file: .env
+    network_mode: host
+    environment:
+      PMA_HOST: 127.0.0.1
+      APACHE_PORT: 8010
+      UPLOAD_LIMIT: 1024M
+    depends_on:
+      - mysql
+
+EOF
+        echo "----------------------------"
+        colorized_echo red "Using MySQL as database"
+        echo "----------------------------"
+        colorized_echo green "File generated at $APP_DIR/docker-compose.yml"
+
+        # Modify .env file
+        colorized_echo blue "Fetching .env file"
+        curl -sL "$FILES_URL_PREFIX/.env.example" -o "$APP_DIR/.env"
+
+        # Comment out the SQLite line
+        sed -i 's~^\(SQLALCHEMY_DATABASE_URL = "sqlite:////var/lib/marzban/db.sqlite3"\)~#\1~' "$APP_DIR/.env"
+
+
+        # Add the MySQL connection string
+        #echo -e '\nSQLALCHEMY_DATABASE_URL = "mysql+pymysql://marzban:password@127.0.0.1:3306/marzban"' >> "$APP_DIR/.env"
+
+        sed -i 's/^# \(XRAY_JSON = .*\)$/\1/' "$APP_DIR/.env"
+        sed -i 's~\(XRAY_JSON = \).*~\1"/var/lib/marzban/xray_config.json"~' "$APP_DIR/.env"
+
+
+        prompt_for_marzban_password
+        MYSQL_ROOT_PASSWORD=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)
+
+        echo "" >> "$ENV_FILE"
+        echo "" >> "$ENV_FILE"
+        echo "# Database configuration" >> "$ENV_FILE"
+        echo "MYSQL_ROOT_PASSWORD=$MYSQL_ROOT_PASSWORD" >> "$ENV_FILE"
+        echo "MYSQL_DATABASE=marzban" >> "$ENV_FILE"
+        echo "MYSQL_USER=marzban" >> "$ENV_FILE"
+        echo "MYSQL_PASSWORD=$MYSQL_PASSWORD" >> "$ENV_FILE"
+
+        SQLALCHEMY_DATABASE_URL="mysql+pymysql://marzban:${MYSQL_PASSWORD}@127.0.0.1:3306/marzban"
+
+        echo "" >> "$ENV_FILE"
+        echo "# SQLAlchemy Database URL" >> "$ENV_FILE"
+        echo "SQLALCHEMY_DATABASE_URL=\"$SQLALCHEMY_DATABASE_URL\"" >> "$ENV_FILE"
+
+        colorized_echo green "File saved in $APP_DIR/.env"
+
+    else
+        echo "----------------------------"
+        colorized_echo red "Using SQLite as database"
+        echo "----------------------------"
+        colorized_echo blue "Fetching compose file"
+        curl -sL "$FILES_URL_PREFIX/docker-compose.yml" -o "$docker_file_path"
+
+        # Install requested version
+        if [ "$marzban_version" == "latest" ]; then
+            yq -i ".services.marzban.image = \"$(marzban_docker_image latest)\"" "$docker_file_path"
+        else
+            yq -i ".services.marzban.image = \"$(marzban_docker_image \"${marzban_version}\")\"" "$docker_file_path"
+        fi
+        echo "Installing $marzban_version version"
+        colorized_echo green "File saved in $APP_DIR/docker-compose.yml"
+
+
+        colorized_echo blue "Fetching .env file"
+        curl -sL "$FILES_URL_PREFIX/.env.example" -o "$APP_DIR/.env"
+
+        sed -i 's/^# \(XRAY_JSON = .*\)$/\1/' "$APP_DIR/.env"
+        sed -i 's/^# \(SQLALCHEMY_DATABASE_URL = .*\)$/\1/' "$APP_DIR/.env"
+        sed -i 's~\(XRAY_JSON = \).*~\1"/var/lib/marzban/xray_config.json"~' "$APP_DIR/.env"
+        sed -i 's~\(SQLALCHEMY_DATABASE_URL = \).*~\1"sqlite:////var/lib/marzban/db.sqlite3"~' "$APP_DIR/.env"
+
+
+
+
+
+
+        colorized_echo green "File saved in $APP_DIR/.env"
+    fi
+
+    colorized_echo blue "Fetching xray config file"
+    curl -sL "$FILES_URL_PREFIX/xray_config.json" -o "$DATA_DIR/xray_config.json"
+    colorized_echo green "File saved in $DATA_DIR/xray_config.json"
+
+    colorized_echo green "Marzban's files downloaded successfully"
+}
+
+up_marzban() {
+    $COMPOSE -f $COMPOSE_FILE -p "$APP_NAME" up -d --remove-orphans
+}
+
+follow_marzban_logs() {
+    $COMPOSE -f $COMPOSE_FILE -p "$APP_NAME" logs -f
+}
+
+status_command() {
+
+    # Check if marzban is installed
+    if ! is_marzban_installed; then
+        echo -n "Status: "
+        colorized_echo red "Not Installed"
+        exit 1
+    fi
+
+    detect_compose
+
+    if ! is_marzban_up; then
+        echo -n "Status: "
+        colorized_echo blue "Down"
+        exit 1
+    fi
+
+    echo -n "Status: "
+    colorized_echo green "Up"
+
+    json=$($COMPOSE -f $COMPOSE_FILE ps -a --format=json)
+    services=$(echo "$json" | jq -r 'if type == "array" then .[] else . end | .Service')
+    states=$(echo "$json" | jq -r 'if type == "array" then .[] else . end | .State')
+    # Print out the service names and statuses
+    for i in $(seq 0 $(expr $(echo $services | wc -w) - 1)); do
+        service=$(echo $services | cut -d' ' -f $(expr $i + 1))
+        state=$(echo $states | cut -d' ' -f $(expr $i + 1))
+        echo -n "- $service: "
+        if [ "$state" == "running" ]; then
+            colorized_echo green $state
+        else
+            colorized_echo red $state
+        fi
+    done
+}
+
+
+prompt_for_marzban_password() {
+    colorized_echo cyan "This password will be used to access the database and should be strong."
+    colorized_echo cyan "If you do not enter a custom password, a secure 20-character password will be generated automatically."
+
+    # –ó–∞–ø—Ä–∞—à–∏–≤–∞–µ–º –≤–≤–æ–¥ –ø–∞—Ä–æ–ª—è
+    read -p "Enter the password for the marzban user (or press Enter to generate a secure default password): " MYSQL_PASSWORD
+
+    # –ì–µ–Ω–µ—Ä–∞—Ü–∏—è 20-–∑–Ω–∞—á–Ω–æ–≥–æ –ø–∞—Ä–æ–ª—è, –µ—Å–ª–∏ –ø–æ–ª—å–∑–æ–≤–∞—Ç–µ–ª—å –æ—Å—Ç–∞–≤–∏–ª –ø–æ–ª–µ –ø—É—Å—Ç—ã–º
+    if [ -z "$MYSQL_PASSWORD" ]; then
+        MYSQL_PASSWORD=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)
+        colorized_echo green "A secure password has been generated automatically."
+    fi
+    colorized_echo green "This password will be recorded in the .env file for future use."
+
+    # –ü–∞—É–∑–∞ 3 —Å–µ–∫—É–Ω–¥—ã –ø–µ—Ä–µ–¥ –ø—Ä–æ–¥–æ–ª–∂–µ–Ω–∏–µ–º
+    sleep 3
+}
+
+install_command() {
+    check_running_as_root
+
+    # Default values
+    database_type="mysql"
+    marzban_version="latest"
+    marzban_version_set="false"
+
+    # Parse options
+    while [[ $# -gt 0 ]]; do
+        key="$1"
+        case $key in
+            --database)
+                database_type="$2"
+                shift 2
+            ;;
+            --dev)
+                if [[ "$marzban_version_set" == "true" ]]; then
+                    colorized_echo red "Error: Cannot use --dev and --version options simultaneously."
+                    exit 1
+                fi
+                marzban_version="dev"
+                marzban_version_set="true"
+                shift
+            ;;
+            --version)
+                if [[ "$marzban_version_set" == "true" ]]; then
+                    colorized_echo red "Error: Cannot use --dev and --version options simultaneously."
+                    exit 1
+                fi
+                marzban_version="$2"
+                marzban_version_set="true"
+                shift 2
+            ;;
+            *)
+                echo "Unknown option: $1"
+                exit 1
+            ;;
+        esac
+    done
+
+    if [ "$database_type" != "mysql" ]; then
+        colorized_echo red "Error: This Marzban build supports MySQL only. Use --database mysql."
+        exit 1
+    fi
+
+    # Check if marzban is already installed
+    if is_marzban_installed; then
+        colorized_echo red "Marzban is already installed at $APP_DIR"
+        read -p "Do you want to override the previous installation? (y/n) "
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            colorized_echo red "Aborted installation"
+            exit 1
+        fi
+    fi
+    detect_os
+    if ! command -v jq >/dev/null 2>&1; then
+        install_package jq
+    fi
+    if ! command -v curl >/dev/null 2>&1; then
+        install_package curl
+    fi
+    if ! command -v docker >/dev/null 2>&1; then
+        install_docker
+    fi
+    if ! command -v yq >/dev/null 2>&1; then
+        install_yq
+    fi
+    detect_compose
+    install_marzban_script_from_repo
+    # Function to check if a version exists in the GitHub releases
+    check_version_exists() {
+        local version=$1
+        repo_url="$MARZBAN_RELEASES_API"
+        if [ "$version" == "latest" ] || [ "$version" == "dev" ]; then
+            return 0
+        fi
+
+        # Fetch the release data from GitHub API
+        response=$(curl -s "$repo_url")
+
+        # Check if the response contains the version tag
+        if echo "$response" | jq -e ".[] | select(.tag_name == \"${version}\")" > /dev/null; then
+            return 0
+        else
+            return 1
+        fi
+    }
+    # Check if the version is valid and exists
+    if [[ "$marzban_version" == "latest" || "$marzban_version" == "dev" || "$marzban_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        if check_version_exists "$marzban_version"; then
+            install_marzban "$marzban_version" "$database_type"
+            echo "Installing $marzban_version version"
+        else
+            echo "Version $marzban_version does not exist. Please enter a valid version (e.g. v0.5.2)"
+            exit 1
+        fi
+    else
+        echo "Invalid version format. Please enter a valid version (e.g. v0.5.2)"
+        exit 1
+    fi
+    up_marzban
+    follow_marzban_logs
+}
+
+install_yq() {
+    if command -v yq &>/dev/null; then
+        colorized_echo green "yq is already installed."
+        return
+    fi
+
+    identify_the_operating_system_and_architecture
+
+    local base_url="https://github.com/mikefarah/yq/releases/latest/download"
+    local yq_binary=""
+
+    case "$ARCH" in
+        '64' | 'x86_64')
+            yq_binary="yq_linux_amd64"
+            ;;
+        'arm32-v7a' | 'arm32-v6' | 'arm32-v5' | 'armv7l')
+            yq_binary="yq_linux_arm"
+            ;;
+        'arm64-v8a' | 'aarch64')
+            yq_binary="yq_linux_arm64"
+            ;;
+        '32' | 'i386' | 'i686')
+            yq_binary="yq_linux_386"
+            ;;
+        *)
+            colorized_echo red "Unsupported architecture: $ARCH"
+            exit 1
+            ;;
+    esac
+
+    local yq_url="${base_url}/${yq_binary}"
+    colorized_echo blue "Downloading yq from ${yq_url}..."
+
+    if ! command -v curl &>/dev/null && ! command -v wget &>/dev/null; then
+        colorized_echo yellow "Neither curl nor wget is installed. Attempting to install curl."
+        install_package curl || {
+            colorized_echo red "Failed to install curl. Please install curl or wget manually."
+            exit 1
+        }
+    fi
+
+
+    if command -v curl &>/dev/null; then
+        if curl -L "$yq_url" -o /usr/local/bin/yq; then
+            chmod +x /usr/local/bin/yq
+            colorized_echo green "yq installed successfully!"
+        else
+            colorized_echo red "Failed to download yq using curl. Please check your internet connection."
+            exit 1
+        fi
+    elif command -v wget &>/dev/null; then
+        if wget -O /usr/local/bin/yq "$yq_url"; then
+            chmod +x /usr/local/bin/yq
+            colorized_echo green "yq installed successfully!"
+        else
+            colorized_echo red "Failed to download yq using wget. Please check your internet connection."
+            exit 1
+        fi
+    fi
+
+
+    if ! echo "$PATH" | grep -q "/usr/local/bin"; then
+        export PATH="/usr/local/bin:$PATH"
+    fi
+
+
+    hash -r
+
+    if command -v yq &>/dev/null; then
+        colorized_echo green "yq is ready to use."
+    elif [ -x "/usr/local/bin/yq" ]; then
+
+        colorized_echo yellow "yq is installed at /usr/local/bin/yq but not found in PATH."
+        colorized_echo yellow "You can add /usr/local/bin to your PATH environment variable."
+    else
+        colorized_echo red "yq installation failed. Please try again or install manually."
+        exit 1
+    fi
+}
+
+
+down_marzban() {
+    $COMPOSE -f $COMPOSE_FILE -p "$APP_NAME" down
+}
+
+
+
+show_marzban_logs() {
+    $COMPOSE -f $COMPOSE_FILE -p "$APP_NAME" logs
+}
+
+follow_marzban_logs() {
+    $COMPOSE -f $COMPOSE_FILE -p "$APP_NAME" logs -f
+}
+
+marzban_cli() {
+    $COMPOSE -f $COMPOSE_FILE -p "$APP_NAME" exec -e CLI_PROG_NAME="marzban cli" marzban marzban-cli "$@"
+}
+
+
+is_marzban_up() {
+    if [ -z "$($COMPOSE -f $COMPOSE_FILE ps -q -a)" ]; then
+        return 1
+    else
+        return 0
+    fi
+}
+
+uninstall_command() {
+    check_running_as_root
+    # Check if marzban is installed
+    if ! is_marzban_installed; then
+        colorized_echo red "Marzban's not installed!"
+        exit 1
+    fi
+
+    read -p "Do you really want to uninstall Marzban? (y/n) "
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        colorized_echo red "Aborted"
+        exit 1
+    fi
+
+    detect_compose
+    if is_marzban_up; then
+        down_marzban
+    fi
+    uninstall_marzban_script
+    uninstall_marzban
+    uninstall_marzban_docker_images
+
+    read -p "Do you want to remove Marzban's data files too ($DATA_DIR)? (y/n) "
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        colorized_echo green "Marzban uninstalled successfully"
+    else
+        uninstall_marzban_data_files
+        colorized_echo green "Marzban uninstalled successfully"
+    fi
+}
+
+uninstall_marzban_script() {
+    if [ -f "/usr/local/bin/marzban" ]; then
+        colorized_echo yellow "Removing marzban script"
+        rm "/usr/local/bin/marzban"
+    fi
+}
+
+uninstall_marzban() {
+    if [ -d "$APP_DIR" ]; then
+        colorized_echo yellow "Removing directory: $APP_DIR"
+        rm -r "$APP_DIR"
+    fi
+}
+
+uninstall_marzban_docker_images() {
+    images=$(docker images | grep marzban | awk '{print $3}')
+
+    if [ -n "$images" ]; then
+        colorized_echo yellow "Removing Docker images of Marzban"
+        for image in $images; do
+            if docker rmi "$image" >/dev/null 2>&1; then
+                colorized_echo yellow "Image $image removed"
+            fi
+        done
+    fi
+}
+
+uninstall_marzban_data_files() {
+    if [ -d "$DATA_DIR" ]; then
+        colorized_echo yellow "Removing directory: $DATA_DIR"
+        rm -r "$DATA_DIR"
+    fi
+}
+
+restart_command() {
+    help() {
+        colorized_echo red "Usage: marzban restart [options]"
+        echo
+        echo "OPTIONS:"
+        echo "  -h, --help        display this help message"
+        echo "  -n, --no-logs     do not follow logs after starting"
+    }
+
+    local no_logs=false
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+            -n|--no-logs)
+                no_logs=true
+            ;;
+            -h|--help)
+                help
+                exit 0
+            ;;
+            *)
+                echo "Error: Invalid option: $1" >&2
+                help
+                exit 0
+            ;;
+        esac
+        shift
+    done
+
+    # Check if marzban is installed
+    if ! is_marzban_installed; then
+        colorized_echo red "Marzban's not installed!"
+        exit 1
+    fi
+
+    detect_compose
+
+    down_marzban
+    up_marzban
+    if [ "$no_logs" = false ]; then
+        follow_marzban_logs
+    fi
+    colorized_echo green "Marzban successfully restarted!"
+}
+logs_command() {
+    help() {
+        colorized_echo red "Usage: marzban logs [options]"
+        echo ""
+        echo "OPTIONS:"
+        echo "  -h, --help        display this help message"
+        echo "  -n, --no-follow   do not show follow logs"
+    }
+
+    local no_follow=false
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+            -n|--no-follow)
+                no_follow=true
+            ;;
+            -h|--help)
+                help
+                exit 0
+            ;;
+            *)
+                echo "Error: Invalid option: $1" >&2
+                help
+                exit 0
+            ;;
+        esac
+        shift
+    done
+
+    # Check if marzban is installed
+    if ! is_marzban_installed; then
+        colorized_echo red "Marzban's not installed!"
+        exit 1
+    fi
+
+    detect_compose
+
+    if ! is_marzban_up; then
+        colorized_echo red "Marzban is not up."
+        exit 1
+    fi
+
+    if [ "$no_follow" = true ]; then
+        show_marzban_logs
+    else
+        follow_marzban_logs
+    fi
+}
+
+down_command() {
+
+    # Check if marzban is installed
+    if ! is_marzban_installed; then
+        colorized_echo red "Marzban's not installed!"
+        exit 1
+    fi
+
+    detect_compose
+
+    if ! is_marzban_up; then
+        colorized_echo red "Marzban's already down"
+        exit 1
+    fi
+
+    down_marzban
+}
+
+cli_command() {
+    # Check if marzban is installed
+    if ! is_marzban_installed; then
+        colorized_echo red "Marzban's not installed!"
+        exit 1
+    fi
+
+    detect_compose
+
+    if ! is_marzban_up; then
+        colorized_echo red "Marzban is not up."
+        exit 1
+    fi
+
+    marzban_cli "$@"
+}
+
+up_command() {
+    help() {
+        colorized_echo red "Usage: marzban up [options]"
+        echo ""
+        echo "OPTIONS:"
+        echo "  -h, --help        display this help message"
+        echo "  -n, --no-logs     do not follow logs after starting"
+    }
+
+    local no_logs=false
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+            -n|--no-logs)
+                no_logs=true
+            ;;
+            -h|--help)
+                help
+                exit 0
+            ;;
+            *)
+                echo "Error: Invalid option: $1" >&2
+                help
+                exit 0
+            ;;
+        esac
+        shift
+    done
+
+    # Check if marzban is installed
+    if ! is_marzban_installed; then
+        colorized_echo red "Marzban's not installed!"
+        exit 1
+    fi
+
+    detect_compose
+
+    if is_marzban_up; then
+        colorized_echo red "Marzban's already up"
+        exit 1
+    fi
+
+    up_marzban
+    if [ "$no_logs" = false ]; then
+        follow_marzban_logs
+    fi
+}
+
+update_command() {
+    help() {
+        colorized_echo red "Usage: marzban update [--version <version>]"
+        echo ""
+        echo "OPTIONS:"
+        echo "  -v, --version    update to an exact version or immutable sha-* image tag"
+        echo "  -h, --help       display this help message"
+    }
+
+    local requested_version="latest"
+    while [[ "$#" -gt 0 ]]; do
+        case "$1" in
+            -v|--version)
+                if [ -z "${2:-}" ]; then
+                    colorized_echo red "Error: --version requires a value."
+                    exit 1
+                fi
+                requested_version="$2"
+                shift 2
+            ;;
+            -h|--help)
+                help
+                exit 0
+            ;;
+            *)
+                colorized_echo red "Error: Invalid option: $1"
+                help
+                exit 1
+            ;;
+        esac
+    done
+
+    if [[ ! "$requested_version" =~ ^[A-Za-z0-9._-]+$ ]]; then
+        colorized_echo red "Error: Invalid version tag: $requested_version"
+        exit 1
+    fi
+
+    check_running_as_root
+    # Check if marzban is installed
+    if ! is_marzban_installed; then
+        colorized_echo red "Marzban's not installed!"
+        exit 1
+    fi
+
+    detect_compose
+
+    update_marzban_script
+    if ! command -v yq >/dev/null 2>&1; then
+        install_yq
+    fi
+
+    local previous_image
+    local target_image
+    previous_image=$(yq -r '.services.marzban.image' "$COMPOSE_FILE")
+    target_image=$(marzban_docker_image "$requested_version")
+    yq -i ".services.marzban.image = \"${target_image}\"" "$COMPOSE_FILE"
+
+    colorized_echo blue "Pulling Marzban version ${requested_version}"
+    if ! update_marzban; then
+        yq -i ".services.marzban.image = \"${previous_image}\"" "$COMPOSE_FILE"
+        colorized_echo red "Update failed. Restored previous image: ${previous_image}"
+        exit 1
+    fi
+
+    colorized_echo blue "Restarting Marzban's services"
+    down_marzban
+    up_marzban
+
+    local container_id
+    local ready="false"
+    for _ in $(seq 1 15); do
+        container_id=$($COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" ps -q marzban 2>/dev/null)
+        if [ -n "$container_id" ] && docker exec "$container_id" python -c \
+            "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/marzhelp/compatibility', timeout=2)" \
+            >/dev/null 2>&1; then
+            ready="true"
+            break
+        fi
+        sleep 1
+    done
+
+    if [ "$ready" != "true" ]; then
+        colorized_echo red "Update health check failed. Restoring previous image: ${previous_image}"
+        down_marzban
+        yq -i ".services.marzban.image = \"${previous_image}\"" "$COMPOSE_FILE"
+        up_marzban
+        colorized_echo red "Update failed and the previous application image was restored. Database migrations were not downgraded."
+        exit 1
+    fi
+
+    colorized_echo green "Marzban updated successfully to ${requested_version}"
+}
+
+update_marzban_script() {
+    colorized_echo blue "Updating marzban script"
+    curl -sSL "$MARZBAN_SCRIPT_URL" | install -m 755 /dev/stdin /usr/local/bin/marzban
+    colorized_echo green "marzban script updated successfully"
+}
+
+update_marzban() {
+    $COMPOSE -f $COMPOSE_FILE -p "$APP_NAME" pull
+}
+
+rollback_command() {
+    if [ "$#" -ne 1 ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+        colorized_echo red "Usage: marzban rollback <version>"
+        echo "Example: marzban rollback v4.3.0"
+        [ "$#" -eq 1 ] && exit 0
+        exit 1
+    fi
+
+    colorized_echo yellow "Rolling back the application image to $1. Database migrations are not downgraded."
+    update_command --version "$1"
+}
+
+check_editor() {
+    if [ -z "$EDITOR" ]; then
+        if command -v nano >/dev/null 2>&1; then
+            EDITOR="nano"
+            elif command -v vi >/dev/null 2>&1; then
+            EDITOR="vi"
+        else
+            detect_os
+            install_package nano
+            EDITOR="nano"
+        fi
+    fi
+}
+
+
+edit_command() {
+    detect_os
+    check_editor
+    if [ -f "$COMPOSE_FILE" ]; then
+        $EDITOR "$COMPOSE_FILE"
+    else
+        colorized_echo red "Compose file not found at $COMPOSE_FILE"
+        exit 1
+    fi
+}
+
+edit_env_command() {
+    detect_os
+    check_editor
+    if [ -f "$ENV_FILE" ]; then
+        $EDITOR "$ENV_FILE"
+    else
+        colorized_echo red "Environment file not found at $ENV_FILE"
+        exit 1
+    fi
+}
+
+usage() {
+    local script_name="${0##*/}"
+    colorized_echo blue "=============================="
+    colorized_echo magenta "           Marzban Help"
+    colorized_echo blue "=============================="
+    colorized_echo cyan "Usage:"
+    echo "  ${script_name} [command]"
+    echo
+
+    colorized_echo cyan "Commands:"
+    colorized_echo yellow "  up              $(tput sgr0)‚Äì Start services"
+    colorized_echo yellow "  down            $(tput sgr0)‚Äì Stop services"
+    colorized_echo yellow "  restart         $(tput sgr0)‚Äì Restart services"
+    colorized_echo yellow "  status          $(tput sgr0)‚Äì Show status"
+    colorized_echo yellow "  logs            $(tput sgr0)‚Äì Show logs"
+    colorized_echo yellow "  cli             $(tput sgr0)‚Äì Marzban CLI"
+    colorized_echo yellow "  install         $(tput sgr0)‚Äì Install Marzban"
+    colorized_echo yellow "  update          $(tput sgr0)‚Äì Update to latest or an exact version"
+    colorized_echo yellow "  rollback        $(tput sgr0)‚Äì Roll back to an exact version"
+    colorized_echo yellow "  uninstall       $(tput sgr0)‚Äì Uninstall Marzban"
+    colorized_echo yellow "  install-script  $(tput sgr0)‚Äì Install Marzban script"
+    colorized_echo yellow "  backup          $(tput sgr0)‚Äì Manual backup launch"
+    colorized_echo yellow "  backup-service  $(tput sgr0)‚Äì Marzban Backupservice to backup to TG, and a new job in crontab"
+    colorized_echo yellow "  core-update     $(tput sgr0)‚Äì Update/Change Xray core"
+    colorized_echo yellow "  edit            $(tput sgr0)‚Äì Edit docker-compose.yml (via nano or vi editor)"
+    colorized_echo yellow "  edit-env        $(tput sgr0)‚Äì Edit environment file (via nano or vi editor)"
+    colorized_echo yellow "  help            $(tput sgr0)‚Äì Show this help message"
+
+
+    echo
+    colorized_echo cyan "Directories:"
+    colorized_echo magenta "  App directory: $APP_DIR"
+    colorized_echo magenta "  Data directory: $DATA_DIR"
+    colorized_echo blue "================================"
+    echo
+}
+
+case "$1" in
+    up)
+        shift; up_command "$@";;
+    down)
+        shift; down_command "$@";;
+    restart)
+        shift; restart_command "$@";;
+    status)
+        shift; status_command "$@";;
+    logs)
+        shift; logs_command "$@";;
+    cli)
+        shift; cli_command "$@";;
+    backup)
+        shift; backup_command "$@";;
+    backup-service)
+        shift; backup_service "$@";;
+    install)
+        shift; install_command "$@";;
+    update)
+        shift; update_command "$@";;
+    rollback)
+        shift; rollback_command "$@";;
+    uninstall)
+        shift; uninstall_command "$@";;
+    install-script)
+        shift; install_marzban_script_from_repo "$@";;
+    core-update)
+        shift; update_core_command "$@";;
+    edit)
+        shift; edit_command "$@";;
+    edit-env)
+        shift; edit_env_command "$@";;
+    help|*)
+        usage;;
+esac
