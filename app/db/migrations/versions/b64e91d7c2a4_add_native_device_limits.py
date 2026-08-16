@@ -84,7 +84,11 @@ def upgrade() -> None:
     if "device_limit_settings" not in tables:
         settings = op.create_table(
             "device_limit_settings",
-            sa.Column("id", sa.Integer(), nullable=False),
+            # MySQL implicitly turns an integer primary key into AUTO_INCREMENT
+            # unless SQLAlchemy is told otherwise.  AUTO_INCREMENT columns cannot
+            # be referenced by a CHECK constraint on MySQL 8 (error 3818).
+            # This table is keyed explicitly with the constant value 1.
+            sa.Column("id", sa.Integer(), autoincrement=False, nullable=False),
             sa.Column("enabled", sa.Boolean(), server_default=sa.false(), nullable=False),
             sa.Column("enforcement_mode", sa.String(length=24), server_default="hybrid", nullable=False),
             sa.Column("check_interval_seconds", sa.Integer(), server_default="60", nullable=False),
@@ -97,7 +101,6 @@ def upgrade() -> None:
             sa.Column("auto_delete_enabled", sa.Boolean(), server_default=sa.false(), nullable=False),
             sa.Column("updated_at", sa.DateTime(), server_default=sa.func.now(), nullable=False),
             sa.PrimaryKeyConstraint("id"),
-            sa.CheckConstraint("id = 1", name="ck_device_limit_settings_singleton"),
         )
         op.bulk_insert(
             settings,
@@ -114,6 +117,21 @@ def upgrade() -> None:
                 "audit_retention_days": 180,
                 "auto_delete_enabled": False,
             }],
+        )
+    elif bind.execute(
+        sa.text("SELECT 1 FROM device_limit_settings WHERE id = 1")
+    ).first() is None:
+        # MySQL DDL is non-transactional.  A prior interrupted migration may
+        # have created the table without inserting its singleton row.
+        bind.execute(
+            sa.text(
+                "INSERT INTO device_limit_settings "
+                "(id, enabled, enforcement_mode, check_interval_seconds, "
+                "active_window_seconds, hit_threshold, strike_reset_seconds, "
+                "full_ip_retention_days, incident_retention_days, "
+                "audit_retention_days, auto_delete_enabled) "
+                "VALUES (1, false, 'hybrid', 60, 300, 3, 2592000, 7, 90, 180, false)"
+            )
         )
 
     if "device_limit_penalty_stages" not in tables:

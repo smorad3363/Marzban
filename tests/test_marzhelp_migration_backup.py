@@ -114,10 +114,13 @@ def test_installer_targets_master_and_latest_mysql_image():
     assert 'MARZBAN_GITHUB_REPO="${MARZBAN_GITHUB_REPO:-smorad3363/Marzban}"' in installer
     assert 'MARZBAN_GITHUB_BRANCH="${MARZBAN_GITHUB_BRANCH:-master}"' in installer
     assert 'MARZBAN_DOCKER_IMAGE="${MARZBAN_DOCKER_IMAGE:-ghcr.io/smorad3363/marzban}"' in installer
+    assert 'database_type="mysql"' in installer
+    assert "This Marzban build supports MySQL only" in installer
     assert 'marzban_version="latest"' in installer
     assert 'elif [ "$database_type" == "mysql" ]; then' in installer
     assert 'image: $(marzban_docker_image "${marzban_version}")' in installer
     assert 'requested_version="latest"' in installer
     assert 'previous_image=$(yq -r' in installer
+    assert "Update health check failed" in installer
     assert 'update_command --version "$1"' in installer
     assert 'rollback)' in installer

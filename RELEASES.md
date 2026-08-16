@@ -30,7 +30,7 @@ marzban update
 Install or update to an exact version:
 
 ```bash
-marzban update --version v4.6.0
+marzban update --version v4.6.1
 ```
 
 ## Rollback

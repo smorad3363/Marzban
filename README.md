@@ -103,26 +103,15 @@ Marzban is user-friendly, feature-rich and reliable. It lets you to create diffe
 - **TLS** and **REALITY** support
 - Integrated **Telegram Bot**
 - Integrated **Command Line Interface (CLI)**
-- **Multi-language**
+- Persian-only RTL dashboard
 - **Multi-admin** support (WIP)
 
 # Installation guide
 
-Run the following command to install Marzban with SQLite database:
-
-```bash
-sudo bash -c "$(curl -sL https://raw.githubusercontent.com/smorad3363/Marzban/master/scripts/marzban.sh)" @ install
-```
-
-Run the following command to install Marzban with MySQL database:
+MySQL 8 is the only supported database. Install with:
 
 ```bash
 sudo bash -c "$(curl -sL https://raw.githubusercontent.com/smorad3363/Marzban/master/scripts/marzban.sh)" @ install --database mysql
-```
-
-Run the following command to install Marzban with MariaDB database:
-```bash
-sudo bash -c "$(curl -sL https://raw.githubusercontent.com/smorad3363/Marzban/master/scripts/marzban.sh)" @ install --database mariadb
 ```
 
 Once the installation is complete:
@@ -344,7 +333,7 @@ It's always a good idea to backup your Marzban files regularly to prevent data l
 1. By default, all Marzban important files are saved in `/var/lib/marzban` (Docker versions). Copy the entire `/var/lib/marzban` directory to a backup location of your choice, such as an external hard drive or cloud storage.
 2. Additionally, make sure to backup your env file, which contains your configuration variables, and also, your Xray config file. If you installed Marzban using marzban-scripts (recommended installation approach), the env and other configurations should be inside `/opt/marzban/` directory.
 
-Marzban's backup service efficiently zips all necessary files and sends them to your specified Telegram bot. It supports SQLite, MySQL, and MariaDB databases. One of its key features is automation, allowing you to schedule backups every hour. There are no limitations concerning Telegram's upload limits for bots; if a file exceeds the limit, it will be split and sent in multiple parts. Additionally, you can initiate an immediate backup at any time.
+Marzban's backup service efficiently dumps the MySQL database, zips the necessary files, and sends them to your specified Telegram bot. One of its key features is automation, allowing you to schedule backups every hour. There are no limitations concerning Telegram's upload limits for bots; if a file exceeds the limit, it will be split and sent in multiple parts. Additionally, you can initiate an immediate backup at any time.
 
 Install the Latest Version of Marzban Command:
 ```bash

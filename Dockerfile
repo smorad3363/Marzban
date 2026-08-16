@@ -7,7 +7,7 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /code
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential curl unzip gcc python3-dev libpq-dev \
+    && apt-get install -y --no-install-recommends build-essential curl unzip gcc python3-dev \
     && curl -L https://github.com/Gozargah/Marzban-scripts/raw/master/install_latest_xray.sh | bash \
     && rm -rf /var/lib/apt/lists/*
 
@@ -32,4 +32,4 @@ RUN ln -s /code/marzban-cli.py /usr/bin/marzban-cli \
     && chmod +x /usr/bin/marzban-cli \
     && marzban-cli completion install --shell bash
 
-CMD ["bash", "-c", "alembic upgrade head; python main.py"]
+CMD ["bash", "-c", "alembic upgrade head && exec python main.py"]

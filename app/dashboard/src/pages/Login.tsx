@@ -18,7 +18,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { BrandMark } from "components/BrandMark";
 import { Footer } from "components/Footer";
 import { Input } from "components/Input";
-import { Language } from "components/Language";
 import { FC, useEffect, useState } from "react";
 import { FieldValues, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
@@ -80,7 +79,6 @@ export const Login: FC = () => {
               <Text fontSize="xs" color="gray.500">Private control laboratory</Text>
             </Box>
           </HStack>
-          <Language />
         </HStack>
 
         <Flex flex="1" align="center" justify="center" py={12}>

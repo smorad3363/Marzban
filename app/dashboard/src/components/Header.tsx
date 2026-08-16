@@ -30,7 +30,6 @@ import { Link, useLocation, useNavigate } from "react-router-dom";
 import { fetch } from "service/http";
 import { removeAuthToken } from "utils/authStorage";
 import { BrandMark } from "./BrandMark";
-import { Language } from "./Language";
 
 const iconProps = { baseStyle: { w: 4, h: 4, flexShrink: 0 } };
 const CoreSettingsIcon = chakra(Cog6ToothIcon, iconProps);
@@ -117,7 +116,6 @@ export const Header: FC = () => {
           </Box>
         </HStack>
         <HStack display={{ base: "flex", lg: "none" }} spacing={1} flexShrink={0}>
-          <Language />
           <IconButton onClick={logout} size="sm" variant="ghost" color="red.200" aria-label={t("header.logout")} icon={<LogoutIcon />} />
         </HStack>
       </HStack>
@@ -196,7 +194,6 @@ export const Header: FC = () => {
       <Spacer display={{ base: "none", lg: "block" }} />
       <Stack display={{ base: "none", lg: "flex" }} mt={6} pt={4} borderTopWidth="1px" borderColor="whiteAlpha.200" spacing={2}>
         <Text fontSize="xs" color="gray.400" px={2} noOfLines={1}>{userData?.username || "Administrator"}</Text>
-        <Language />
         <Button onClick={logout} size="sm" variant="ghost" color="red.200" leftIcon={<LogoutIcon />} justifyContent="flex-start" _hover={{ bg: "rgba(239, 68, 68, .14)", color: "red.100" }}>{t("header.logout")}</Button>
       </Stack>
     </Flex>
