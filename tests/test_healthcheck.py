@@ -7,6 +7,18 @@ def test_internal_health_uses_configured_uvicorn_port():
     assert public is None
 
 
+def test_internal_health_uses_https_when_uvicorn_tls_is_configured():
+    internal, public = health_targets(
+        {
+            "UVICORN_PORT": "443",
+            "UVICORN_SSL_CERTFILE": "/certs/fullchain.pem",
+            "UVICORN_SSL_KEYFILE": "/certs/key.pem",
+        }
+    )
+    assert internal == "https://127.0.0.1:443/api/marzhelp/compatibility"
+    assert public is None
+
+
 def test_public_https_health_is_derived_from_subscription_prefix():
     internal, public = health_targets(
         {

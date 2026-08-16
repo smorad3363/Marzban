@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import ssl
 import sys
 import urllib.error
 import urllib.request
@@ -16,7 +17,12 @@ HEALTH_PATH = "/api/marzhelp/compatibility"
 def health_targets(env: dict[str, str] | None = None) -> tuple[str, str | None]:
     values = os.environ if env is None else env
     port = int(values.get("UVICORN_PORT", "8000"))
-    internal = f"http://127.0.0.1:{port}{HEALTH_PATH}"
+    tls_enabled = bool(
+        values.get("UVICORN_SSL_CERTFILE", "").strip()
+        and values.get("UVICORN_SSL_KEYFILE", "").strip()
+    )
+    scheme = "https" if tls_enabled else "http"
+    internal = f"{scheme}://127.0.0.1:{port}{HEALTH_PATH}"
     explicit = values.get("HEISENBERG_PUBLIC_HEALTH_URL", "").strip()
     if explicit:
         return internal, explicit
@@ -35,7 +41,11 @@ def health_targets(env: dict[str, str] | None = None) -> tuple[str, str | None]:
 
 def check(url: str, timeout: float) -> None:
     request = urllib.request.Request(url, headers={"User-Agent": "Heisenberg-Health/1"})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    parsed = urlsplit(url)
+    context = None
+    if parsed.scheme == "https" and parsed.hostname in {"127.0.0.1", "localhost", "::1"}:
+        context = ssl._create_unverified_context()
+    with urllib.request.urlopen(request, timeout=timeout, context=context) as response:
         if not 200 <= response.status < 300:
             raise RuntimeError(f"health endpoint returned HTTP {response.status}")
 
