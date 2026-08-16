@@ -66,7 +66,7 @@ import { useTranslation } from "react-i18next";
 import { Navigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 import { fetch } from "service/http";
-import { AdminPolicy, ManagedAdmin, ManagedAdminList, ManagedAdminPayload } from "types/Admin";
+import { AdminPolicy, ManagedAdmin, ManagedAdminList, ManagedAdminPayload, SubscriptionMode } from "types/Admin";
 import { formatBytes } from "utils/formatByte";
 
 const SearchIcon = chakra(MagnifyingGlassIcon, { baseStyle: { w: 4, h: 4 } });
@@ -89,6 +89,12 @@ const emptyPolicy = (): AdminPolicy => ({
   allowed_inbounds: [],
   all_user_limits: true,
   allowed_user_limits: [],
+  allowed_subscription_modes: [
+    "limited_traffic_unlimited_devices",
+    "unlimited_traffic_limited_devices",
+    "limited_traffic_limited_devices",
+  ],
+  view_full_client_ip: false,
   max_user_duration_days: null,
   calculate_volume: "used_traffic",
   prevent_user_creation: false,
@@ -197,6 +203,10 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
       toast({ title: t("admins.selectUserLimitRequired"), status: "warning", duration: 3000 });
       return;
     }
+    if (form.policy.allowed_subscription_modes.length === 0) {
+      toast({ title: t("admins.selectSubscriptionModeRequired"), status: "warning", duration: 3000 });
+      return;
+    }
     const payload = { ...form };
     if (isEditing && !payload.password) delete payload.password;
     mutation.mutate(payload);
@@ -223,6 +233,22 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
     ["prevent_revoke_subscription", "admins.preventRevoke", "admins.preventRevokeHelp"],
     ["prevent_unlimited_traffic", "admins.preventUnlimited", "admins.preventUnlimitedHelp"],
   ];
+
+  const subscriptionModes: SubscriptionMode[] = [
+    "limited_traffic_unlimited_devices",
+    "unlimited_traffic_limited_devices",
+    "limited_traffic_limited_devices",
+    "unlimited_traffic_unlimited_devices",
+  ];
+
+  const toggleSubscriptionMode = (mode: SubscriptionMode, checked: boolean) => {
+    setPolicy(
+      "allowed_subscription_modes",
+      checked
+        ? [...new Set([...form.policy.allowed_subscription_modes, mode])]
+        : form.policy.allowed_subscription_modes.filter((value) => value !== mode)
+    );
+  };
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} size="5xl" scrollBehavior="inside">
@@ -323,6 +349,42 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
                   </HStack>
                 ))}
               </SimpleGrid>
+            </Box>
+
+            <Box p={{ base: 4, md: 5 }} bg="#0d1812" borderWidth="1px" borderColor="#33483b" borderRadius="12px">
+              <Text fontWeight="700">{t("admins.subscriptionModes")}</Text>
+              <Text color="gray.400" fontSize="sm" mt={1}>{t("admins.subscriptionModesHelp")}</Text>
+              <SimpleGrid columns={{ base: 1, md: 2 }} gap={3} mt={4}>
+                {subscriptionModes.map((mode) => (
+                  <Checkbox
+                    key={mode}
+                    minH="52px"
+                    px={3}
+                    py={2}
+                    colorScheme="primary"
+                    bg="rgba(255,255,255,.025)"
+                    borderWidth="1px"
+                    borderColor="rgba(148,163,184,.18)"
+                    borderRadius="10px"
+                    isChecked={form.policy.allowed_subscription_modes.includes(mode)}
+                    onChange={(event) => toggleSubscriptionMode(mode, event.target.checked)}
+                  >
+                    <Text fontSize="sm" fontWeight="650">{t(`admins.subscriptionMode.${mode}`)}</Text>
+                  </Checkbox>
+                ))}
+              </SimpleGrid>
+              <HStack mt={4} justify="space-between" align="start" p={4} bg="#111d17" borderWidth="1px" borderColor="#33483b" borderRadius="10px">
+                <Box pe={3} minW={0}>
+                  <Text fontSize="sm" fontWeight="650">{t("admins.viewFullClientIp")}</Text>
+                  <Text fontSize="xs" color="gray.400" mt={1}>{t("admins.viewFullClientIpHelp")}</Text>
+                </Box>
+                <Switch
+                  flexShrink={0}
+                  colorScheme="primary"
+                  isChecked={form.policy.view_full_client_ip}
+                  onChange={(event) => setPolicy("view_full_client_ip", event.target.checked)}
+                />
+              </HStack>
             </Box>
 
             <SimpleGrid columns={{ base: 1, lg: 2 }} gap={5}>

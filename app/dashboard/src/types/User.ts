@@ -72,6 +72,7 @@ export type User = {
   next_plan: NextPlan | null;
   reset_history: UsageReset[];
   concurrent_user_limit?: number | null;
+  device_limit_state?: import("./DeviceLimit").DeviceLimitState | null;
 };
 
 export type UserCreate = Pick<

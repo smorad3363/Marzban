@@ -1,7 +1,7 @@
 {
   "source_id": "smorad3363-marzban",
-  "marzban_release": "v4.3.0",
+  "marzban_release": "v4.6.0",
   "marzhelp_schema_version": 1,
   "compatible_marzhelp_release": "v2",
-  "alembic_revision": "c8e2a4f6b901"
+  "alembic_revision": "b64e91d7c2a4"
 }

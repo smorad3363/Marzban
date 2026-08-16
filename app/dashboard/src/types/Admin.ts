@@ -1,3 +1,9 @@
+export type SubscriptionMode =
+  | "limited_traffic_unlimited_devices"
+  | "unlimited_traffic_limited_devices"
+  | "limited_traffic_limited_devices"
+  | "unlimited_traffic_unlimited_devices";
+
 export type AdminPolicy = {
   total_traffic: number | null;
   used_traffic: number;
@@ -8,6 +14,8 @@ export type AdminPolicy = {
   allowed_inbounds: string[];
   all_user_limits: boolean;
   allowed_user_limits: number[];
+  allowed_subscription_modes: SubscriptionMode[];
+  view_full_client_ip: boolean;
   max_user_duration_days: number | null;
   calculate_volume: "used_traffic" | "created_traffic";
   prevent_user_creation: boolean;
@@ -44,6 +52,8 @@ export type AdminCapabilities = {
   allowed_inbounds: string[];
   all_user_limits: boolean;
   allowed_user_limits: number[];
+  allowed_subscription_modes: SubscriptionMode[];
+  view_full_client_ip: boolean;
   capacity_used: number;
   capacity_limit: number | null;
   capacity_remaining: number | null;

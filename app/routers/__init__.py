@@ -9,6 +9,7 @@ from . import (
     user_template, 
     user,
     home,
+    device_limit,
 )
 
 api_router = APIRouter()
@@ -23,6 +24,7 @@ routers = [
     user_template.router,
     user.router,
     home.router,
+    device_limit.router,
 ]
 
 for router in routers:

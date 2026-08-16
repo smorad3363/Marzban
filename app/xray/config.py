@@ -362,6 +362,12 @@ class XRayConfig(dict):
         config = self.copy()
 
         with GetDB() as db:
+            device_limit_settings = db.get(db_models.DeviceLimitSettings, 1)
+            if device_limit_settings and device_limit_settings.enabled:
+                # Xray emits accepted connection records only at info level.
+                # This is required by the native detector on the main core and nodes.
+                config.setdefault("log", {})["loglevel"] = "info"
+
             query = db.query(
                 db_models.User.id,
                 db_models.User.username,
@@ -428,6 +434,66 @@ class XRayConfig(dict):
                             del client['flow']
 
                         clients.append(client)
+
+            # Finite-device users keep their legacy/base credential as slot 1.
+            # Extra slots are independent Xray accounts whose email still starts
+            # with the parent user id, so existing traffic aggregation remains
+            # compatible without changing the public User API.
+            slot_rows = db.query(
+                db_models.DeviceSlot.user_id,
+                db_models.User.username,
+                db_models.DeviceSlot.slot_index,
+                db_models.DeviceSlot.credentials,
+                func.lower(db_models.Proxy.type).label("type"),
+                func.group_concat(
+                    db_models.excluded_inbounds_association.c.inbound_tag
+                ).label("excluded_inbound_tags"),
+            ).join(
+                db_models.User,
+                db_models.User.id == db_models.DeviceSlot.user_id,
+            ).join(
+                db_models.Proxy,
+                db_models.Proxy.user_id == db_models.User.id,
+            ).outerjoin(
+                db_models.excluded_inbounds_association,
+                db_models.Proxy.id == db_models.excluded_inbounds_association.c.proxy_id,
+            ).filter(
+                db_models.DeviceSlot.enabled.is_(True),
+                db_models.DeviceSlot.slot_index > 1,
+                db_models.User.concurrent_user_limit.is_not(None),
+                db_models.User.status.in_([UserStatus.active, UserStatus.on_hold]),
+            ).group_by(
+                db_models.DeviceSlot.id,
+                db_models.DeviceSlot.user_id,
+                db_models.User.username,
+                db_models.DeviceSlot.slot_index,
+                db_models.DeviceSlot.credentials,
+                func.lower(db_models.Proxy.type),
+            ).all()
+
+            for row in slot_rows:
+                protocol_settings = (row.credentials or {}).get(row.type)
+                if not protocol_settings:
+                    continue
+                excluded = set(
+                    item
+                    for item in (row.excluded_inbound_tags or "").split(",")
+                    if item
+                )
+                for inbound in self.inbounds_by_protocol.get(row.type, []):
+                    if inbound["tag"] in excluded:
+                        continue
+                    client = {
+                        "email": f"{row.user_id}.{row.username}.slot{row.slot_index}",
+                        **protocol_settings,
+                    }
+                    if client.get("flow") and (
+                        inbound.get("network", "tcp") not in ("tcp", "raw", "kcp")
+                        or inbound.get("tls") not in ("tls", "reality")
+                        or inbound.get("header_type") == "http"
+                    ):
+                        del client["flow"]
+                    config.get_inbound(inbound["tag"])["settings"]["clients"].append(client)
 
         if DEBUG:
             with open('generated_config-debug.json', 'w') as f:

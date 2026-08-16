@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from app import xray
 from app.models.admin import Admin
+from app.models.device_limit import DeviceLimitStateResponse
 from app.models.proxy import ProxySettings, ProxyTypes
 from app.subscription.share import generate_v2ray_links
 from app.utils.jwt import create_subscription_token
@@ -337,6 +338,7 @@ class UserResponse(User):
     proxies: dict
     excluded_inbounds: Dict[ProxyTypes, List[str]] = {}
     reset_history: List[UserUsageResetResponse] = Field(default_factory=list)
+    device_limit_state: Optional[DeviceLimitStateResponse] = None
 
     admin: Optional[Admin] = None
     model_config = ConfigDict(from_attributes=True)
@@ -382,6 +384,7 @@ class SubscriptionUserResponse(UserResponse):
     inbounds: Dict[ProxyTypes, List[str]] | None = Field(None, exclude=True)
     auto_delete_in_days: int | None = Field(None, exclude=True)
     reset_history: List[UserUsageResetResponse] | None = Field(None, exclude=True)
+    device_limit_state: DeviceLimitStateResponse | None = Field(None, exclude=True)
     model_config = ConfigDict(from_attributes=True)
 
 

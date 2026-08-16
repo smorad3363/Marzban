@@ -1,0 +1,135 @@
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from app.device_limit.constants import PenaltyAction, PenaltyStatus
+
+
+class DeviceLimitSettingsResponse(BaseModel):
+    enabled: bool
+    enforcement_mode: Literal["ip", "slots", "hybrid"]
+    check_interval_seconds: int
+    active_window_seconds: int
+    hit_threshold: int
+    strike_reset_seconds: int
+    full_ip_retention_days: int
+    incident_retention_days: int
+    audit_retention_days: int
+    auto_delete_enabled: bool
+    updated_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DeviceLimitSettingsUpdate(BaseModel):
+    enabled: bool
+    enforcement_mode: Literal["ip", "slots", "hybrid"] = "hybrid"
+    check_interval_seconds: int = Field(ge=10, le=3600)
+    active_window_seconds: int = Field(ge=30, le=86400)
+    hit_threshold: int = Field(ge=1, le=100)
+    strike_reset_seconds: int = Field(ge=300, le=31536000)
+    full_ip_retention_days: int = Field(ge=1, le=30)
+    incident_retention_days: int = Field(ge=7, le=3650)
+    audit_retention_days: int = Field(ge=30, le=3650)
+    auto_delete_enabled: bool = False
+
+    @model_validator(mode="after")
+    def validate_window(self):
+        if self.active_window_seconds < self.check_interval_seconds:
+            raise ValueError("Active window must be at least the check interval")
+        return self
+
+
+class DeviceLimitPenaltyStageInput(BaseModel):
+    violation_count: int = Field(ge=1, le=100)
+    action: PenaltyAction
+    duration_seconds: int | None = Field(default=None, ge=60, le=31536000)
+    enabled: bool = True
+
+    @model_validator(mode="after")
+    def validate_duration(self):
+        if self.action == PenaltyAction.temporary_disable and self.duration_seconds is None:
+            raise ValueError("Temporary-disable stages require a duration")
+        if self.action != PenaltyAction.temporary_disable:
+            self.duration_seconds = None
+        return self
+
+
+class DeviceLimitPenaltyStageResponse(DeviceLimitPenaltyStageInput):
+    id: int
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DeviceLimitPenaltyStagesUpdate(BaseModel):
+    stages: list[DeviceLimitPenaltyStageInput] = Field(min_length=1, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_unique_counts(self):
+        counts = [stage.violation_count for stage in self.stages]
+        if len(counts) != len(set(counts)):
+            raise ValueError("Penalty violation counts must be unique")
+        return self
+
+
+class DeviceSlotResponse(BaseModel):
+    id: int
+    slot_index: int
+    label: str | None
+    enabled: bool
+    last_seen_at: datetime | None
+    last_ip: str | None
+    subscription_url: str
+    created_at: datetime
+
+
+class DeviceSlotModify(BaseModel):
+    label: str | None = Field(default=None, max_length=64)
+
+
+class DeviceLimitStateResponse(BaseModel):
+    violation_count: int = 0
+    current_stage: int = 0
+    penalty_status: PenaltyStatus = PenaltyStatus.clear
+    blocked_until: datetime | None = None
+    last_violation_at: datetime | None = None
+    last_seen_at: datetime | None = None
+    active_ip_count: int = 0
+    last_reason: str | None = None
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DeviceLimitIncidentResponse(BaseModel):
+    id: int
+    user_id: int | None
+    admin_id: int | None
+    username: str
+    stage: int
+    action: PenaltyAction
+    configured_limit: int
+    observed_count: int
+    ip_addresses: list[str] | None
+    source_nodes: list[str] | None
+    reason: str
+    resolved_at: datetime | None
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DeviceLimitIncidentList(BaseModel):
+    incidents: list[DeviceLimitIncidentResponse]
+    total: int
+    offset: int
+    limit: int
+
+
+class DeviceLimitUserSummary(BaseModel):
+    username: str
+    configured_limit: int | None
+    enabled: bool
+    live_active_ip_count: int
+    live_ip_addresses: list[str]
+    live_source_nodes: list[str]
+    state: DeviceLimitStateResponse
+    slots: list[DeviceSlotResponse]

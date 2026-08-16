@@ -6,8 +6,9 @@ from fastapi.responses import HTMLResponse
 
 from app.db import Session, crud, get_db
 from app.dependencies import get_validated_sub, validate_dates
+from app.models.proxy import ProxySettings, ProxyTypes
 from app.models.user import SubscriptionUserResponse, UserResponse
-from app.subscription.share import encode_title, generate_subscription
+from app.subscription.share import encode_title, generate_subscription, generate_v2ray_links
 from app.templates import render_template
 from config import (
     SUB_PROFILE_TITLE,
@@ -35,6 +36,23 @@ client_config = {
 router = APIRouter(tags=['Subscription'], prefix=f'/{XRAY_SUBSCRIPTION_PATH}')
 
 
+def _subscription_user(dbuser) -> UserResponse:
+    user = UserResponse.model_validate(dbuser)
+    credentials = getattr(dbuser, "_device_slot_credentials", None)
+    if credentials:
+        user.proxies = {
+            ProxyTypes(protocol): ProxySettings.from_dict(ProxyTypes(protocol), settings)
+            for protocol, settings in credentials.items()
+        }
+        user.links = generate_v2ray_links(
+            user.proxies,
+            user.inbounds,
+            extra_data=user.model_dump(),
+            reverse=False,
+        )
+    return user
+
+
 def get_subscription_user_info(user: UserResponse) -> dict:
     """Retrieve user subscription information including upload, download, total data, and expiry."""
     return {
@@ -54,7 +72,7 @@ def user_subscription(
     user_agent: str = Header(default="")
 ):
     """Provides a subscription link based on the user agent (Clash, V2Ray, etc.)."""
-    user: UserResponse = UserResponse.model_validate(dbuser)
+    user = _subscription_user(dbuser)
 
     accept_header = request.headers.get("Accept", "")
     if "text/html" in accept_header:
@@ -144,7 +162,7 @@ def user_subscription_info(
     dbuser: UserResponse = Depends(get_validated_sub),
 ):
     """Retrieves detailed information about the user's subscription."""
-    return dbuser
+    return SubscriptionUserResponse.model_validate(_subscription_user(dbuser))
 
 
 @router.get("/{token}/usage")
@@ -171,7 +189,7 @@ def user_subscription_with_client_type(
     user_agent: str = Header(default="")
 ):
     """Provides a subscription link based on the specified client type (e.g., Clash, V2Ray)."""
-    user: UserResponse = UserResponse.model_validate(dbuser)
+    user = _subscription_user(dbuser)
 
     response_headers = {
         "content-disposition": f'attachment; filename="{user.username}"',

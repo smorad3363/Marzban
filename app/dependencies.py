@@ -2,6 +2,7 @@ from typing import Optional, Union
 from app.models.admin import AdminInDB, AdminValidationResult, Admin
 from app.models.user import UserResponse, UserStatus
 from app.db import Session, crud, get_db
+from app.db.models import DeviceSlot
 from config import SUDOERS
 from fastapi import Depends, HTTPException
 from datetime import datetime, timezone, timedelta
@@ -79,6 +80,22 @@ def get_validated_sub(
 
     if dbuser.sub_revoked_at and dbuser.sub_revoked_at > sub['created_at']:
         raise HTTPException(status_code=404, detail="Not Found")
+
+    slot_index = sub.get("slot_index")
+    if slot_index is not None:
+        slot = (
+            db.query(DeviceSlot)
+            .filter(
+                DeviceSlot.user_id == dbuser.id,
+                DeviceSlot.slot_index == slot_index,
+                DeviceSlot.enabled.is_(True),
+            )
+            .first()
+        )
+        if slot is None or slot.token_version != sub.get("token_version"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        dbuser._device_slot_index = slot.slot_index
+        dbuser._device_slot_credentials = slot.credentials
 
     return dbuser
 

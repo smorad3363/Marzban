@@ -11,6 +11,7 @@ from sqlalchemy.orm import Query, Session, joinedload
 from sqlalchemy.sql.functions import coalesce
 
 from app import xray
+from app.device_limit.constants import DEFAULT_ADMIN_SUBSCRIPTION_MODES
 from app.db.models import (
     JWT,
     TLS,
@@ -18,6 +19,7 @@ from app.db.models import (
     AdminUsageLogs,
     MarzhelpAdminSettings,
     MarzhelpAdminInboundPermission,
+    MarzhelpAdminSubscriptionModePermission,
     MarzhelpAdminUserLimitPermission,
     MarzhelpAdminUsage,
     MarzhelpLimit,
@@ -58,6 +60,7 @@ from app.models.user import (
 from app.models.user_template import UserTemplateCreate, UserTemplateModify
 from app.utils.helpers import calculate_expiration_days, calculate_usage_percent
 from app.utils import marzhelp_policy
+from app.device_limit.slots import sync_device_slots
 from config import NOTIFY_DAYS_LEFT, NOTIFY_REACHED_USAGE_PERCENT, USERS_AUTODELETE_DAYS
 
 
@@ -457,6 +460,7 @@ def create_user(db: Session, user: UserCreate, admin: Admin = None) -> User:
     )
     db.add(dbuser)
     db.flush()
+    sync_device_slots(db, dbuser)
     marzhelp_policy.record_create(
         db, dbuser, policy_settings is not None and policy_settings.user_limit is not None
     )
@@ -596,6 +600,8 @@ def update_user(
         db.delete(dbuser.next_plan)
 
     dbuser.edit_at = datetime.utcnow()
+
+    sync_device_slots(db, dbuser)
 
     if renewal:
         db.flush()
@@ -1031,6 +1037,16 @@ def create_admin(db: Session, admin: AdminCreate, commit: bool = True) -> Admin:
         discord_webhook=admin.discord_webhook if admin.discord_webhook else None
     )
     db.add(dbadmin)
+    db.flush()
+    settings = MarzhelpAdminSettings(admin_id=dbadmin.id)
+    settings.subscription_mode_permissions = [
+        MarzhelpAdminSubscriptionModePermission(
+            admin_id=dbadmin.id,
+            mode=mode.value,
+        )
+        for mode in DEFAULT_ADMIN_SUBSCRIPTION_MODES
+    ]
+    db.add(settings)
     if commit:
         db.commit()
         db.refresh(dbadmin)
@@ -1102,7 +1118,13 @@ def upsert_marzhelp_admin_policy(
         )
     settings.capacity_used = used_capacity
 
-    values = policy.model_dump(exclude={"allowed_inbounds", "allowed_user_limits"})
+    values = policy.model_dump(
+        exclude={
+            "allowed_inbounds",
+            "allowed_user_limits",
+            "allowed_subscription_modes",
+        }
+    )
     for field, value in values.items():
         setattr(settings, field, value)
 
@@ -1116,6 +1138,13 @@ def upsert_marzhelp_admin_policy(
             concurrent_user_limit=limit,
         )
         for limit in policy.allowed_user_limits
+    ]
+    settings.subscription_mode_permissions = [
+        MarzhelpAdminSubscriptionModePermission(
+            admin_id=admin_id,
+            mode=mode.value,
+        )
+        for mode in policy.allowed_subscription_modes
     ]
 
     if commit:
@@ -1174,6 +1203,9 @@ def remove_admin(db: Session, dbadmin: Admin) -> Admin:
     ).delete()
     db.query(MarzhelpAdminUserLimitPermission).filter(
         MarzhelpAdminUserLimitPermission.admin_id == dbadmin.id
+    ).delete()
+    db.query(MarzhelpAdminSubscriptionModePermission).filter(
+        MarzhelpAdminSubscriptionModePermission.admin_id == dbadmin.id
     ).delete()
     db.query(MarzhelpAdminSettings).filter(
         MarzhelpAdminSettings.admin_id == dbadmin.id

@@ -20,6 +20,7 @@ import {
   SquaresPlusIcon,
   UserGroupIcon,
   UsersIcon,
+  ShieldCheckIcon,
 } from "@heroicons/react/24/outline";
 import { useDashboard } from "contexts/DashboardContext";
 import useGetUser from "hooks/useGetUser";
@@ -41,6 +42,7 @@ const ResetUsageIcon = chakra(DocumentMinusIcon, iconProps);
 const UsersNavIcon = chakra(UsersIcon, iconProps);
 const AdminsNavIcon = chakra(UserGroupIcon, iconProps);
 const AuditNavIcon = chakra(ClipboardDocumentListIcon, iconProps);
+const DeviceLimitNavIcon = chakra(ShieldCheckIcon, iconProps);
 
 type ActionButtonProps = {
   icon: ReactElement;
@@ -76,7 +78,8 @@ export const Header: FC = () => {
   const navigate = useNavigate();
   const isAdminsPage = location.pathname.startsWith("/admins");
   const isAuditPage = location.pathname.startsWith("/audit-logs");
-  const isUsersPage = !isAdminsPage && !isAuditPage;
+  const isDeviceLimitPage = location.pathname.startsWith("/device-limits");
+  const isUsersPage = !isAdminsPage && !isAuditPage && !isDeviceLimitPage;
   const logout = async () => {
     try {
       await fetch("/admin/logout", { method: "POST" });
@@ -120,7 +123,7 @@ export const Header: FC = () => {
       </HStack>
 
       <Text display={{ base: "none", lg: "block" }} mt={8} mb={2} px={2} fontSize="xs" color="gray.500" fontFamily="mono" letterSpacing=".1em" textTransform="uppercase">Navigation</Text>
-      <SimpleGrid as="nav" aria-label="Primary navigation" columns={{ base: isSudo ? 3 : 1, lg: 1 }} spacing={2} mt={{ base: 4, lg: 0 }}>
+      <SimpleGrid as="nav" aria-label="Primary navigation" columns={{ base: isSudo ? 2 : 1, sm: isSudo ? 4 : 1, lg: 1 }} spacing={2} mt={{ base: 4, lg: 0 }}>
         <Button
           as={Link}
           to="/"
@@ -146,6 +149,20 @@ export const Header: FC = () => {
             justifyContent="flex-start"
             aria-current={isAdminsPage ? "page" : undefined}
           >{t("admins.nav")}</Button>
+        )}
+        {isSudo && (
+          <Button
+            as={Link}
+            to="/device-limits/"
+            size="md"
+            variant={isDeviceLimitPage ? "solid" : "ghost"}
+            colorScheme={isDeviceLimitPage ? "primary" : "gray"}
+            color={isDeviceLimitPage ? "#07130e" : "gray.200"}
+            _hover={isDeviceLimitPage ? undefined : { bg: "whiteAlpha.100", color: "white" }}
+            leftIcon={<DeviceLimitNavIcon />}
+            justifyContent="flex-start"
+            aria-current={isDeviceLimitPage ? "page" : undefined}
+          >{t("deviceLimit.nav")}</Button>
         )}
         {isSudo && (
           <Button
