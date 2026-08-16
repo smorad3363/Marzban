@@ -980,15 +980,33 @@ up_marzban() {
 
 verify_marzban_health() {
     local container_id
-    for _ in $(seq 1 15); do
+    local attempt
+    for attempt in $(seq 1 150); do
         container_id=$($COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" ps -q marzban 2>/dev/null)
         if [ -n "$container_id" ] && docker exec "$container_id" python \
-            /code/scripts/healthcheck.py --mode all --timeout 3; then
+            /code/scripts/healthcheck.py --mode internal --timeout 3 \
+            >/dev/null 2>&1; then
+            if ! docker exec "$container_id" python \
+                /code/scripts/healthcheck.py --mode all --timeout 3 \
+                >/dev/null 2>&1; then
+                colorized_echo yellow "Internal health passed, but the public health check is unavailable"
+            fi
             return 0
         fi
-        sleep 1
+        if [ $((attempt % 15)) -eq 0 ]; then
+            colorized_echo blue "Waiting for Marzban health check (${attempt}/150)"
+        fi
+        sleep 2
     done
-    colorized_echo red "Marzban internal/public health check failed"
+    if [ -n "$container_id" ]; then
+        colorized_echo yellow "Final Marzban health check error:"
+        docker exec "$container_id" python \
+            /code/scripts/healthcheck.py --mode internal --timeout 3 || true
+        mkdir -p "$DATA_DIR"
+        docker logs --tail 200 "$container_id" > "$DATA_DIR/update-failed.log" 2>&1 || true
+        colorized_echo yellow "Container logs saved to $DATA_DIR/update-failed.log"
+    fi
+    colorized_echo red "Marzban internal health check failed"
     return 1
 }
 
@@ -1573,20 +1591,7 @@ update_command() {
     down_marzban
     up_marzban
 
-    local container_id
-    local ready="false"
-    for _ in $(seq 1 15); do
-        container_id=$($COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" ps -q marzban 2>/dev/null)
-        if [ -n "$container_id" ] && docker exec "$container_id" python \
-            /code/scripts/healthcheck.py --mode all --timeout 3 \
-            >/dev/null 2>&1; then
-            ready="true"
-            break
-        fi
-        sleep 1
-    done
-
-    if [ "$ready" != "true" ]; then
+    if ! verify_marzban_health; then
         colorized_echo red "Update health check failed. Restoring previous image: ${previous_image}"
         down_marzban
         yq -i ".services.marzban.image = \"${previous_image}\"" "$COMPOSE_FILE"

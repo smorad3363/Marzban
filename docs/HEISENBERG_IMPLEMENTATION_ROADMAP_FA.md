@@ -1,5 +1,3 @@
-<div dir="rtl" align="right">
-
 # نقشه راه و وضعیت پیاده‌سازی هایزنبرگ
 
 آخرین به‌روزرسانی: `2026-08-17`
@@ -138,4 +136,11 @@
 
 پیاده‌سازی محلی کامل است. ابتدا این فایل و سپس `git status --short` خوانده شود. اگر `Graphify` کامل نشده بود، در ریشهٔ `Marzban` فرمان `graphify update .` فقط یک‌بار اجرا شود. سپس با یک MySQL آزمایشی، `TEST_MYSQL_DATABASE_URL` تنظیم و تست `tests/test_mysql_device_limit_migration.py` اجرا شود. پس از آن تنها کار باقیمانده، بازبینی diff و تصمیم کاربر برای commit/deploy است. در `marzhelp` یا `V2IpLimit` هیچ تغییری انجام نشود.
 
-</div>
+## رخداد انتشار `v4.7.0`
+
+- ایمیج `ghcr.io/smorad3363/marzban:v4.7.0` با موفقیت pull و سرویس‌ها start شدند، اما updater پس از ۱۵ ثانیه health check را ناموفق اعلام کرد و خودکار به `v4.6.3` برگشت.
+- علت: updater شاخهٔ `master` پورت داخلی را ثابت `8000` فرض می‌کرد و فقط ۱۵ ثانیه برای startup و migration صبر می‌کرد.
+- rollback برنامه موفق بود. migrationهای پایگاه‌داده عمداً downgrade نشدند؛ تغییرات schema افزایشی و با `v4.6.3` سازگارند.
+- هات‌فیکس `743a62916a7ade2120bd846a206e9541aed5e4f6` در PR شمارهٔ ۲ ادغام شد؛ commit شاخهٔ `master`: `8ff626202aac5032f6ebb5b96d74f2496ea8516a`.
+- updater اکنون تا ۵ دقیقه صبر می‌کند، پورت را از `UVICORN_PORT` می‌خواند و پیش از rollback لاگ کانتینر را در `/var/lib/marzban/update-failed.log` نگه می‌دارد.
+- تگ و ایمیج `v4.7.0` بازنویسی نشدند. نقطهٔ ادامه: اجرای دوبارهٔ `sudo marzban update --version v4.7.0` و بررسی سلامت سرویس.
