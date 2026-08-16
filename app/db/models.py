@@ -222,7 +222,7 @@ class DeviceLimitSettings(Base):
 
     __tablename__ = "device_limit_settings"
 
-    id = Column(Integer, primary_key=True, default=1)
+    id = Column(Integer, primary_key=True, autoincrement=False, default=1)
     enabled = Column(Boolean, nullable=False, default=False)
     enforcement_mode = Column(String(24), nullable=False, default="hybrid")
     check_interval_seconds = Column(Integer, nullable=False, default=60)

@@ -10,6 +10,12 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/marzhelp/compatibility', timeout=2)"]
+      start_period: 10s
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
   mysql:
     image: mysql:8.0
@@ -27,8 +33,6 @@ services:
       - --bind-address=127.0.0.1
       - --character_set_server=utf8mb4
       - --collation_server=utf8mb4_unicode_ci
-      - --log-bin=mysql-bin
-      - --binlog_expire_logs_seconds=1209600
       - --host-cache-size=0
       - --innodb-open-files=1024
       - --innodb-buffer-pool-size=256M

@@ -26,7 +26,45 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  test-mysql:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root-test-password
+          MYSQL_DATABASE: marzban_test
+          MYSQL_USER: marzban
+          MYSQL_PASSWORD: marzban-test-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -u marzban --password=marzban-test-password"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
+    env:
+      SQLALCHEMY_DATABASE_URL: mysql+pymysql://marzban:marzban-test-password@127.0.0.1:3306/marzban_test
+      TEST_MYSQL_DATABASE_URL: mysql+pymysql://marzban:marzban-test-password@127.0.0.1:3306/marzban_test
+      XRAY_JSON: ./xray_config.json
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install backend dependencies
+        run: pip install -r requirements.txt
+
+      - name: Verify MySQL migration and partial-DDL recovery
+        run: pytest -q tests/test_mysql_device_limit_migration.py
+
   build-docker-image:
+    needs: test-mysql
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

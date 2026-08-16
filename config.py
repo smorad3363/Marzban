@@ -4,7 +4,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-SQLALCHEMY_DATABASE_URL = config("SQLALCHEMY_DATABASE_URL", default="sqlite:///db.sqlite3")
+SQLALCHEMY_DATABASE_URL = config("SQLALCHEMY_DATABASE_URL", default="").strip()
+if not SQLALCHEMY_DATABASE_URL.lower().startswith("mysql+pymysql://"):
+    raise RuntimeError(
+        "SQLALCHEMY_DATABASE_URL must use MySQL with the mysql+pymysql:// driver"
+    )
 SQLALCHEMY_POOL_SIZE = config("SQLALCHEMY_POOL_SIZE", cast=int, default=10)
 SQLIALCHEMY_MAX_OVERFLOW = config("SQLIALCHEMY_MAX_OVERFLOW", cast=int, default=30)
 

@@ -1,11 +1,9 @@
 import { joinPaths } from "@remix-run/router";
 
 import fa from "date-fns/locale/fa-IR";
-import ru from "date-fns/locale/ru";
-import zh from "date-fns/locale/zh-CN";
 import dayjs from "dayjs";
+import "dayjs/locale/fa";
 import i18n from "i18next";
-import LanguageDetector from "i18next-browser-languagedetector";
 import HttpApi from "i18next-http-backend";
 import { registerLocale } from "react-datepicker";
 import { initReactI18next } from "react-i18next";
@@ -16,21 +14,21 @@ declare module "i18next" {
     }
 }
 
-const syncDocumentLanguage = (language: string) => {
-    const normalizedLanguage = language.toLowerCase();
-    document.documentElement.lang = normalizedLanguage;
-    document.documentElement.dir = normalizedLanguage.startsWith("fa") ? "rtl" : "ltr";
+const syncDocumentLanguage = () => {
+    document.documentElement.lang = "fa";
+    document.documentElement.dir = "rtl";
 };
 
 i18n
-    .use(LanguageDetector)
     .use(initReactI18next)
     .use(HttpApi)
     .init(
         {
             debug: import.meta.env.NODE_ENV === "development",
             returnNull: false,
-            fallbackLng: "en",
+            lng: "fa",
+            supportedLngs: ["fa"],
+            fallbackLng: "fa",
             interpolation: {
                 escapeValue: false,
             },
@@ -38,9 +36,6 @@ i18n
                 useSuspense: false,
             },
             load: "languageOnly",
-            detection: {
-                caches: ["localStorage", "sessionStorage", "cookie"],
-            },
             backend: {
                 loadPath: joinPaths([
                     import.meta.env.BASE_URL,
@@ -48,20 +43,18 @@ i18n
                 ]),
             },
         },
-        function (err, t) {
-            dayjs.locale(i18n.language);
-            syncDocumentLanguage(i18n.language);
+        function () {
+            dayjs.locale("fa");
+            syncDocumentLanguage();
         }
     );
 
-i18n.on("languageChanged", (lng) => {
-    dayjs.locale(lng);
-    syncDocumentLanguage(lng);
+i18n.on("languageChanged", () => {
+    dayjs.locale("fa");
+    syncDocumentLanguage();
 });
 
 // DataPicker
-registerLocale("zh-cn", zh);
-registerLocale("ru", ru);
 registerLocale("fa", fa);
 
 export default i18n;

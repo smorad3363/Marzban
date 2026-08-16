@@ -723,6 +723,10 @@ update_core_command() {
 install_marzban() {
     local marzban_version=$1
     local database_type=$2
+    if [ "$database_type" != "mysql" ]; then
+        colorized_echo red "Error: This Marzban build supports MySQL only. Use --database mysql."
+        exit 1
+    fi
     # Fetch releases
     FILES_URL_PREFIX="$MARZBAN_FILES_URL_PREFIX"
     
@@ -838,6 +842,12 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/marzhelp/compatibility', timeout=2)"]
+      start_period: 10s
+      interval: 10s
+      timeout: 3s
+      retries: 3
 
   mysql:
     image: mysql:8.0
@@ -855,8 +865,6 @@ services:
       - --bind-address=127.0.0.1                  # Restricts access to localhost for increased security
       - --character_set_server=utf8mb4            # Sets UTF-8 character set for full Unicode support
       - --collation_server=utf8mb4_unicode_ci     # Defines collation for Unicode
-      - --log-bin=mysql-bin                       # Enables binary logging for point-in-time recovery
-      - --binlog_expire_logs_seconds=1209600      # Sets binary log expiration to 14 days
       - --host-cache-size=0                       # Disables host cache to prevent DNS issues
       - --innodb-open-files=1024                  # Sets the limit for InnoDB open files
       - --innodb-buffer-pool-size=256M            # Allocates buffer pool size for InnoDB
@@ -1033,7 +1041,7 @@ install_command() {
     check_running_as_root
 
     # Default values
-    database_type="sqlite"
+    database_type="mysql"
     marzban_version="latest"
     marzban_version_set="false"
 
@@ -1069,6 +1077,11 @@ install_command() {
             ;;
         esac
     done
+
+    if [ "$database_type" != "mysql" ]; then
+        colorized_echo red "Error: This Marzban build supports MySQL only. Use --database mysql."
+        exit 1
+    fi
 
     # Check if marzban is already installed
     if is_marzban_installed; then
@@ -1542,7 +1555,29 @@ update_command() {
     colorized_echo blue "Restarting Marzban's services"
     down_marzban
     up_marzban
-    
+
+    local container_id
+    local ready="false"
+    for _ in $(seq 1 15); do
+        container_id=$($COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" ps -q marzban 2>/dev/null)
+        if [ -n "$container_id" ] && docker exec "$container_id" python -c \
+            "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/marzhelp/compatibility', timeout=2)" \
+            >/dev/null 2>&1; then
+            ready="true"
+            break
+        fi
+        sleep 1
+    done
+
+    if [ "$ready" != "true" ]; then
+        colorized_echo red "Update health check failed. Restoring previous image: ${previous_image}"
+        down_marzban
+        yq -i ".services.marzban.image = \"${previous_image}\"" "$COMPOSE_FILE"
+        up_marzban
+        colorized_echo red "Update failed and the previous application image was restored. Database migrations were not downgraded."
+        exit 1
+    fi
+
     colorized_echo green "Marzban updated successfully to ${requested_version}"
 }
 
