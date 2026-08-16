@@ -1560,7 +1560,7 @@ update_command() {
     local attempt
     local health_probe
     local ready="false"
-    health_probe="import os, urllib.request; port = int(os.environ.get('UVICORN_PORT', '8000')); urllib.request.urlopen(f'http://127.0.0.1:{port}/api/marzhelp/compatibility', timeout=3)"
+    health_probe="import os, ssl, urllib.request; port = int(os.environ.get('UVICORN_PORT', '8000')); tls = bool(os.environ.get('UVICORN_SSL_CERTFILE', '').strip() and os.environ.get('UVICORN_SSL_KEYFILE', '').strip()); scheme = 'https' if tls else 'http'; context = ssl._create_unverified_context() if tls else None; urllib.request.urlopen(f'{scheme}://127.0.0.1:{port}/api/marzhelp/compatibility', timeout=3, context=context)"
     for attempt in $(seq 1 150); do
         container_id=$($COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" ps -q marzban 2>/dev/null)
         if [ -n "$container_id" ] && docker exec "$container_id" python -c \
