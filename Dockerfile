@@ -30,6 +30,7 @@ COPY . /code
 
 RUN ln -s /code/marzban-cli.py /usr/bin/marzban-cli \
     && chmod +x /usr/bin/marzban-cli \
-    && marzban-cli completion install --shell bash
+    && SQLALCHEMY_DATABASE_URL=mysql+pymysql://marzban:marzban@127.0.0.1:3306/marzban \
+       marzban-cli completion install --shell bash
 
 CMD ["bash", "-c", "alembic upgrade head && exec python main.py"]
