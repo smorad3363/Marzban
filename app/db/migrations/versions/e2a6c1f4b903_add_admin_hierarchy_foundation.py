@@ -233,7 +233,7 @@ def _create_extended_schema(bind: sa.Connection) -> None:
             "admin_api_tokens",
             sa.Column("id", _bigint_pk(), autoincrement=True, nullable=False),
             sa.Column("admin_id", sa.Integer(), nullable=False),
-            sa.Column("token_hash", sa.LargeBinary(length=32), nullable=False),
+            sa.Column("token_hash", sa.BINARY(length=32), nullable=False),
             sa.Column("name", sa.String(length=96), nullable=False),
             sa.Column("scopes", sa.JSON(), nullable=False),
             sa.Column("expires_at", sa.DateTime(), nullable=False),

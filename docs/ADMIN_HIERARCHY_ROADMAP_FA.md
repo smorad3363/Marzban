@@ -2,7 +2,7 @@
 
 آخرین به‌روزرسانی: `2026-08-19`
 
-وضعیت: `V4.9.1_RELEASE_RETRY_PENDING` — schema، backend، API، CLI و UI پیاده شده‌اند. اجرای واقعی MySQL 8.0 برای `v4.9.0` خطای `3818` مربوط به `AUTO_INCREMENT` در جدول singleton را آشکار کرد؛ اصلاح `autoincrement=False` برای `v4.9.1` آماده آزمون است. تا تعیین Owner، رفتار اجرایی قدیمی `is_sudo` حفظ می‌شود.
+وضعیت: `V4.9.2_RELEASE_RETRY_PENDING` — schema، backend، API، CLI و UI پیاده شده‌اند. اجرای واقعی MySQL 8.0 برای `v4.9.1` خطای `1170` مربوط به unique index روی `BLOB token_hash` را آشکار کرد؛ اصلاح نوع به `BINARY(32)` برای `v4.9.2` آماده آزمون است. تا تعیین Owner، رفتار اجرایی قدیمی `is_sudo` حفظ می‌شود.
 
 ## قانون اجباری شروع هر چت و هر جلسه
 
@@ -782,7 +782,7 @@ reason codeهای حداقلی برای لاگ parent:
 
 ## نقطه دقیق ادامه
 
-مرحله بعد: اصلاح MySQL برای `v4.9.1` commit شود؛ سپس branch و tag جدید `v4.9.1` push و workflow تا پایان دنبال شود. tag تغییرناپذیر `v4.9.0` روی `dc357cc` باقی می‌ماند و جابه‌جا یا حذف نمی‌شود. اجرای `32195714228` در job `95899175897` با خطای دقیق `(3818, "Check constraint 'ck_admin_hierarchy_settings_singleton' cannot refer to an auto-increment column.")` شکست خورد و build/release همان اجرا skip شد. suite اصلاح‌شده `83 passed, 2 skipped`، compileall، YAML و `git diff --check` سبز هستند؛ Graphify با `4796 nodes/10304 edges/442 communities` همگام شد. انتشار فقط پس از موفقیت MySQL 8.0، partial-DDL recovery، backup/checksum/restore و rollback application `v4.8.0` انجام شود.
+مرحله بعد: اصلاح کوچک MySQL برای `v4.9.2` تست و commit شود؛ سپس tag جدید push و workflow تا پایان دنبال شود. tagهای تغییرناپذیر و ناموفق `v4.9.0` و `v4.9.1` جابه‌جا یا حذف نمی‌شوند. اجرای `32196467586` در job `95901398510` با خطای دقیق `(1170, "BLOB/TEXT column 'token_hash' used in key specification without a key length")` شکست خورد؛ علت `LargeBinary(32)` بود که MySQL آن را `BLOB` می‌سازد. اصلاح هدفمند `BINARY(32)` است. انتشار فقط پس از موفقیت MySQL 8.0، partial-DDL recovery، backup/checksum/restore و rollback application `v4.8.0` انجام شود.
 
 ### گزارش DB برش foundation
 
@@ -830,3 +830,4 @@ git log -3 --oneline --decorate
 | `2026-08-19` | ۲ تا ۶ | در حال اجرا | توسعه migration با ledger/token/suspension/bulk/Plan؛ پیاده‌سازی closure scope، `set-owner`، انتقال اعتبار idempotent، توکن hash‌شده، تعلیق قابل‌بازگشت، bulk job cursor-resume، Plan immutable، renewal atomic، قطع خودکار، scope کاربران/audit/device/system و UI responsive hierarchy/Plan/account | `—` working tree | `23 passed` برای hierarchy service، migration، full chain و Admin regression؛ `compileall` موفق؛ TypeScript و گیت MySQL در حال تکمیل | رفع هر خطای build، اجرای کل suite و گیت MySQL 8.0؛ سپس Graphify و release |
 | `2026-08-19` | ۳ تا ۱۳ | پیاده‌سازی محلی کامل؛ گیت خارجی باز | تکمیل hierarchy/API/CLI/UI، تمدید مستقل با Plan، audit عملیات حساس، بستن conflict کلید idempotency، اصلاح جهت reclaim ledger، حذف دو index تکراری و حذف N+1 در tree؛ Graphify=`4796 nodes/10304 edges` | `14d9592` | `82 passed, 2 skipped`؛ skipها فقط MySQL؛ TypeScript=`0`، Vite production build=`0`، `compileall`=`0`، `bash -n`=`0`، YAML parse=`OK` | احراز هویت GitHub؛ push branch/tag `v4.9.0`؛ انتظار برای workflow MySQL/backup/rollback و انتشار |
 | `2026-08-19` | ۱۴ | شکست گیت MySQL؛ اصلاح محلی کامل | branch و tag `v4.9.0` push شدند؛ workflow `32195714228` در job `95899175897` با MySQL error `3818` شکست خورد، چون `SMALLINT` primary key جدول singleton به‌طور ضمنی `AUTO_INCREMENT` شده بود؛ build/release skip شد. برای `v4.9.1` شناسه شش جدول مرجع ثابت و singleton صریحاً `autoincrement=False` شد | `dc357cc` + working tree | `83 passed, 2 skipped`؛ تست DDL جدید هر شش جدول؛ compileall/YAML/diff-check سبز؛ Graphify=`4796/10304/442` | commit و tag `v4.9.1`؛ دنبال‌کردن workflow و release تا نتیجه نهایی |
+| `2026-08-19` | ۱۴ | شکست دوم گیت MySQL؛ اصلاح کوچک در حال آزمون | `v4.9.1@cb696c4` خطای قبلی را رفع کرد، ولی run `32196467586` در job `95901398510` با MySQL error `1170` روی unique index فیلد `token_hash BLOB` شکست خورد. نوع hash ثابت SHA-256 برای `v4.9.2` به `BINARY(32)` تغییر کرد | `cb696c4` + working tree | backend regression سبز؛ migration واقعی در run دوم خطا داد | تست regression؛ commit/tag `v4.9.2`؛ یک retry نهایی workflow |

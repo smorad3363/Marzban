@@ -36,7 +36,7 @@ marzban update --version v4.6.1
 Fresh-install an exact release directly from GitHub:
 
 ```bash
-sudo bash -c "$(curl -sL https://raw.githubusercontent.com/smorad3363/Marzban/master/scripts/marzban.sh)" @ install --version v4.9.1 --database mysql
+sudo bash -c "$(curl -sL https://raw.githubusercontent.com/smorad3363/Marzban/master/scripts/marzban.sh)" @ install --version v4.9.2 --database mysql
 ```
 
 The previous release remains directly installable:
@@ -53,7 +53,7 @@ Roll back the application image while preserving the current database and data:
 marzban rollback v4.5.2
 ```
 
-Rollback from `v4.9.1` to the previous release:
+Rollback from `v4.9.2` to the previous release:
 
 ```bash
 marzban rollback v4.8.0
@@ -69,6 +69,6 @@ Rollback changes the application container only. It does not automatically
 downgrade database migrations. Take a database backup before rolling back
 across versions with incompatible schema changes.
 
-The `v4.9.1` migration only adds compatible columns/indexes and preserves the
+The `v4.9.2` migration only adds compatible columns/indexes and preserves the
 legacy quota columns used by `v4.8.0`, so application-image rollback to
 `v4.8.0` does not require a schema downgrade.

@@ -9,6 +9,7 @@ from sqlalchemy.schema import CreateTable
 
 from app.db.models import (
     AdminAccountStatus,
+    AdminApiToken,
     AdminHierarchySettings,
     AdminRole,
     AdminSuspensionReason,
@@ -45,6 +46,13 @@ def test_fixed_identifier_tables_do_not_compile_mysql_auto_increment():
     ):
         ddl = str(CreateTable(model.__table__).compile(dialect=mysql.dialect()))
         assert "AUTO_INCREMENT" not in ddl
+
+
+def test_api_token_hash_compiles_as_indexable_mysql_binary():
+    ddl = str(CreateTable(AdminApiToken.__table__).compile(dialect=mysql.dialect()))
+    assert "token_hash BINARY(32)" in ddl
+    assert "token_hash BLOB" not in ddl
+    assert "UNIQUE (token_hash)" in ddl
 
 
 def _legacy_schema(connection: sa.Connection) -> None:

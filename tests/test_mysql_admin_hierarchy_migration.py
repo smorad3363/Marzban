@@ -88,6 +88,9 @@ def _assert_extended_schema(connection: sa.Connection) -> None:
     ):
         create_sql = connection.execute(sa.text(f"SHOW CREATE TABLE `{table}`")).one()[1]
         assert "AUTO_INCREMENT" not in create_sql
+    token_sql = connection.execute(sa.text("SHOW CREATE TABLE admin_api_tokens")).one()[1]
+    assert "`token_hash` binary(32) NOT NULL" in token_sql
+    assert "UNIQUE KEY `uq_admin_api_tokens_hash` (`token_hash`)" in token_sql
 
 
 @pytest.mark.skipif(not MYSQL_URL, reason="TEST_MYSQL_DATABASE_URL is not configured")

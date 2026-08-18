@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     JSON,
+    BINARY,
     BigInteger,
     Boolean,
     CheckConstraint,
@@ -14,7 +15,6 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
-    LargeBinary,
     Numeric,
     SmallInteger,
     String,
@@ -203,7 +203,7 @@ class AdminApiToken(Base):
 
     id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
     admin_id = Column(Integer, ForeignKey("admins.id", ondelete="CASCADE"), nullable=False)
-    token_hash = Column(LargeBinary(32), nullable=False, unique=True)
+    token_hash = Column(BINARY(32), nullable=False, unique=True)
     name = Column(String(96), nullable=False)
     scopes = Column(JSON, nullable=False)
     expires_at = Column(DateTime, nullable=False)
