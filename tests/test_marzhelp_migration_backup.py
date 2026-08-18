@@ -138,6 +138,8 @@ def test_installer_targets_master_and_latest_mysql_image():
     assert 'marzban_version="latest"' in installer
     assert 'elif [ "$database_type" == "mysql" ]; then' in installer
     assert 'image: $(marzban_docker_image "${marzban_version}")' in installer
+    assert "image: mysql:latest" in installer
+    assert "image: mysql:8.0" not in installer
     assert 'requested_version="latest"' in installer
     assert 'previous_image=$(yq -r' in installer
     assert "for attempt in $(seq 1 150)" in installer

@@ -850,7 +850,7 @@ services:
       retries: 3
 
   mysql:
-    image: mysql:8.0
+    image: mysql:latest
     env_file: .env
     network_mode: host
     restart: always

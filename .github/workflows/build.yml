@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - master
+      - agent/admin-hierarchy-v4.9.0
     tags:
       - "v*"
   workflow_dispatch:
@@ -16,6 +17,11 @@ on:
         description: Container image tag
         required: true
         default: latest
+      tests_only:
+        description: Run compatibility tests without building an application image
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -27,10 +33,17 @@ concurrency:
 
 jobs:
   test-mysql:
+    name: test-mysql (${{ matrix.mysql-image }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mysql-image:
+          - mysql:8.0
+          - mysql:latest
     services:
       mysql:
-        image: mysql:8.0
+        image: ${{ matrix.mysql-image }}
         env:
           MYSQL_ROOT_PASSWORD: root-test-password
           MYSQL_DATABASE: marzban_test
@@ -73,18 +86,19 @@ jobs:
           tests/test_mysql_admin_hierarchy_migration.py
 
       - name: Verify backup checksum and restore
-        env:
-          MYSQL_PWD: root-test-password
         run: |
-          sudo apt-get update
-          sudo apt-get install -y default-mysql-client
-          mysqldump --host=127.0.0.1 --user=root --single-transaction --routines --triggers marzban_test > /tmp/marzban_test.sql
+          mysql_container="$(docker ps --filter publish=3306 --format '{{.ID}}' | head -1)"
+          test -n "${mysql_container}"
+          docker exec -e MYSQL_PWD=root-test-password "${mysql_container}" \
+            mysqldump --user=root --single-transaction --routines --triggers marzban_test > /tmp/marzban_test.sql
           sha256sum /tmp/marzban_test.sql | tee /tmp/marzban_test.sql.sha256
           test -s /tmp/marzban_test.sql
-          mysql --host=127.0.0.1 --user=root -e "DROP DATABASE IF EXISTS marzban_restore; CREATE DATABASE marzban_restore CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-          mysql --host=127.0.0.1 --user=root marzban_restore < /tmp/marzban_test.sql
-          source_count="$(mysql --host=127.0.0.1 --user=root --batch --skip-column-names -e 'SELECT COUNT(*) FROM marzban_test.admins')"
-          restore_count="$(mysql --host=127.0.0.1 --user=root --batch --skip-column-names -e 'SELECT COUNT(*) FROM marzban_restore.admins')"
+          docker exec -e MYSQL_PWD=root-test-password "${mysql_container}" mysql --user=root \
+            -e "DROP DATABASE IF EXISTS marzban_restore; CREATE DATABASE marzban_restore CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+          docker exec -i -e MYSQL_PWD=root-test-password "${mysql_container}" \
+            mysql --user=root marzban_restore < /tmp/marzban_test.sql
+          source_count="$(docker exec -e MYSQL_PWD=root-test-password "${mysql_container}" mysql --user=root --batch --skip-column-names -e 'SELECT COUNT(*) FROM marzban_test.admins')"
+          restore_count="$(docker exec -e MYSQL_PWD=root-test-password "${mysql_container}" mysql --user=root --batch --skip-column-names -e 'SELECT COUNT(*) FROM marzban_restore.admins')"
           test "${source_count}" = "${restore_count}"
 
       - name: Verify v4.8.0 application rollback compatibility
@@ -98,6 +112,7 @@ jobs:
 
   build-docker-image:
     needs: test-mysql
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.tests_only != true }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
