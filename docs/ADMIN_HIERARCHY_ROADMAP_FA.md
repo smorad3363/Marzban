@@ -2,7 +2,7 @@
 
 آخرین به‌روزرسانی: `2026-08-19`
 
-وضعیت: `IMPLEMENTED_LOCALLY_RELEASE_GATED` — schema، backend، API، CLI و UI نسخه `4.9.0` پیاده شده‌اند و suite محلی سبز است؛ اجرای واقعی MySQL 8.0 و احراز هویت GitHub برای انتشار باقی مانده‌اند. تا تعیین Owner، رفتار اجرایی قدیمی `is_sudo` حفظ می‌شود.
+وضعیت: `V4.9.1_RELEASE_RETRY_PENDING` — schema، backend، API، CLI و UI پیاده شده‌اند. اجرای واقعی MySQL 8.0 برای `v4.9.0` خطای `3818` مربوط به `AUTO_INCREMENT` در جدول singleton را آشکار کرد؛ اصلاح `autoincrement=False` برای `v4.9.1` آماده آزمون است. تا تعیین Owner، رفتار اجرایی قدیمی `is_sudo` حفظ می‌شود.
 
 ## قانون اجباری شروع هر چت و هر جلسه
 
@@ -782,7 +782,7 @@ reason codeهای حداقلی برای لاگ parent:
 
 ## نقطه دقیق ادامه
 
-مرحله بعد: commit محلی `14d9592` روی branch `agent/admin-hierarchy-v4.9.0` آماده است. با credential معتبر GitHub، branch و tag `v4.9.0` push شوند تا workflow اجباری MySQL 8.0، partial-DDL recovery، backup/checksum/restore و rollback application `v4.8.0` را اجرا کند. دانلود Oracle CDN و WinGet در `2026-08-19` با `403 Forbidden` متوقف شد و هیچ باینری ناشناخته‌ای پذیرفته نشد. suite محلی `82 passed, 2 skipped` است؛ دو skip دقیقاً گیت‌های MySQL هستند. TypeScript، production build، `compileall`، `bash -n`، YAML parse، `git diff --check` و Graphify update موفق‌اند. انتشار تا سبزشدن workflow و احراز هویت GitHub ممنوع است.
+مرحله بعد: اصلاح MySQL برای `v4.9.1` commit شود؛ سپس branch و tag جدید `v4.9.1` push و workflow تا پایان دنبال شود. tag تغییرناپذیر `v4.9.0` روی `dc357cc` باقی می‌ماند و جابه‌جا یا حذف نمی‌شود. اجرای `32195714228` در job `95899175897` با خطای دقیق `(3818, "Check constraint 'ck_admin_hierarchy_settings_singleton' cannot refer to an auto-increment column.")` شکست خورد و build/release همان اجرا skip شد. suite اصلاح‌شده `83 passed, 2 skipped`، compileall، YAML و `git diff --check` سبز هستند؛ Graphify با `4796 nodes/10304 edges/442 communities` همگام شد. انتشار فقط پس از موفقیت MySQL 8.0، partial-DDL recovery، backup/checksum/restore و rollback application `v4.8.0` انجام شود.
 
 ### گزارش DB برش foundation
 
@@ -829,3 +829,4 @@ git log -3 --oneline --decorate
 | `2026-08-18` | ۲/۳ | در حال اجرا | افزودن مدل و migration `e2a6c1f4b903`: role lookup، Parent nullable، external API flag، settings singleton خاموش، Owner singleton خالی و closure self-row؛ فایل‌ها: `app/db/models.py`، migration جدید، `tests/test_admin_hierarchy_migration.py`، `tests/test_marzhelp_migration_backup.py` | `—` working tree | `2 passed` migration legacy/partial-rerun؛ `1 passed` full Alembic chain؛ `9 passed` Admin regression؛ MySQL test=`skipped` چون `MYSQL_TEST_URL` موجود نیست؛ `compileall` و `git diff --check` موفق؛ Graphify تا HEAD `fd73e03` به‌روزرسانی شد؛ `alembic heads` محلی به‌علت نبود Xray binary شکست خورد و بررسی AST head=`e2a6c1f4b903` را تأیید کرد | اجرای migration روی clone واقعی MySQL 8.0 و ثبت backup/restore/partial-DDL/rollback evidence |
 | `2026-08-19` | ۲ تا ۶ | در حال اجرا | توسعه migration با ledger/token/suspension/bulk/Plan؛ پیاده‌سازی closure scope، `set-owner`، انتقال اعتبار idempotent، توکن hash‌شده، تعلیق قابل‌بازگشت، bulk job cursor-resume، Plan immutable، renewal atomic، قطع خودکار، scope کاربران/audit/device/system و UI responsive hierarchy/Plan/account | `—` working tree | `23 passed` برای hierarchy service، migration، full chain و Admin regression؛ `compileall` موفق؛ TypeScript و گیت MySQL در حال تکمیل | رفع هر خطای build، اجرای کل suite و گیت MySQL 8.0؛ سپس Graphify و release |
 | `2026-08-19` | ۳ تا ۱۳ | پیاده‌سازی محلی کامل؛ گیت خارجی باز | تکمیل hierarchy/API/CLI/UI، تمدید مستقل با Plan، audit عملیات حساس، بستن conflict کلید idempotency، اصلاح جهت reclaim ledger، حذف دو index تکراری و حذف N+1 در tree؛ Graphify=`4796 nodes/10304 edges` | `14d9592` | `82 passed, 2 skipped`؛ skipها فقط MySQL؛ TypeScript=`0`، Vite production build=`0`، `compileall`=`0`، `bash -n`=`0`، YAML parse=`OK` | احراز هویت GitHub؛ push branch/tag `v4.9.0`؛ انتظار برای workflow MySQL/backup/rollback و انتشار |
+| `2026-08-19` | ۱۴ | شکست گیت MySQL؛ اصلاح محلی کامل | branch و tag `v4.9.0` push شدند؛ workflow `32195714228` در job `95899175897` با MySQL error `3818` شکست خورد، چون `SMALLINT` primary key جدول singleton به‌طور ضمنی `AUTO_INCREMENT` شده بود؛ build/release skip شد. برای `v4.9.1` شناسه شش جدول مرجع ثابت و singleton صریحاً `autoincrement=False` شد | `dc357cc` + working tree | `83 passed, 2 skipped`؛ تست DDL جدید هر شش جدول؛ compileall/YAML/diff-check سبز؛ Graphify=`4796/10304/442` | commit و tag `v4.9.1`؛ دنبال‌کردن workflow و release تا نتیجه نهایی |

@@ -173,7 +173,7 @@ def _create_extended_schema(bind: sa.Connection) -> None:
         if table not in tables:
             op.create_table(
                 table,
-                sa.Column("id", sa.SmallInteger(), nullable=False),
+                sa.Column("id", sa.SmallInteger(), autoincrement=False, nullable=False),
                 sa.Column("code", sa.String(length=32), nullable=False),
                 sa.PrimaryKeyConstraint("id"),
                 sa.UniqueConstraint("code", name=f"uq_{table}_code"),
@@ -184,7 +184,7 @@ def _create_extended_schema(bind: sa.Connection) -> None:
     if "admin_suspension_reasons" not in tables:
         op.create_table(
             "admin_suspension_reasons",
-            sa.Column("id", sa.SmallInteger(), nullable=False),
+            sa.Column("id", sa.SmallInteger(), autoincrement=False, nullable=False),
             sa.Column("code", sa.String(length=64), nullable=False),
             sa.Column("description", sa.String(length=255), nullable=True),
             sa.PrimaryKeyConstraint("id"),
@@ -454,7 +454,7 @@ def upgrade() -> None:
     if "admin_roles" not in tables:
         op.create_table(
             "admin_roles",
-            sa.Column("id", sa.SmallInteger(), nullable=False),
+            sa.Column("id", sa.SmallInteger(), autoincrement=False, nullable=False),
             sa.Column("code", sa.String(length=32), nullable=False),
             sa.PrimaryKeyConstraint("id"),
             sa.UniqueConstraint("code", name="uq_admin_roles_code"),
@@ -493,7 +493,7 @@ def upgrade() -> None:
     if "admin_hierarchy_settings" not in tables:
         op.create_table(
             "admin_hierarchy_settings",
-            sa.Column("id", sa.SmallInteger(), nullable=False),
+            sa.Column("id", sa.SmallInteger(), autoincrement=False, nullable=False),
             sa.Column(
                 "enabled",
                 sa.Boolean(),
@@ -530,7 +530,7 @@ def upgrade() -> None:
     if "system_owner" not in tables:
         op.create_table(
             "system_owner",
-            sa.Column("id", sa.SmallInteger(), nullable=False),
+            sa.Column("id", sa.SmallInteger(), autoincrement=False, nullable=False),
             sa.Column("admin_id", sa.Integer(), nullable=False),
             sa.Column(
                 "assigned_at",

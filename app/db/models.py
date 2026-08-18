@@ -48,7 +48,7 @@ def utc_now_naive() -> datetime:
 class AdminRole(Base):
     __tablename__ = "admin_roles"
 
-    id = Column(SmallInteger, primary_key=True)
+    id = Column(SmallInteger, primary_key=True, autoincrement=False)
     code = Column(String(32), nullable=False, unique=True)
 
 
@@ -103,7 +103,7 @@ class Admin(Base):
 class AdminHierarchySettings(Base):
     __tablename__ = "admin_hierarchy_settings"
 
-    id = Column(SmallInteger, primary_key=True)
+    id = Column(SmallInteger, primary_key=True, autoincrement=False)
     enabled = Column(Boolean, nullable=False, default=False)
     max_depth = Column(Integer, nullable=False, default=64)
     updated_at = Column(
@@ -117,7 +117,7 @@ class AdminHierarchySettings(Base):
 class SystemOwner(Base):
     __tablename__ = "system_owner"
 
-    id = Column(SmallInteger, primary_key=True)
+    id = Column(SmallInteger, primary_key=True, autoincrement=False)
     admin_id = Column(
         Integer,
         ForeignKey("admins.id", ondelete="RESTRICT"),
@@ -156,21 +156,21 @@ class AdminHierarchy(Base):
 class AdminUserCreationMode(Base):
     __tablename__ = "admin_user_creation_modes"
 
-    id = Column(SmallInteger, primary_key=True)
+    id = Column(SmallInteger, primary_key=True, autoincrement=False)
     code = Column(String(32), nullable=False, unique=True)
 
 
 class AdminAccountStatus(Base):
     __tablename__ = "admin_account_statuses"
 
-    id = Column(SmallInteger, primary_key=True)
+    id = Column(SmallInteger, primary_key=True, autoincrement=False)
     code = Column(String(32), nullable=False, unique=True)
 
 
 class AdminSuspensionReason(Base):
     __tablename__ = "admin_suspension_reasons"
 
-    id = Column(SmallInteger, primary_key=True)
+    id = Column(SmallInteger, primary_key=True, autoincrement=False)
     code = Column(String(64), nullable=False, unique=True)
     description = Column(String(255), nullable=True)
 

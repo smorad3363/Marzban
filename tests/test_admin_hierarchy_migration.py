@@ -4,6 +4,17 @@ from pathlib import Path
 import sqlalchemy as sa
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from sqlalchemy.dialects import mysql
+from sqlalchemy.schema import CreateTable
+
+from app.db.models import (
+    AdminAccountStatus,
+    AdminHierarchySettings,
+    AdminRole,
+    AdminSuspensionReason,
+    AdminUserCreationMode,
+    SystemOwner,
+)
 
 
 MIGRATION_PATH = (
@@ -21,6 +32,19 @@ MIGRATION_SPEC = importlib.util.spec_from_file_location(
 assert MIGRATION_SPEC and MIGRATION_SPEC.loader
 migration = importlib.util.module_from_spec(MIGRATION_SPEC)
 MIGRATION_SPEC.loader.exec_module(migration)
+
+
+def test_fixed_identifier_tables_do_not_compile_mysql_auto_increment():
+    for model in (
+        AdminRole,
+        AdminHierarchySettings,
+        SystemOwner,
+        AdminUserCreationMode,
+        AdminAccountStatus,
+        AdminSuspensionReason,
+    ):
+        ddl = str(CreateTable(model.__table__).compile(dialect=mysql.dialect()))
+        assert "AUTO_INCREMENT" not in ddl
 
 
 def _legacy_schema(connection: sa.Connection) -> None:

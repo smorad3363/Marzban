@@ -78,6 +78,16 @@ def _assert_extended_schema(connection: sa.Connection) -> None:
     )
     create_sql = connection.execute(sa.text("SHOW CREATE TABLE admin_credit_transfers")).one()[1]
     assert "ENGINE=InnoDB" in create_sql
+    for table in (
+        "admin_roles",
+        "admin_hierarchy_settings",
+        "system_owner",
+        "admin_user_creation_modes",
+        "admin_account_statuses",
+        "admin_suspension_reasons",
+    ):
+        create_sql = connection.execute(sa.text(f"SHOW CREATE TABLE `{table}`")).one()[1]
+        assert "AUTO_INCREMENT" not in create_sql
 
 
 @pytest.mark.skipif(not MYSQL_URL, reason="TEST_MYSQL_DATABASE_URL is not configured")
