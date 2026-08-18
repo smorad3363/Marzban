@@ -49,7 +49,6 @@ import { AppShell } from "components/AppShell";
 import useGetUser from "hooks/useGetUser";
 import { FC, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Navigate } from "react-router-dom";
 import { useQuery } from "react-query";
 import { fetch } from "service/http";
 import { AuditLog, AuditLogList, AuditLogOptions, AuditValue } from "types/Audit";
@@ -167,10 +166,8 @@ export const AuditLogs: FC = () => {
     return params.toString();
   }, [filters, page]);
 
-  const optionsQuery = useQuery<AuditLogOptions>("audit-log-options", () => fetch("/audit-logs/options"), { enabled: userData.is_sudo });
-  const logsQuery = useQuery<AuditLogList, Error>(["audit-logs", queryString], () => fetch(`/audit-logs?${queryString}`), { keepPreviousData: true, enabled: userData.is_sudo });
-
-  if (!getUserIsPending && !userData.is_sudo) return <Navigate to="/" replace />;
+  const optionsQuery = useQuery<AuditLogOptions>("audit-log-options", () => fetch("/audit-logs/options"), { enabled: !getUserIsPending });
+  const logsQuery = useQuery<AuditLogList, Error>(["audit-logs", queryString], () => fetch(`/audit-logs?${queryString}`), { keepPreviousData: true, enabled: !getUserIsPending });
   const logs = logsQuery.data?.logs || [];
   const total = logsQuery.data?.total || 0;
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));

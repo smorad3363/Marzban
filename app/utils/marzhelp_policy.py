@@ -16,6 +16,7 @@ from app import logger, xray
 from app.device_limit.constants import SubscriptionMode
 from app.db.models import (
     Admin,
+    AdminHierarchySettings,
     MarzhelpAccountingTransaction,
     MarzhelpAdminSettings,
     MarzhelpDeletedUser,
@@ -177,6 +178,7 @@ def quota_summary(db: Session, admin_id: int) -> dict[str, Any]:
 def _quota_summary_values(
     settings: MarzhelpAdminSettings | None,
     *,
+    zero_is_finite: bool = False,
     current_users: int = 0,
     current_usage: int = 0,
     reset_usage: int = 0,
@@ -189,7 +191,11 @@ def _quota_summary_values(
         else int(current_usage) + int(reset_usage) + int(deleted_usage)
     )
     configured_limit = settings.total_traffic if settings is not None else None
-    limit = int(configured_limit) if configured_limit is not None and configured_limit > 0 else None
+    limit = (
+        int(configured_limit)
+        if configured_limit is not None and (configured_limit > 0 or zero_is_finite)
+        else None
+    )
     percent = round((used * 100) / limit, 2) if limit is not None else None
     admin_threshold = int(
         settings.admin_traffic_warning_percent or 80
@@ -241,6 +247,11 @@ def quota_summaries(
             .filter(MarzhelpAdminSettings.admin_id.in_(ids))
             .all()
         }
+    zero_is_finite = bool(
+        db.query(AdminHierarchySettings.enabled)
+        .filter(AdminHierarchySettings.id == 1)
+        .scalar()
+    )
 
     user_totals = {
         int(admin_id): (int(count or 0), int(used or 0))
@@ -277,6 +288,7 @@ def quota_summaries(
     return {
         admin_id: _quota_summary_values(
             settings_by_admin.get(admin_id),
+            zero_is_finite=zero_is_finite,
             current_users=user_totals.get(admin_id, (0, 0))[0],
             current_usage=user_totals.get(admin_id, (0, 0))[1],
             reset_usage=reset_totals.get(admin_id, 0),
@@ -463,8 +475,42 @@ def _adjust_user_count(db: Session, settings: MarzhelpAdminSettings, delta: int)
 
 
 def _validate_account(settings: MarzhelpAdminSettings) -> None:
+    if int(getattr(settings, "account_status_id", 1) or 1) != 1:
+        raise MarzhelpPolicyError(
+            "admin_account_read_only",
+            "MarzHelp: administrative account is suspended or disabled",
+        )
     if settings.expiry_date is not None and settings.expiry_date < date.today():
         raise MarzhelpPolicyError("admin_expired", "MarzHelp: admin account is expired")
+
+
+def _consume_renewal(db: Session, settings: MarzhelpAdminSettings) -> None:
+    if not bool(getattr(settings, "renewal_enabled", True)):
+        raise MarzhelpPolicyError(
+            "renewal_disabled",
+            "MarzHelp: renewal is disabled for this admin",
+        )
+    remaining = getattr(settings, "renewal_remaining", None)
+    if remaining is None:
+        return
+    result = db.execute(
+        update(MarzhelpAdminSettings)
+        .where(
+            MarzhelpAdminSettings.admin_id == settings.admin_id,
+            MarzhelpAdminSettings.renewal_remaining > 0,
+        )
+        .values(
+            renewal_remaining=MarzhelpAdminSettings.renewal_remaining - 1,
+            renewals_used=MarzhelpAdminSettings.renewals_used + 1,
+            updated_at=func.now(),
+        )
+    )
+    if result.rowcount != 1:
+        raise MarzhelpPolicyError(
+            "renewal_quota_exhausted",
+            "MarzHelp: renewal quota is exhausted",
+        )
+    db.expire(settings, ["renewal_remaining", "renewals_used"])
 
 
 def _validate_data_limit(settings: MarzhelpAdminSettings, data_limit: int | None) -> None:
@@ -545,11 +591,19 @@ def _validate_traffic_credit(
     unlimited_requested: bool = False,
 ) -> None:
     mode = settings.calculate_volume or "used_traffic"
+    hierarchy_on = bool(
+        db.query(AdminHierarchySettings.enabled)
+        .filter(AdminHierarchySettings.id == 1)
+        .scalar()
+    )
     limit = (
         int(settings.total_traffic)
-        if settings.total_traffic is not None and settings.total_traffic > 0
+        if settings.total_traffic is not None
+        and (settings.total_traffic > 0 or hierarchy_on)
         else None
     )
+    if limit is not None:
+        limit = max(limit - int(getattr(settings, "delegated_traffic", 0) or 0), 0)
     if mode == "created_traffic":
         if unlimited_requested and limit is not None:
             raise MarzhelpPolicyError(
@@ -830,6 +884,8 @@ def validate_update(db: Session, dbuser: User, modify: Any) -> tuple[bool, bool]
         _validate_expiration(settings, _effective_expire(modify.next_plan.expire))
 
     if allowance_operation:
+        if renewal:
+            _consume_renewal(db, settings)
         limited_allowance = settings.user_limit is not None
         _consume_allowance(db, settings)
         dbuser._marzhelp_allowance_delta = -1 if limited_allowance else 0

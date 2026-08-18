@@ -1276,6 +1276,15 @@ marzban_cli() {
     $COMPOSE -f $COMPOSE_FILE -p "$APP_NAME" exec -e CLI_PROG_NAME="marzban cli" marzban marzban-cli "$@"
 }
 
+set_owner_command() {
+    if [ "$#" -ne 1 ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+        colorized_echo red "Usage: marzban set-owner <username>"
+        [ "$#" -eq 1 ] && exit 0
+        exit 1
+    fi
+    cli_command admin set-owner --username "$1"
+}
+
 
 is_marzban_up() {
     if [ -z "$($COMPOSE -f $COMPOSE_FILE ps -q -a)" ]; then
@@ -1678,6 +1687,7 @@ usage() {
     colorized_echo yellow "  status          $(tput sgr0)– Show status"
     colorized_echo yellow "  logs            $(tput sgr0)– Show logs"
     colorized_echo yellow "  cli             $(tput sgr0)– Marzban CLI"
+    colorized_echo yellow "  set-owner       $(tput sgr0)– Select Owner and migrate the admin hierarchy"
     colorized_echo yellow "  install         $(tput sgr0)– Install Marzban"
     colorized_echo yellow "  update          $(tput sgr0)– Update to latest or an exact version"
     colorized_echo yellow "  rollback        $(tput sgr0)– Roll back to an exact version"
@@ -1712,6 +1722,8 @@ case "$1" in
         shift; logs_command "$@";;
     cli)
         shift; cli_command "$@";;
+    set-owner)
+        shift; set_owner_command "$@";;
     backup)
         shift; backup_command "$@";;
     backup-service)

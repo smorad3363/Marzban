@@ -11,7 +11,7 @@ def test_release_version_and_install_rollback_contract():
 
     app_version = re.search(r'^__version__ = "([0-9]+\.[0-9]+\.[0-9]+)"$', app_source, re.MULTILINE)
     assert app_version is not None
-    assert version == app_version.group(1) == "4.8.0"
+    assert version == app_version.group(1) == "4.9.0"
 
     assert 'MARZBAN_GITHUB_BRANCH="${MARZBAN_GITHUB_BRANCH:-master}"' in installer
     assert 'MARZBAN_DOCKER_IMAGE="${MARZBAN_DOCKER_IMAGE:-ghcr.io/smorad3363/marzban}"' in installer
@@ -21,6 +21,6 @@ def test_release_version_and_install_rollback_contract():
     assert '${IMAGE_NAME}:${VERSION_TAG}' in workflow
     assert 'gh release create "${VERSION_TAG}"' in workflow
 
+    assert "install --version v4.9.0 --database mysql" in release_docs
     assert "install --version v4.8.0 --database mysql" in release_docs
-    assert "install --version v4.7.1 --database mysql" in release_docs
-    assert "marzban rollback v4.7.1" in release_docs
+    assert "marzban rollback v4.8.0" in release_docs

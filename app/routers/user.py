@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app import logger, xray
 from app.db import Session, crud, get_db
+from app.db.models import Admin as DBAdmin, AdminHierarchy, MarzhelpAdminSettings
 from app.dependencies import get_expired_users_list, get_validated_user, validate_dates
 from app.models.admin import Admin
 from app.models.user import (
@@ -27,7 +28,7 @@ from app.models.user import (
     UsersUsagesResponse,
     UserUsagesResponse,
 )
-from app.utils import marzhelp_policy, report, responses
+from app.utils import admin_hierarchy, marzhelp_policy, report, responses
 from app.utils.audit import (
     AuditLogService,
     changed_fields,
@@ -65,6 +66,15 @@ def add_user(
 
     # TODO expire should be datetime instead of timestamp
 
+    dbadmin = crud.get_admin(db, admin.username)
+    if dbadmin is not None and admin_hierarchy.hierarchy_enabled(db):
+        settings = db.get(MarzhelpAdminSettings, dbadmin.id)
+        if settings is not None and settings.user_creation_mode_id == admin_hierarchy.USER_CREATION_MODE_IDS[admin_hierarchy.PLAN_ONLY]:
+            raise HTTPException(
+                status_code=403,
+                detail={"code": "plan_only", "message": "Use /api/users/from-plan for this administrator"},
+            )
+
     for proxy_type in new_user.proxies:
         if not xray.config.inbounds_by_protocol.get(proxy_type):
             raise HTTPException(
@@ -74,7 +84,7 @@ def add_user(
 
     try:
         dbuser = crud.create_user(
-            db, new_user, admin=crud.get_admin(db, admin.username)
+            db, new_user, admin=dbadmin
         )
     except IntegrityError:
         db.rollback()
@@ -314,6 +324,9 @@ def get_users(
                     status_code=400, detail=f'"{opt}" is not a valid sort option'
                 )
 
+    dbadmin = crud.get_admin(db, admin.username)
+    hierarchy_on = dbadmin is not None and admin_hierarchy.hierarchy_enabled(db)
+    owner_role = dbadmin is not None and admin_hierarchy.is_owner(db, dbadmin)
     users, count = crud.get_users(
         db=db,
         offset=offset,
@@ -322,7 +335,8 @@ def get_users(
         usernames=username,
         status=status,
         sort=sort,
-        admins=owner if admin.is_sudo else [admin.username],
+        admins=owner if (not hierarchy_on and admin.is_sudo) or owner_role else owner,
+        scope_admin_id=(dbadmin.id if hierarchy_on and not owner_role else None),
         allowed_inbounds=marzhelp_policy.allowed_inbound_tags(
             db, crud.get_admin(db, admin.username) or admin
         ),
@@ -357,15 +371,14 @@ def bulk_user_action(
     if missing:
         raise HTTPException(status_code=404, detail={"missing_users": missing})
 
-    if not admin.is_sudo:
-        effective_admin = crud.get_admin(db, admin.username) or admin
-        forbidden = [
-            user.username
-            for user in dbusers
-            if not marzhelp_policy.can_access_user(db, effective_admin, user)
-        ]
-        if forbidden:
-            raise HTTPException(status_code=403, detail={"forbidden_users": forbidden})
+    effective_admin = crud.get_admin(db, admin.username) or admin
+    forbidden = [
+        user.username
+        for user in dbusers
+        if not admin_hierarchy.can_access_user(db, effective_admin, user)
+    ]
+    if forbidden:
+        raise HTTPException(status_code=403, detail={"forbidden_users": forbidden})
 
     ordered_users = [users_by_username[username] for username in usernames]
 
@@ -594,11 +607,26 @@ def get_users_usage(
     """Get all users usage"""
     start, end = validate_dates(start, end)
 
+    actor = crud.get_admin(db, admin.username)
+    hierarchy_on = admin_hierarchy.hierarchy_enabled(db)
+    if hierarchy_on and actor is not None and not admin_hierarchy.is_owner(db, actor):
+        scoped_admins = [
+            row[0]
+            for row in db.query(DBAdmin.username)
+            .join(AdminHierarchy, AdminHierarchy.descendant_id == DBAdmin.id)
+            .filter(AdminHierarchy.ancestor_id == actor.id)
+            .all()
+        ]
+        selected_admins = (
+            sorted(set(owner).intersection(scoped_admins)) if owner else scoped_admins
+        )
+    else:
+        selected_admins = owner
     usages = crud.get_all_users_usages(
         db=db,
         start=start,
         end=end,
-        admin=owner if admin.is_sudo else [admin.username],
+        admin=selected_admins,
         allowed_inbounds=marzhelp_policy.allowed_inbound_tags(
             db, crud.get_admin(db, admin.username) or admin
         ),
@@ -651,7 +679,7 @@ def get_expired_users(
     expired_after: Optional[datetime] = Query(None, example="2024-01-01T00:00:00"),
     expired_before: Optional[datetime] = Query(None, example="2024-01-31T23:59:59"),
     db: Session = Depends(get_db),
-    admin: Admin = Depends(Admin.check_sudo_admin),
+    admin: Admin = Depends(Admin.get_current),
 ):
     """
     Get users who have expired within the specified date range.
@@ -675,7 +703,7 @@ def delete_expired_users(
     expired_after: Optional[datetime] = Query(None, example="2024-01-01T00:00:00"),
     expired_before: Optional[datetime] = Query(None, example="2024-01-31T23:59:59"),
     db: Session = Depends(get_db),
-    admin: Admin = Depends(Admin.check_sudo_admin),
+    admin: Admin = Depends(Admin.get_current),
 ):
     """
     Delete users who have expired within the specified date range.

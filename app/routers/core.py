@@ -7,10 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket
 from starlette.websockets import WebSocketDisconnect
 
 from app import xray
-from app.db import Session, get_db
+from app.db import Session, crud, get_db
 from app.models.admin import Admin
 from app.models.core import CoreStats
-from app.utils import responses
+from app.utils import admin_hierarchy, responses
 from app.utils.audit import AuditLogService
 from app.xray import XRayConfig
 from config import XRAY_JSON
@@ -27,7 +27,8 @@ async def core_logs(websocket: WebSocket, db: Session = Depends(get_db)):
     if not admin:
         return await websocket.close(reason="Unauthorized", code=4401)
 
-    if not admin.is_sudo:
+    dbadmin = crud.get_admin(db, admin.username)
+    if admin.auth_method != "session" or dbadmin is None or not admin_hierarchy.is_owner(db, dbadmin):
         return await websocket.close(reason="You're not allowed", code=4403)
 
     interval = websocket.query_params.get("interval")
@@ -77,7 +78,7 @@ async def core_logs(websocket: WebSocket, db: Session = Depends(get_db)):
 
 
 @router.get("/core", response_model=CoreStats)
-def get_core_stats(admin: Admin = Depends(Admin.get_current)):
+def get_core_stats(admin: Admin = Depends(Admin.check_sudo_admin)):
     """Retrieve core statistics such as version and uptime."""
     return CoreStats(
         version=xray.core.version,

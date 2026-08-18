@@ -53,10 +53,10 @@ def test_bulk_request_rejects_empty_selection():
         BulkUserActionRequest(usernames=[], operation=BulkUserOperation.delete)
 
 
-def test_expired_cleanup_routes_require_sudo_admin():
+def test_expired_cleanup_routes_use_scoped_current_admin():
     for handler in (get_expired_users, delete_expired_users):
         dependency = signature(handler).parameters["admin"].default.dependency
-        assert dependency.__func__ is APIAdmin.check_sudo_admin.__func__
+        assert dependency.__func__ is APIAdmin.get_current.__func__
 
 
 def test_users_can_be_sorted_by_owner_admin(session):

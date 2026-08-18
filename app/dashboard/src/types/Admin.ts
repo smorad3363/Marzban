@@ -28,8 +28,12 @@ export type AdminPolicy = {
 };
 
 export type ManagedAdmin = {
+  id: number;
   username: string;
   is_sudo: boolean;
+  role: "OWNER" | "SUPER_ADMIN" | "ADMIN";
+  parent_admin_id: number | null;
+  external_api_enabled: boolean;
   telegram_id: number | null;
   discord_webhook: string | null;
   users_usage: number | null;
@@ -62,8 +66,67 @@ export type ManagedAdminList = {
   limit: number;
 };
 
-export type ManagedAdminPayload = Omit<ManagedAdmin, "users_usage" | "user_count" | "capacity_used" | "quota"> & {
+export type ManagedAdminPayload = Omit<
+  ManagedAdmin,
+  "id" | "parent_admin_id" | "external_api_enabled" | "users_usage" | "user_count" | "capacity_used" | "quota"
+> & {
   password?: string;
+};
+
+export type HierarchyAdminNode = {
+  id: number;
+  username: string;
+  role: "OWNER" | "SUPER_ADMIN" | "ADMIN";
+  parent_admin_id: number | null;
+  depth: number;
+  external_api_enabled: boolean;
+  account_status: "ACTIVE" | "SUSPENDED" | "DISABLED";
+  total_traffic: number | null;
+  delegated_traffic: number;
+  own_spend: number;
+  available_traffic: number | null;
+  children: HierarchyAdminNode[];
+};
+
+export type AccountSummary = {
+  username: string;
+  role: "OWNER" | "SUPER_ADMIN" | "ADMIN";
+  account_status: "ACTIVE" | "SUSPENDED" | "DISABLED";
+  suspended_reason: string | null;
+  suspended_at: string | null;
+  own_users: number;
+  subtree_users: number;
+  total_traffic: number | null;
+  delegated_traffic: number;
+  own_spend: number;
+  available_traffic: number | null;
+  renewal_enabled: boolean;
+  renewal_remaining: number | null;
+  user_creation_mode: "FREE_FORM" | "PLAN_ONLY";
+  can_manage_plans: boolean;
+};
+
+export type UserPlanVersion = {
+  data_limit: number;
+  duration_days: number;
+  concurrent_user_limit: number | null;
+  reset_strategy: "no_reset" | "day" | "week" | "month" | "year";
+  renewal_volume_strategy: "replace";
+  renewal_time_strategy: "extend_max";
+  inbounds: string[];
+};
+
+export type UserPlan = {
+  id: number;
+  owner_admin_id: number;
+  name: string;
+  description: string | null;
+  current_version_id: number;
+  version_number: number;
+  archived_at: string | null;
+  version: UserPlanVersion;
+  allowed_admin_ids: number[];
+  include_subtree: boolean;
 };
 
 export type AdminCapabilities = {

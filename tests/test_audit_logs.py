@@ -128,7 +128,7 @@ def test_audit_query_filters_combined_and_uses_server_pagination(tmp_path):
         date_to=date(2026, 8, 15),
         sort="newest",
         db=db,
-        _=Admin(username="sudo", is_sudo=True),
+        admin=Admin(username="sudo", is_sudo=True),
     )
 
     assert result.total == 1

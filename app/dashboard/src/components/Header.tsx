@@ -21,6 +21,7 @@ import {
   UserGroupIcon,
   UsersIcon,
   ShieldCheckIcon,
+  RectangleStackIcon,
 } from "@heroicons/react/24/outline";
 import { useDashboard } from "contexts/DashboardContext";
 import useGetUser from "hooks/useGetUser";
@@ -42,6 +43,7 @@ const UsersNavIcon = chakra(UsersIcon, iconProps);
 const AdminsNavIcon = chakra(UserGroupIcon, iconProps);
 const AuditNavIcon = chakra(ClipboardDocumentListIcon, iconProps);
 const DeviceLimitNavIcon = chakra(ShieldCheckIcon, iconProps);
+const PlansNavIcon = chakra(RectangleStackIcon, iconProps);
 
 type ActionButtonProps = {
   icon: ReactElement;
@@ -70,7 +72,8 @@ const ActionButton: FC<ActionButtonProps> = ({ icon, label, onClick, danger }) =
 
 export const Header: FC = () => {
   const { userData, getUserIsSuccess, getUserIsPending } = useGetUser();
-  const isSudo = !getUserIsPending && getUserIsSuccess && userData.is_sudo;
+  const isOwner = !getUserIsPending && getUserIsSuccess && (userData.is_sudo || userData.role === "OWNER");
+  const canManage = isOwner || userData.role === "SUPER_ADMIN";
   const { onEditingHosts, onResetAllUsage, onEditingNodes, onShowingNodesUsage } = useDashboard();
   const { t } = useTranslation();
   const location = useLocation();
@@ -78,7 +81,8 @@ export const Header: FC = () => {
   const isAdminsPage = location.pathname.startsWith("/admins");
   const isAuditPage = location.pathname.startsWith("/audit-logs");
   const isDeviceLimitPage = location.pathname.startsWith("/device-limits");
-  const isUsersPage = !isAdminsPage && !isAuditPage && !isDeviceLimitPage;
+  const isPlansPage = location.pathname.startsWith("/plans");
+  const isUsersPage = !isAdminsPage && !isAuditPage && !isDeviceLimitPage && !isPlansPage;
   const logout = async () => {
     try {
       await fetch("/admin/logout", { method: "POST" });
@@ -121,7 +125,7 @@ export const Header: FC = () => {
       </HStack>
 
       <Text display={{ base: "none", lg: "block" }} mt={8} mb={2} px={2} fontSize="xs" color="gray.500" fontFamily="mono" letterSpacing=".1em" textTransform="uppercase">Navigation</Text>
-      <SimpleGrid as="nav" aria-label="Primary navigation" columns={{ base: isSudo ? 2 : 1, sm: isSudo ? 4 : 1, lg: 1 }} spacing={2} mt={{ base: 4, lg: 0 }}>
+      <SimpleGrid as="nav" aria-label="Primary navigation" columns={{ base: 2, sm: 4, lg: 1 }} spacing={2} mt={{ base: 4, lg: 0 }}>
         <Button
           as={Link}
           to="/"
@@ -134,7 +138,19 @@ export const Header: FC = () => {
           justifyContent="flex-start"
           aria-current={isUsersPage ? "page" : undefined}
         >{t("users")}</Button>
-        {isSudo && (
+        <Button
+          as={Link}
+          to="/plans/"
+          size="md"
+          variant={isPlansPage ? "solid" : "ghost"}
+          colorScheme={isPlansPage ? "primary" : "gray"}
+          color={isPlansPage ? "#07130e" : "gray.200"}
+          _hover={isPlansPage ? undefined : { bg: "whiteAlpha.100", color: "white" }}
+          leftIcon={<PlansNavIcon />}
+          justifyContent="flex-start"
+          aria-current={isPlansPage ? "page" : undefined}
+        >پلن‌ها</Button>
+        {canManage && (
           <Button
             as={Link}
             to="/admins/"
@@ -148,7 +164,7 @@ export const Header: FC = () => {
             aria-current={isAdminsPage ? "page" : undefined}
           >{t("admins.nav")}</Button>
         )}
-        {isSudo && (
+        {(
           <Button
             as={Link}
             to="/device-limits/"
@@ -162,7 +178,7 @@ export const Header: FC = () => {
             aria-current={isDeviceLimitPage ? "page" : undefined}
           >{t("deviceLimit.nav")}</Button>
         )}
-        {isSudo && (
+        {(
           <Button
             as={Link}
             to="/audit-logs/"
@@ -178,7 +194,7 @@ export const Header: FC = () => {
         )}
       </SimpleGrid>
 
-      {isSudo && (
+      {isOwner && (
         <Box mt={{ base: 4, lg: 7 }} pt={{ base: 4, lg: 0 }} borderTopWidth={{ base: "1px", lg: "0" }} borderColor="whiteAlpha.200">
           <Text mb={2} px={2} fontSize="xs" color="gray.500" fontFamily="mono" letterSpacing=".1em" textTransform="uppercase">{t("core.configuration")}</Text>
           <SimpleGrid columns={{ base: 2, sm: 3, lg: 1 }} spacing={1}>

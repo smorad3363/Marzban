@@ -15,6 +15,7 @@ const useGetUser = (): UseGetUserReturn => {
     const userDataEmpty: UserApi =  {
         discord_webook: "",
         is_sudo: false,
+        role: null,
         telegram_id: "",
         username: ""
       }

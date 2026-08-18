@@ -11,11 +11,45 @@ from sqlalchemy.exc import IntegrityError
 from app.db import GetDB, crud
 from app.db.models import Admin, User
 from app.models.admin import AdminCreate, AdminPartialModify
+from app.utils import admin_hierarchy
 from app.utils.system import readable_size
+from config import SUDOERS
 
 from . import utils
 
 app = typer.Typer(no_args_is_help=True)
+
+
+@app.command(name="set-owner")
+def set_system_owner(
+    username: str = typer.Option(..., *utils.FLAGS["username"], prompt=True),
+):
+    """Atomically select Owner and backfill the legacy admin hierarchy."""
+    with GetDB() as db:
+        try:
+            current = crud.get_admin(db, username=username)
+            env_password = SUDOERS.get(username)
+            if current is None and env_password:
+                crud.create_admin(
+                    db,
+                    AdminCreate(username=username, password=env_password, is_sudo=True),
+                    commit=False,
+                )
+            elif current is not None and env_password:
+                crud.partial_update_admin(
+                    db,
+                    current,
+                    AdminPartialModify(password=env_password, is_sudo=True),
+                    commit=False,
+                )
+            result = admin_hierarchy.set_owner(db, username)
+        except admin_hierarchy.HierarchyError as exc:
+            utils.error(f"{exc.code}: {exc}")
+        utils.success(
+            f'Owner "{result["owner"]}" assigned successfully.\n'
+            f'Admins: {result["admin_count"]}; closure rows: {result["closure_rows"]}.\n'
+            f'Reason counts: {result["reason_counts"]}'
+        )
 
 
 def validate_telegram_id(value: Union[int, str]) -> Union[int, None]:
@@ -99,7 +133,6 @@ def delete_admin(
 @app.command(name="create")
 def create_admin(
     username: str = typer.Option(..., *utils.FLAGS["username"], show_default=False, prompt=True),
-    is_sudo: bool = typer.Option(False, *utils.FLAGS["is_sudo"], prompt=True),
     password: str = typer.Option(..., prompt=True, confirmation_prompt=True,
                                  hide_input=True, hidden=True, envvar=utils.PASSWORD_ENVIRON_NAME),
     telegram_id: str = typer.Option('', *utils.FLAGS["telegram_id"], prompt="Telegram ID",
@@ -116,7 +149,7 @@ def create_admin(
         try:
             crud.create_admin(db, AdminCreate(username=username,
                                               password=password,
-                                              is_sudo=is_sudo,
+                                              is_sudo=False,
                                               telegram_id=telegram_id,
                                               discord_webhook=discord_webhook))
             utils.success(f'Admin "{username}" created successfully.')
@@ -137,7 +170,6 @@ def update_admin(username: str = typer.Option(..., *utils.FLAGS["username"], pro
             Panel(f'Editing "{username}". Just press "Enter" to leave each field unchanged.')
         )
 
-        is_sudo: bool = typer.confirm("Is sudo", default=admin.is_sudo)
         new_password: Union[str, None] = typer.prompt(
             "New password",
             default="",
@@ -155,7 +187,6 @@ def update_admin(username: str = typer.Option(..., *utils.FLAGS["username"], pro
         discord_webhook = validate_discord_webhook(discord_webhook)
 
         return AdminPartialModify(
-            is_sudo=is_sudo,
             password=new_password,
             telegram_id=telegram_id,
             discord_webhook=discord_webhook

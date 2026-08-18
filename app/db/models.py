@@ -5,6 +5,7 @@ from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    CheckConstraint,
     Column,
     Date,
     DateTime,
@@ -13,7 +14,9 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     Numeric,
+    SmallInteger,
     String,
     Table,
     Text,
@@ -42,8 +45,18 @@ def utc_now_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+class AdminRole(Base):
+    __tablename__ = "admin_roles"
+
+    id = Column(SmallInteger, primary_key=True)
+    code = Column(String(32), nullable=False, unique=True)
+
+
 class Admin(Base):
     __tablename__ = "admins"
+    __table_args__ = (
+        Index("ix_admins_parent_id", "parent_admin_id", "id"),
+    )
 
     id = Column(Integer, primary_key=True)
     username = Column(String(34), unique=True, index=True)
@@ -56,6 +69,286 @@ class Admin(Base):
     discord_webhook = Column(String(1024), nullable=True, default=None)
     users_usage = Column(BigInteger, nullable=False, default=0)
     usage_logs = relationship("AdminUsageLogs", back_populates="admin")
+    role_id = Column(
+        SmallInteger,
+        ForeignKey("admin_roles.id"),
+        nullable=True,
+    )
+    parent_admin_id = Column(
+        Integer,
+        ForeignKey("admins.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    external_api_enabled = Column(Boolean, nullable=False, default=False)
+    external_api_updated_by = Column(
+        Integer,
+        ForeignKey("admins.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    external_api_updated_at = Column(DateTime, nullable=True)
+    role = relationship("AdminRole")
+    parent = relationship(
+        "Admin",
+        foreign_keys=[parent_admin_id],
+        remote_side=[id],
+        back_populates="children",
+    )
+    children = relationship(
+        "Admin",
+        foreign_keys=[parent_admin_id],
+        back_populates="parent",
+    )
+
+
+class AdminHierarchySettings(Base):
+    __tablename__ = "admin_hierarchy_settings"
+
+    id = Column(SmallInteger, primary_key=True)
+    enabled = Column(Boolean, nullable=False, default=False)
+    max_depth = Column(Integer, nullable=False, default=64)
+    updated_at = Column(
+        DateTime,
+        nullable=False,
+        default=utc_now_naive,
+        onupdate=utc_now_naive,
+    )
+
+
+class SystemOwner(Base):
+    __tablename__ = "system_owner"
+
+    id = Column(SmallInteger, primary_key=True)
+    admin_id = Column(
+        Integer,
+        ForeignKey("admins.id", ondelete="RESTRICT"),
+        nullable=False,
+        unique=True,
+    )
+    assigned_at = Column(DateTime, nullable=False, default=utc_now_naive)
+    admin = relationship("Admin", foreign_keys=[admin_id])
+
+
+class AdminHierarchy(Base):
+    __tablename__ = "admin_hierarchy"
+    __table_args__ = (
+        CheckConstraint("depth >= 0", name="ck_admin_hierarchy_depth_nonnegative"),
+        Index(
+            "ix_admin_hierarchy_descendant_ancestor_depth",
+            "descendant_id",
+            "ancestor_id",
+            "depth",
+        ),
+    )
+
+    ancestor_id = Column(
+        Integer,
+        ForeignKey("admins.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    descendant_id = Column(
+        Integer,
+        ForeignKey("admins.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    depth = Column(Integer, nullable=False)
+
+
+class AdminUserCreationMode(Base):
+    __tablename__ = "admin_user_creation_modes"
+
+    id = Column(SmallInteger, primary_key=True)
+    code = Column(String(32), nullable=False, unique=True)
+
+
+class AdminAccountStatus(Base):
+    __tablename__ = "admin_account_statuses"
+
+    id = Column(SmallInteger, primary_key=True)
+    code = Column(String(32), nullable=False, unique=True)
+
+
+class AdminSuspensionReason(Base):
+    __tablename__ = "admin_suspension_reasons"
+
+    id = Column(SmallInteger, primary_key=True)
+    code = Column(String(64), nullable=False, unique=True)
+    description = Column(String(255), nullable=True)
+
+
+class AdminCreditTransfer(Base):
+    __tablename__ = "admin_credit_transfers"
+    __table_args__ = (
+        Index("ix_admin_credit_from_created", "from_admin_id", "created_at", "id"),
+        Index("ix_admin_credit_to_created", "to_admin_id", "created_at", "id"),
+        Index("ix_admin_credit_actor_created", "actor_admin_id", "created_at", "id"),
+        CheckConstraint("amount > 0", name="ck_admin_credit_transfer_amount_positive"),
+    )
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    from_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=True)
+    to_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=True)
+    actor_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
+    amount = Column(BigInteger, nullable=False)
+    operation_type = Column(String(32), nullable=False)
+    idempotency_key = Column(String(128), nullable=False, unique=True)
+    created_at = Column(DateTime, nullable=False, default=utc_now_naive)
+    note = Column(String(512), nullable=True)
+
+
+class AdminApiToken(Base):
+    __tablename__ = "admin_api_tokens"
+    __table_args__ = (
+        Index("ix_admin_api_tokens_active", "admin_id", "revoked_at", "expires_at", "id"),
+    )
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    admin_id = Column(Integer, ForeignKey("admins.id", ondelete="CASCADE"), nullable=False)
+    token_hash = Column(LargeBinary(32), nullable=False, unique=True)
+    name = Column(String(96), nullable=False)
+    scopes = Column(JSON, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    last_used_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+    created_by_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=utc_now_naive)
+
+
+class AdminSuspensionEvent(Base):
+    __tablename__ = "admin_suspension_events"
+    __table_args__ = (
+        Index("ix_admin_suspension_target_started", "admin_id", "started_at", "id"),
+    )
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
+    actor_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
+    reason_id = Column(SmallInteger, ForeignKey("admin_suspension_reasons.id"), nullable=False)
+    limits_snapshot = Column(JSON, nullable=True)
+    status = Column(String(24), nullable=False, default="processing")
+    started_at = Column(DateTime, nullable=False, default=utc_now_naive)
+    resolved_at = Column(DateTime, nullable=True)
+
+
+class AdminSuspensionUser(Base):
+    __tablename__ = "admin_suspension_users"
+    __table_args__ = (
+        Index("ix_admin_suspension_user_cursor", "event_id", "sync_status", "user_id"),
+    )
+
+    event_id = Column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        ForeignKey("admin_suspension_events.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    previous_status = Column(String(32), nullable=False)
+    applied_status = Column(String(32), nullable=False)
+    sync_status = Column(String(24), nullable=False, default="pending")
+
+
+class AdminBulkJob(Base):
+    __tablename__ = "admin_bulk_jobs"
+    __table_args__ = (
+        Index("ix_admin_bulk_jobs_actor_created", "actor_admin_id", "created_at", "id"),
+        Index("ix_admin_bulk_jobs_status_cursor", "status", "last_user_id", "id"),
+    )
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    actor_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
+    target_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
+    operation = Column(String(32), nullable=False)
+    include_subtree = Column(Boolean, nullable=False, default=False)
+    status = Column(String(24), nullable=False, default="pending")
+    total_count = Column(BigInteger, nullable=False, default=0)
+    processed_count = Column(BigInteger, nullable=False, default=0)
+    last_user_id = Column(Integer, nullable=True)
+    idempotency_key = Column(String(128), nullable=False, unique=True)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utc_now_naive)
+    updated_at = Column(DateTime, nullable=False, default=utc_now_naive, onupdate=utc_now_naive)
+
+
+class AdminUserPlan(Base):
+    __tablename__ = "admin_user_plans"
+    __table_args__ = (
+        Index("ix_admin_user_plans_owner_active", "owner_admin_id", "archived_at", "id"),
+        UniqueConstraint("owner_admin_id", "name", name="uq_admin_user_plans_owner_name"),
+    )
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    owner_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
+    name = Column(String(128), nullable=False)
+    description = Column(String(512), nullable=True)
+    current_version_id = Column(BigInteger().with_variant(Integer, "sqlite"), nullable=True)
+    archived_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utc_now_naive)
+    updated_at = Column(DateTime, nullable=False, default=utc_now_naive, onupdate=utc_now_naive)
+
+
+class AdminUserPlanVersion(Base):
+    __tablename__ = "admin_user_plan_versions"
+    __table_args__ = (
+        UniqueConstraint("plan_id", "version_number", name="uq_admin_plan_version_number"),
+        CheckConstraint("version_number > 0", name="ck_admin_plan_version_positive"),
+    )
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    plan_id = Column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        ForeignKey("admin_user_plans.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    version_number = Column(Integer, nullable=False)
+    data_limit = Column(BigInteger, nullable=False)
+    duration_days = Column(Integer, nullable=False)
+    concurrent_user_limit = Column(Integer, nullable=True)
+    reset_strategy = Column(String(32), nullable=False)
+    renewal_volume_strategy = Column(String(32), nullable=False, default="replace")
+    renewal_time_strategy = Column(String(32), nullable=False, default="extend_max")
+    created_by_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=utc_now_naive)
+
+
+class AdminUserPlanInbound(Base):
+    __tablename__ = "admin_user_plan_inbounds"
+
+    version_id = Column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        ForeignKey("admin_user_plan_versions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    inbound_tag = Column(String(256), primary_key=True)
+
+
+class AdminUserPlanAccess(Base):
+    __tablename__ = "admin_user_plan_access"
+    __table_args__ = (
+        Index("ix_admin_user_plan_access_plan_admin", "plan_id", "admin_id"),
+    )
+
+    admin_id = Column(Integer, ForeignKey("admins.id", ondelete="CASCADE"), primary_key=True)
+    plan_id = Column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        ForeignKey("admin_user_plans.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    include_subtree = Column(Boolean, nullable=False, default=False)
+
+
+class UserPlanAssignment(Base):
+    __tablename__ = "user_plan_assignments"
+    __table_args__ = (
+        Index("ix_user_plan_assignments_user_created", "user_id", "created_at", "id"),
+    )
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    plan_id = Column(BigInteger().with_variant(Integer, "sqlite"), ForeignKey("admin_user_plans.id"), nullable=False)
+    version_id = Column(BigInteger().with_variant(Integer, "sqlite"), ForeignKey("admin_user_plan_versions.id"), nullable=False)
+    actor_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
+    operation_type = Column(String(24), nullable=False)
+    idempotency_key = Column(String(128), nullable=False, unique=True)
+    created_at = Column(DateTime, nullable=False, default=utc_now_naive)
 
 
 class AdminUsageLogs(Base):
@@ -129,6 +422,7 @@ class MarzhelpAdminSettings(Base):
 
     admin_id = Column(Integer, ForeignKey("admins.id"), primary_key=True)
     total_traffic = Column(BigInteger, nullable=True)
+    delegated_traffic = Column(BigInteger, nullable=False, default=0)
     used_traffic = Column(BigInteger, nullable=False, default=0)
     expiry_date = Column(Date, nullable=True)
     status = Column(JSON, nullable=True)
@@ -144,6 +438,37 @@ class MarzhelpAdminSettings(Base):
     provisioning_volume_used = Column(BigInteger, nullable=False, default=0)
     renewal_limit = Column(BigInteger, nullable=True)
     renewals_used = Column(BigInteger, nullable=False, default=0)
+    renewal_enabled = Column(Boolean, nullable=False, default=True)
+    renewal_remaining = Column(BigInteger, nullable=True)
+    user_creation_mode_id = Column(
+        SmallInteger,
+        ForeignKey("admin_user_creation_modes.id"),
+        nullable=False,
+        default=1,
+    )
+    can_manage_plans = Column(Boolean, nullable=False, default=False)
+    account_status_id = Column(
+        SmallInteger,
+        ForeignKey("admin_account_statuses.id"),
+        nullable=False,
+        default=1,
+    )
+    suspended_reason_id = Column(
+        SmallInteger,
+        ForeignKey("admin_suspension_reasons.id"),
+        nullable=True,
+    )
+    suspended_at = Column(DateTime, nullable=True)
+    suspended_by_admin_id = Column(
+        Integer,
+        ForeignKey("admins.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    suspension_event_id = Column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        ForeignKey("admin_suspension_events.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     admin_traffic_warning_percent = Column(Integer, nullable=False, default=80)
     sudo_traffic_warning_percent = Column(Integer, nullable=False, default=80)
     all_inbounds = Column(Boolean, nullable=False, default=True)

@@ -59,6 +59,7 @@ import {
   UserGroupIcon,
 } from "@heroicons/react/24/outline";
 import { AppShell } from "components/AppShell";
+import { AdminHierarchyPanel } from "components/AdminHierarchyPanel";
 import { useDashboard } from "contexts/DashboardContext";
 import useGetUser from "hooks/useGetUser";
 import { ChangeEvent, FC, FormEvent, useEffect, useRef, useState } from "react";
@@ -110,6 +111,7 @@ const emptyAdmin = (): ManagedAdminPayload => ({
   username: "",
   password: "",
   is_sudo: false,
+  role: "ADMIN",
   telegram_id: null,
   discord_webhook: null,
   policy: emptyPolicy(),
@@ -176,6 +178,7 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
       username: admin.username,
       password: "",
       is_sudo: admin.is_sudo,
+      role: admin.role,
       telegram_id: admin.telegram_id,
       discord_webhook: admin.discord_webhook,
       policy: { ...admin.policy },
@@ -317,23 +320,32 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
                   <Input value={form.discord_webhook || ""} onChange={(e) => setField("discord_webhook", e.target.value || null)} dir="ltr" />
                 </FormControl>
               </SimpleGrid>
-              <Checkbox mt={4} colorScheme="primary" isChecked={form.is_sudo} onChange={(e) => setField("is_sudo", e.target.checked)}>
-                {t("admins.sudoAccess")}
-              </Checkbox>
+              <FormControl mt={4} maxW={{ md: "320px" }}>
+                <FormLabel>{t("admins.role")}</FormLabel>
+                <Select
+                  value={form.role}
+                  isDisabled={isEditing}
+                  onChange={(event) => setField("role", event.target.value as ManagedAdminPayload["role"])}
+                >
+                  <option value="ADMIN">{t("admins.role.ADMIN")}</option>
+                  <option value="SUPER_ADMIN">{t("admins.role.SUPER_ADMIN")}</option>
+                </Select>
+                <FormHelperText>{t("admins.roleHelp")}</FormHelperText>
+              </FormControl>
             </Box>
 
             <Box p={{ base: 4, md: 5 }} bg="#0d1812" borderWidth="1px" borderColor="#33483b" borderRadius="12px">
               <Text fontWeight="700">{t("admins.limitsSection")}</Text>
               <Text color="gray.400" fontSize="sm" mt={1}>{t("admins.limitsSectionHelp")}</Text>
               <SimpleGrid columns={{ base: 1, lg: 2 }} gap={5} mt={4}>
-                <FormControl>
+                <FormControl isReadOnly>
                   <FormLabel>{t("admins.creditLimit")}</FormLabel>
-                  <Input type="number" min={0} step="0.01" dir="ltr" value={form.policy.total_traffic === null ? "" : form.policy.total_traffic / GIB} onChange={(e) => setPolicy("total_traffic", e.target.value === "" ? null : Math.round(Number(e.target.value) * GIB))} />
-                  <FormHelperText>{t("admins.creditLimitHelp")}</FormHelperText>
+                  <Input type="number" min={0} step="0.01" dir="ltr" value={form.policy.total_traffic === null ? "" : form.policy.total_traffic / GIB} readOnly />
+                  <FormHelperText>{t("admins.creditLedgerHelp")}</FormHelperText>
                 </FormControl>
-                <FormControl>
+                <FormControl isReadOnly>
                   <FormLabel>{t("admins.volumeMode")}</FormLabel>
-                  <Select value={form.policy.calculate_volume} onChange={(e) => setPolicy("calculate_volume", e.target.value as AdminPolicy["calculate_volume"])}>
+                  <Select value={form.policy.calculate_volume} isReadOnly isDisabled>
                     <option value="used_traffic">{t("admins.usedTrafficMode")}</option>
                     <option value="created_traffic">{t("admins.createdTrafficMode")}</option>
                   </Select>
@@ -547,6 +559,7 @@ export const Admins: FC = () => {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
   const [deleteStrategy, setDeleteStrategy] = useState<"delete_users" | "disable_users" | "keep_users">("keep_users");
+  const canManage = userData.is_sudo || userData.role === "OWNER" || userData.role === "SUPER_ADMIN";
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -559,7 +572,7 @@ export const Admins: FC = () => {
   const query = useQuery<ManagedAdminList, Error>(
     ["admin-management", page, search],
     () => fetch(`/admin-management?offset=${page * PAGE_SIZE}&limit=${PAGE_SIZE}&username=${encodeURIComponent(search)}`),
-    { keepPreviousData: true, enabled: userData.is_sudo, refetchInterval: 15000 }
+    { keepPreviousData: true, enabled: canManage, refetchInterval: 15000 }
   );
 
   const removeMutation = useMutation(
@@ -576,13 +589,13 @@ export const Admins: FC = () => {
     }
   );
 
-  if (!getUserIsPending && !userData.is_sudo) return <Navigate to="/" replace />;
+  if (!getUserIsPending && !canManage) return <Navigate to="/" replace />;
 
   const admins = query.data?.admins || [];
   const total = query.data?.total || 0;
-  const sudoCount = admins.filter((item) => item.is_sudo).length;
+  const managerCount = admins.filter((item) => item.role === "OWNER" || item.role === "SUPER_ADMIN").length;
   const restrictedCount = admins.filter((item) => Object.entries(item.policy).some(([key, value]) => key.startsWith("prevent_") && value)).length;
-  const canEdit = (item: ManagedAdmin) => !item.is_sudo || item.username === userData.username;
+  const canEdit = (item: ManagedAdmin) => item.role !== "OWNER" || item.username === userData.username;
   const openCreate = () => { setSelected(null); formDisclosure.onOpen(); };
   const openEdit = (item: ManagedAdmin) => { setSelected(item); formDisclosure.onOpen(); };
   const openDelete = (item: ManagedAdmin) => { setSelected(item); setDeleteStrategy("keep_users"); deleteDisclosure.onOpen(); };
@@ -600,9 +613,11 @@ export const Admins: FC = () => {
 
         <SimpleGrid columns={{ base: 1, sm: 3 }} gap={4} mb={5}>
           <AdminStat label={t("admins.totalAdmins")} value={total} icon={<AdminsIcon />} />
-          <AdminStat label={t("admins.sudoAdmins")} value={sudoCount} icon={<SudoIcon />} />
+          <AdminStat label={t("admins.managerAdmins")} value={managerCount} icon={<SudoIcon />} />
           <AdminStat label={t("admins.restrictedAdmins")} value={restrictedCount} icon={<ShieldCheckIcon width={20} />} />
         </SimpleGrid>
+
+        <AdminHierarchyPanel />
 
         <Card variant="outline" bg="#111d17" color="gray.100" borderRadius={{ base: "16px", md: "20px" }} borderColor="#33483b" boxShadow="panel" overflow="hidden">
           <HStack p={4} justify="space-between" borderBottomWidth="1px" borderColor="#33483b" flexWrap="wrap" gap={3}>
@@ -629,13 +644,13 @@ export const Admins: FC = () => {
                   <Tbody>{admins.map((item) => (
                     <Tr key={item.username}>
                       <Td><Text color="white" fontWeight="650">{item.username}</Text><Text fontSize="xs" color="gray.400">{item.telegram_id ? `Telegram: ${item.telegram_id}` : t("admins.noContact")}</Text></Td>
-                      <Td><Badge bg={item.is_sudo ? "rgba(168, 85, 247, .18)" : "whiteAlpha.100"} color={item.is_sudo ? "purple.200" : "gray.200"} borderWidth="1px" borderColor={item.is_sudo ? "rgba(192, 132, 252, .4)" : "whiteAlpha.200"}>{t(item.is_sudo ? "admins.sudo" : "admins.adminRole")}</Badge></Td>
+                      <Td><Badge colorScheme={item.role === "OWNER" ? "purple" : item.role === "SUPER_ADMIN" ? "cyan" : "gray"}>{t(`admins.role.${item.role}`)}</Badge></Td>
                       <Td>{item.quota.current_users} / {item.quota.max_users ?? t("unlimited")}</Td>
                       <Td><CreditRemaining admin={item} /></Td>
                       <Td>{item.quota.operation_allowance_remaining ?? t("unlimited")}</Td>
                       <Td>{item.policy.max_user_duration_days ? `${item.policy.max_user_duration_days} ${t("days")}` : t("unlimited")}</Td>
                       <Td>{item.policy.expiry_date || t("unlimited")}</Td>
-                      <Td><HStack justify="end"><IconButton aria-label={t("edit")} size="sm" variant="ghost" icon={<EditIcon />} isDisabled={!canEdit(item)} onClick={() => openEdit(item)} /><IconButton aria-label={t("delete")} size="sm" variant="ghost" colorScheme="red" icon={<RemoveIcon />} isDisabled={item.is_sudo} onClick={() => openDelete(item)} /></HStack></Td>
+                      <Td><HStack justify="end"><IconButton aria-label={t("edit")} size="sm" variant="ghost" icon={<EditIcon />} isDisabled={!canEdit(item)} onClick={() => openEdit(item)} /><IconButton aria-label={t("delete")} size="sm" variant="ghost" colorScheme="red" icon={<RemoveIcon />} isDisabled={item.role === "OWNER"} onClick={() => openDelete(item)} /></HStack></Td>
                     </Tr>
                   ))}</Tbody>
                 </Table>
@@ -644,7 +659,7 @@ export const Admins: FC = () => {
               <Stack display={{ base: "flex", lg: "none" }} divider={<Divider borderColor="#33483b" />} spacing={0}>
                 {admins.map((item) => (
                   <Box key={item.username} p={4}>
-                    <HStack justify="space-between" align="start"><Box><Text color="white" fontWeight="700">{item.username}</Text><Badge mt={1} bg={item.is_sudo ? "rgba(168, 85, 247, .18)" : "whiteAlpha.100"} color={item.is_sudo ? "purple.200" : "gray.200"} borderWidth="1px" borderColor={item.is_sudo ? "rgba(192, 132, 252, .4)" : "whiteAlpha.200"}>{t(item.is_sudo ? "admins.sudo" : "admins.adminRole")}</Badge></Box><HStack><IconButton aria-label={t("edit")} size="sm" variant="ghost" icon={<EditIcon />} isDisabled={!canEdit(item)} onClick={() => openEdit(item)} /><IconButton aria-label={t("delete")} size="sm" variant="ghost" colorScheme="red" icon={<RemoveIcon />} isDisabled={item.is_sudo} onClick={() => openDelete(item)} /></HStack></HStack>
+                    <HStack justify="space-between" align="start"><Box><Text color="white" fontWeight="700">{item.username}</Text><Badge mt={1} colorScheme={item.role === "OWNER" ? "purple" : item.role === "SUPER_ADMIN" ? "cyan" : "gray"}>{t(`admins.role.${item.role}`)}</Badge></Box><HStack><IconButton aria-label={t("edit")} size="sm" variant="ghost" icon={<EditIcon />} isDisabled={!canEdit(item)} onClick={() => openEdit(item)} /><IconButton aria-label={t("delete")} size="sm" variant="ghost" colorScheme="red" icon={<RemoveIcon />} isDisabled={item.role === "OWNER"} onClick={() => openDelete(item)} /></HStack></HStack>
                     <SimpleGrid columns={2} gap={3} mt={4} fontSize="sm"><Box><Text color="gray.400" fontSize="xs">{t("admins.usersCount")}</Text><Text color="gray.100" mt={1}>{item.quota.current_users} / {item.quota.max_users ?? t("unlimited")}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.creditRemaining")}</Text><Box mt={1}><CreditRemaining admin={item} /></Box></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.operationRemaining")}</Text><Text color="gray.100" mt={1}>{item.quota.operation_allowance_remaining ?? t("unlimited")}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.maxDuration")}</Text><Text color="gray.100" mt={1}>{item.policy.max_user_duration_days ? `${item.policy.max_user_duration_days} ${t("days")}` : t("unlimited")}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.expiryDate")}</Text><Text color="gray.100" mt={1}>{item.policy.expiry_date || t("unlimited")}</Text></Box></SimpleGrid>
                   </Box>
                 ))}

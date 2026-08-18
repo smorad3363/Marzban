@@ -554,5 +554,12 @@
   "deviceLimit.eventState.permanently_disabled": "غیرفعال دائمی",
   "deviceLimit.eventState.resolved": "حل‌شده",
   "deviceLimit.eventState.expired": "منقضی",
-  "userDialog.subscriptionModeForbidden": "ادمین مالک اجازه استفاده از این مدل اشتراک را ندارد."
+  "userDialog.subscriptionModeForbidden": "ادمین مالک اجازه استفاده از این مدل اشتراک را ندارد.",
+  "admins.role": "نقش مدیریتی",
+  "admins.roleHelp": "Owner فقط با دستور marzban set-owner تعیین می‌شود.",
+  "admins.role.OWNER": "مالک",
+  "admins.role.SUPER_ADMIN": "مدیر ارشد",
+  "admins.role.ADMIN": "ادمین",
+  "admins.managerAdmins": "مدیران شاخه",
+  "admins.creditLedgerHelp": "اعتبار در ساختار سلسله‌مراتبی فقط از دفترکل واگذاری یا بازپس‌گیری تغییر می‌کند."
 }

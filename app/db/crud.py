@@ -16,6 +16,9 @@ from app.db.models import (
     JWT,
     TLS,
     Admin,
+    AdminApiToken,
+    AdminHierarchy,
+    AdminUserPlanAccess,
     AdminUsageLogs,
     MarzhelpAdminSettings,
     MarzhelpAdminInboundPermission,
@@ -280,7 +283,8 @@ def get_users(db: Session,
               admins: Optional[List[str]] = None,
               reset_strategy: Optional[Union[UserDataLimitResetStrategy, list]] = None,
               return_with_count: bool = False,
-              allowed_inbounds: set[str] | None = None) -> Union[List[User], Tuple[List[User], int]]:
+              allowed_inbounds: set[str] | None = None,
+              scope_admin_id: Optional[int] = None) -> Union[List[User], Tuple[List[User], int]]:
     """
     Retrieves users based on various filters and options.
 
@@ -302,6 +306,15 @@ def get_users(db: Session,
     """
     query = get_user_queryset(db)
     query = apply_inbound_access_filter(query, allowed_inbounds)
+    if scope_admin_id is not None:
+        query = query.filter(
+            exists().where(
+                and_(
+                    AdminHierarchy.ancestor_id == scope_admin_id,
+                    AdminHierarchy.descendant_id == User.admin_id,
+                )
+            )
+        )
 
     if search:
         query = query.filter(or_(User.username.ilike(f"%{search}%"), User.note.ilike(f"%{search}%")))
@@ -389,6 +402,7 @@ def get_users_count(
     status: UserStatus = None,
     admin: Admin = None,
     allowed_inbounds: set[str] | None = None,
+    scope_admin_id: Optional[int] = None,
 ) -> int:
     """
     Retrieves the count of users based on status and admin filters.
@@ -403,6 +417,15 @@ def get_users_count(
     """
     query = db.query(User.id)
     query = apply_inbound_access_filter(query, allowed_inbounds)
+    if scope_admin_id is not None:
+        query = query.filter(
+            exists().where(
+                and_(
+                    AdminHierarchy.ancestor_id == scope_admin_id,
+                    AdminHierarchy.descendant_id == User.admin_id,
+                )
+            )
+        )
     if admin:
         query = query.filter(User.admin == admin)
     if status:
@@ -410,7 +433,12 @@ def get_users_count(
     return query.count()
 
 
-def create_user(db: Session, user: UserCreate, admin: Admin = None) -> User:
+def create_user(
+    db: Session,
+    user: UserCreate,
+    admin: Admin = None,
+    commit: bool = True,
+) -> User:
     """
     Creates a new user with provided details.
 
@@ -464,8 +492,11 @@ def create_user(db: Session, user: UserCreate, admin: Admin = None) -> User:
     marzhelp_policy.record_create(
         db, dbuser, policy_settings is not None
     )
-    db.commit()
-    db.refresh(dbuser)
+    if commit:
+        db.commit()
+        db.refresh(dbuser)
+    else:
+        db.flush()
     return dbuser
 
 
@@ -1077,7 +1108,8 @@ def update_admin(
     Returns:
         Admin: The updated admin object.
     """
-    dbadmin.is_sudo = modified_admin.is_sudo
+    if modified_admin.is_sudo is not None:
+        dbadmin.is_sudo = modified_admin.is_sudo
     if modified_admin.password is not None and dbadmin.hashed_password != modified_admin.hashed_password:
         dbadmin.hashed_password = modified_admin.hashed_password
         dbadmin.password_reset_at = datetime.utcnow()
@@ -1209,7 +1241,12 @@ def upsert_marzhelp_admin_policy(
     return settings
 
 
-def partial_update_admin(db: Session, dbadmin: Admin, modified_admin: AdminPartialModify) -> Admin:
+def partial_update_admin(
+    db: Session,
+    dbadmin: Admin,
+    modified_admin: AdminPartialModify,
+    commit: bool = True,
+) -> Admin:
     """
     Partially updates an admin's details.
 
@@ -1231,8 +1268,11 @@ def partial_update_admin(db: Session, dbadmin: Admin, modified_admin: AdminParti
     if modified_admin.discord_webhook is not None:
         dbadmin.discord_webhook = modified_admin.discord_webhook
 
-    db.commit()
-    db.refresh(dbadmin)
+    if commit:
+        db.commit()
+        db.refresh(dbadmin)
+    else:
+        db.flush()
     return dbadmin
 
 
@@ -1285,6 +1325,12 @@ def remove_admin(
     db.query(MarzhelpAdminSubscriptionModePermission).filter(
         MarzhelpAdminSubscriptionModePermission.admin_id == dbadmin.id
     ).delete()
+    db.query(AdminApiToken).filter(AdminApiToken.admin_id == dbadmin.id).delete()
+    db.query(AdminUserPlanAccess).filter(AdminUserPlanAccess.admin_id == dbadmin.id).delete()
+    db.query(AdminHierarchy).filter(
+        (AdminHierarchy.ancestor_id == dbadmin.id)
+        | (AdminHierarchy.descendant_id == dbadmin.id)
+    ).delete(synchronize_session=False)
     db.query(MarzhelpAdminSettings).filter(
         MarzhelpAdminSettings.admin_id == dbadmin.id
     ).delete()
@@ -1324,7 +1370,8 @@ def get_admin_by_telegram_id(db: Session, telegram_id: int) -> Admin:
 def get_admins(db: Session,
                offset: Optional[int] = None,
                limit: Optional[int] = None,
-               username: Optional[str] = None) -> List[Admin]:
+               username: Optional[str] = None,
+               scope_admin_id: Optional[int] = None) -> List[Admin]:
     """
     Retrieves a list of admins with optional filters and pagination.
 
@@ -1338,6 +1385,15 @@ def get_admins(db: Session,
         List[Admin]: A list of admin objects.
     """
     query = db.query(Admin).order_by(Admin.username.asc())
+    if scope_admin_id is not None:
+        query = query.filter(
+            exists().where(
+                and_(
+                    AdminHierarchy.ancestor_id == scope_admin_id,
+                    AdminHierarchy.descendant_id == Admin.id,
+                )
+            )
+        )
     if username:
         query = query.filter(Admin.username.ilike(f'%{username}%'))
     if offset:
@@ -1352,8 +1408,18 @@ def get_admins_with_count(
     offset: int = 0,
     limit: int = 20,
     username: Optional[str] = None,
+    scope_admin_id: Optional[int] = None,
 ) -> Tuple[List[Admin], int]:
     query = db.query(Admin)
+    if scope_admin_id is not None:
+        query = query.filter(
+            exists().where(
+                and_(
+                    AdminHierarchy.ancestor_id == scope_admin_id,
+                    AdminHierarchy.descendant_id == Admin.id,
+                )
+            )
+        )
     if username:
         query = query.filter(Admin.username.ilike(f"%{username}%"))
     total = query.count()
@@ -1831,11 +1897,21 @@ def count_online_users(
     hours: int = 24,
     admin: Admin | None = None,
     allowed_inbounds: set[str] | None = None,
+    scope_admin_id: int | None = None,
 ):
     twenty_four_hours_ago = datetime.utcnow() - timedelta(hours=hours)
     query = db.query(func.count(User.id)).filter(User.online_at.isnot(
         None), User.online_at >= twenty_four_hours_ago)
     if admin is not None:
         query = query.filter(User.admin_id == admin.id)
+    if scope_admin_id is not None:
+        query = query.filter(
+            exists().where(
+                and_(
+                    AdminHierarchy.ancestor_id == scope_admin_id,
+                    AdminHierarchy.descendant_id == User.admin_id,
+                )
+            )
+        )
     query = apply_inbound_access_filter(query, allowed_inbounds)
     return query.scalar()

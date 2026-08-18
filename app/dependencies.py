@@ -7,12 +7,14 @@ from config import SUDOERS
 from fastapi import Depends, HTTPException
 from datetime import datetime, timezone, timedelta
 from app.utils.jwt import get_subscription_payload
-from app.utils import marzhelp_policy
+from app.utils import admin_hierarchy, marzhelp_policy
 
 
 def validate_admin(db: Session, username: str, password: str) -> Optional[AdminValidationResult]:
     """Validate admin credentials with environment variables or database."""
-    if SUDOERS.get(username) == password:
+    from app.utils import admin_hierarchy
+
+    if not admin_hierarchy.hierarchy_enabled(db) and SUDOERS.get(username) == password:
         return AdminValidationResult(username=username, is_sudo=True)
 
     dbadmin = crud.get_admin(db, username)
@@ -111,7 +113,7 @@ def get_validated_user(
 
     dbadmin = crud.get_admin(db, admin.username)
     effective_admin = dbadmin or admin
-    if not marzhelp_policy.can_access_user(db, effective_admin, dbuser):
+    if not admin_hierarchy.can_access_user(db, effective_admin, dbuser):
         raise HTTPException(status_code=403, detail="You're not allowed")
 
     return dbuser
@@ -124,11 +126,20 @@ def get_expired_users_list(db: Session, admin: Admin, expired_after: Optional[da
 
     dbadmin = crud.get_admin(db, admin.username)
     allowed_inbounds = marzhelp_policy.allowed_inbound_tags(db, dbadmin or admin)
+    hierarchy_on = admin_hierarchy.hierarchy_enabled(db)
+    scope_admin_id = (
+        dbadmin.id
+        if hierarchy_on
+        and dbadmin is not None
+        and not admin_hierarchy.is_owner(db, dbadmin)
+        else None
+    )
     dbusers = crud.get_users(
         db=db,
         status=[UserStatus.expired, UserStatus.limited],
-        admin=dbadmin if not admin.is_sudo else None,
+        admin=dbadmin if not hierarchy_on and not admin.is_sudo else None,
         allowed_inbounds=allowed_inbounds,
+        scope_admin_id=scope_admin_id,
     )
 
     return [

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy import exists
 from app import xray
 from app.db import Session, crud, get_db
 from app.db.models import (
@@ -11,6 +12,7 @@ from app.db.models import (
     DeviceLimitSettings,
     DeviceLimitUserState,
     DeviceSlot,
+    AdminHierarchy,
     MarzhelpAdminSettings,
     User,
 )
@@ -33,6 +35,7 @@ from app.models.device_limit import (
     DeviceSlotResponse,
 )
 from app.models.user import UserStatus
+from app.utils import admin_hierarchy
 from app.utils.audit import AuditLogService
 
 
@@ -50,11 +53,8 @@ def _settings(db: Session) -> DeviceLimitSettings:
 
 
 def _can_view_full_ip(db: Session, admin: Admin) -> bool:
-    if admin.is_sudo:
-        return True
     dbadmin = crud.get_admin(db, admin.username)
-    settings = db.get(MarzhelpAdminSettings, dbadmin.id) if dbadmin else None
-    return bool(settings and settings.view_full_client_ip)
+    return bool(dbadmin and admin_hierarchy.is_owner(db, dbadmin))
 
 
 def _slot_response(username: str, slot: DeviceSlot, full_ip: bool) -> DeviceSlotResponse:
@@ -208,11 +208,16 @@ def list_incidents(
     admin: Admin = Depends(Admin.get_current),
 ):
     query = db.query(DeviceLimitIncident)
-    if not admin.is_sudo:
-        dbadmin = crud.get_admin(db, admin.username)
-        if dbadmin is None:
-            return DeviceLimitIncidentList(incidents=[], total=0, offset=offset, limit=limit)
-        query = query.filter(DeviceLimitIncident.admin_id == dbadmin.id)
+    dbadmin = crud.get_admin(db, admin.username)
+    if dbadmin is None:
+        return DeviceLimitIncidentList(incidents=[], total=0, offset=offset, limit=limit)
+    if not admin_hierarchy.is_owner(db, dbadmin):
+        query = query.filter(
+            exists().where(
+                (AdminHierarchy.ancestor_id == dbadmin.id)
+                & (AdminHierarchy.descendant_id == DeviceLimitIncident.admin_id)
+            )
+        )
     if username:
         query = query.filter(DeviceLimitIncident.username.ilike(f"%{username.strip()}%"))
     if unresolved_only:
@@ -377,10 +382,11 @@ def delete_warning(
     incident = db.get(DeviceLimitIncident, incident_id)
     if incident is None or incident.event_state != DeviceEventState.warning.value:
         raise HTTPException(status_code=404, detail="Device warning not found")
-    if not admin.is_sudo:
-        dbadmin = crud.get_admin(db, admin.username)
-        if dbadmin is None or incident.admin_id != dbadmin.id:
-            raise HTTPException(status_code=403, detail="You're not allowed")
+    dbadmin = crud.get_admin(db, admin.username)
+    if dbadmin is None or incident.admin_id is None or not admin_hierarchy.admin_in_scope(
+        db, dbadmin, incident.admin_id
+    ):
+        raise HTTPException(status_code=403, detail="You're not allowed")
     user_id = incident.user_id
     username = incident.username
     db.delete(incident)

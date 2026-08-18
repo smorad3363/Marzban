@@ -34,7 +34,6 @@ import { AppShell } from "components/AppShell";
 import useGetUser from "hooks/useGetUser";
 import { FC, FormEvent, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Navigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 import { fetch } from "service/http";
 import {
@@ -349,10 +348,9 @@ const IncidentSection: FC = () => {
 export const DeviceLimits: FC = () => {
   const { t } = useTranslation();
   const { userData, getUserIsPending } = useGetUser();
-  const settings = useQuery<DeviceLimitSettings, Error>("device-limit-settings", () => fetch("/device-limit/settings"), { enabled: userData.is_sudo });
-  const stages = useQuery<DeviceLimitPenaltyStage[], Error>("device-limit-stages", () => fetch("/device-limit/penalty-stages"), { enabled: userData.is_sudo });
-
-  if (!getUserIsPending && !userData.is_sudo) return <Navigate to="/" replace />;
+  const isOwner = userData.is_sudo || userData.role === "OWNER";
+  const settings = useQuery<DeviceLimitSettings, Error>("device-limit-settings", () => fetch("/device-limit/settings"), { enabled: !getUserIsPending && isOwner });
+  const stages = useQuery<DeviceLimitPenaltyStage[], Error>("device-limit-stages", () => fetch("/device-limit/penalty-stages"), { enabled: !getUserIsPending && isOwner });
 
   return (
     <AppShell>
@@ -362,10 +360,10 @@ export const DeviceLimits: FC = () => {
           <Text as="h1" fontSize={{ base: "2xl", md: "3xl" }} fontWeight="800" letterSpacing="-.035em" mt={2}>{t("deviceLimit.title")}</Text>
           <Text color="gray.300" mt={1} maxW="720px">{t("deviceLimit.subtitle")}</Text>
         </Box>
-        <Badge px={3} py={2} borderRadius="full" colorScheme={settings.data?.enabled ? "green" : "gray"} textTransform="none">{t(settings.data?.enabled ? "deviceLimit.active" : "deviceLimit.inactive")}</Badge>
+        {isOwner && <Badge px={3} py={2} borderRadius="full" colorScheme={settings.data?.enabled ? "green" : "gray"} textTransform="none">{t(settings.data?.enabled ? "deviceLimit.active" : "deviceLimit.inactive")}</Badge>}
       </Stack>
-      {(settings.isError || stages.isError) && <Alert status="error" mb={4}><AlertIcon />{t("deviceLimit.loadFailed")}</Alert>}
-      {settings.data && stages.data ? <SettingsSection settings={settings.data} stages={stages.data} /> : <Stack>{Array.from({ length: 3 }).map((_, index) => <Skeleton key={index} h="180px" borderRadius="18px" startColor="#14231b" endColor="#243d31" />)}</Stack>}
+      {isOwner && (settings.isError || stages.isError) && <Alert status="error" mb={4}><AlertIcon />{t("deviceLimit.loadFailed")}</Alert>}
+      {isOwner && (settings.data && stages.data ? <SettingsSection settings={settings.data} stages={stages.data} /> : <Stack>{Array.from({ length: 3 }).map((_, index) => <Skeleton key={index} h="180px" borderRadius="18px" startColor="#14231b" endColor="#243d31" />)}</Stack>)}
       <IncidentSection />
     </AppShell>
   );

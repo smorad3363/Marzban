@@ -10,6 +10,8 @@ import {
   CircularProgressLabel,
   Divider,
   Flex,
+  FormControl,
+  FormLabel,
   Grid,
   HStack,
   IconButton,
@@ -21,10 +23,20 @@ import {
   PopoverHeader,
   PopoverTrigger,
   Portal,
+  Select,
   Stack,
   Text,
   Tooltip,
+  Modal,
+  ModalBody,
+  ModalCloseButton,
+  ModalContent,
+  ModalFooter,
+  ModalHeader,
+  ModalOverlay,
+  useDisclosure,
   usePrefersReducedMotion,
+  useToast,
   VStack,
 } from "@chakra-ui/react";
 import {
@@ -46,6 +58,9 @@ import { useDashboard } from "contexts/DashboardContext";
 import { FC, ReactNode, useEffect, useState } from "react";
 import CopyToClipboard from "react-copy-to-clipboard";
 import { useTranslation } from "react-i18next";
+import { useMutation, useQuery, useQueryClient } from "react-query";
+import { fetch } from "service/http";
+import { AccountSummary, UserPlan } from "types/Admin";
 import { User } from "types/User";
 import { formatBytes } from "utils/formatByte";
 import { BulkUserActions } from "./BulkUserActions";
@@ -394,10 +409,11 @@ const ResetHistory: FC<{ user: User }> = ({ user }) => {
 type ActionButtonsProps = {
   user: User;
   onEdit: () => void;
+  onRenew: () => void;
   accent: string;
 };
 
-const ActionButtons: FC<ActionButtonsProps> = ({ user, onEdit, accent }) => {
+const ActionButtons: FC<ActionButtonsProps> = ({ user, onEdit, onRenew, accent }) => {
   const { setQRCode, setSubLink } = useDashboard();
   const { t } = useTranslation();
   const proxyLinks = user.links.join("\r\n");
@@ -502,6 +518,14 @@ const ActionButtons: FC<ActionButtonsProps> = ({ user, onEdit, accent }) => {
           onClick={onEdit}
         />
       </Tooltip>
+      <Tooltip label="تمدید با پلن" placement="top">
+        <IconButton
+          {...buttonStyle}
+          aria-label="تمدید با پلن"
+          icon={<PlanIcon />}
+          onClick={onRenew}
+        />
+      </Tooltip>
     </HStack>
   );
 };
@@ -511,6 +535,7 @@ type UserCardProps = {
   selected: boolean;
   onSelectedChange: (selected: boolean) => void;
   onOpen: () => void;
+  onRenew: () => void;
 };
 
 const UserCard: FC<UserCardProps> = ({
@@ -518,6 +543,7 @@ const UserCard: FC<UserCardProps> = ({
   selected,
   onSelectedChange,
   onOpen,
+  onRenew,
 }) => {
   const { t, i18n } = useTranslation();
   const reduceMotion = usePrefersReducedMotion();
@@ -758,7 +784,7 @@ const UserCard: FC<UserCardProps> = ({
           gap={2}
           wrap="wrap"
         >
-          <ActionButtons user={user} onEdit={onOpen} accent={visual.accent} />
+          <ActionButtons user={user} onEdit={onOpen} onRenew={onRenew} accent={visual.accent} />
           <UserDeviceLimit user={user} />
         </Flex>
       </Stack>
@@ -769,6 +795,7 @@ const UserCard: FC<UserCardProps> = ({
 const EmptySection: FC<{ isFiltered: boolean }> = ({ isFiltered }) => {
   const { onCreateUser } = useDashboard();
   const { t } = useTranslation();
+  const account = useQuery<AccountSummary, Error>("account-summary", () => fetch("/account/summary"));
 
   return (
     <VStack px={5} py={12} spacing={4} textAlign="center">
@@ -787,7 +814,7 @@ const EmptySection: FC<{ isFiltered: boolean }> = ({ isFiltered }) => {
       <Text color="gray.300" maxW="52ch">
         {isFiltered ? t("usersTable.noUserMatched") : t("usersTable.noUser")}
       </Text>
-      {!isFiltered && (
+      {!isFiltered && account.data?.user_creation_mode !== "PLAN_ONLY" && (
         <Button size="sm" colorScheme="primary" onClick={() => onCreateUser(true)}>
           {t("createUser")}
         </Button>
@@ -803,8 +830,48 @@ export const UsersTable: FC<UsersTableProps> = (props) => {
     filters,
     users: { users },
     onEditingUser,
+    refetchUsers,
   } = useDashboard();
   const { i18n } = useTranslation();
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const renewalModal = useDisclosure();
+  const [renewalUser, setRenewalUser] = useState<User | null>(null);
+  const [renewalPlanId, setRenewalPlanId] = useState("");
+  const plans = useQuery<UserPlan[], Error>(
+    "user-plans",
+    () => fetch("/user-plans"),
+    { enabled: renewalModal.isOpen }
+  );
+  const renew = useMutation(
+    ({ user, planId }: { user: User; planId: number }) =>
+      fetch(`/users/${user.username}/renew-from-plan`, {
+        method: "POST",
+        body: {
+          plan_id: planId,
+          idempotency_key: `renew-${user.username}-${planId}-${crypto.randomUUID()}`,
+        },
+      }),
+    {
+      onSuccess: () => {
+        refetchUsers();
+        queryClient.invalidateQueries("account-summary");
+        renewalModal.onClose();
+        setRenewalUser(null);
+        setRenewalPlanId("");
+        toast({ title: "کاربر با پلن تمدید شد", status: "success", duration: 3000 });
+      },
+      onError: (error: any) => {
+        const detail = error?.data?.detail || error?.response?._data?.detail || error?.message;
+        toast({
+          title: "تمدید انجام نشد",
+          description: typeof detail === "object" ? detail.message || detail.code : detail,
+          status: "error",
+          duration: 5000,
+        });
+      },
+    }
+  );
   const direction = i18n.dir();
   const isFiltered = Boolean(
     filters.search ||
@@ -888,12 +955,67 @@ export const UsersTable: FC<UsersTableProps> = (props) => {
                 selected={selectedUsernames.has(user.username)}
                 onSelectedChange={(selected) => setUserSelected(user.username, selected)}
                 onOpen={() => onEditingUser(user)}
+                onRenew={() => {
+                  setRenewalUser(user);
+                  setRenewalPlanId("");
+                  renewalModal.onOpen();
+                }}
               />
             ))}
           </Grid>
         </>
       )}
       <Pagination />
+      <Modal
+        isOpen={renewalModal.isOpen}
+        onClose={() => {
+          renewalModal.onClose();
+          setRenewalUser(null);
+          setRenewalPlanId("");
+        }}
+        isCentered
+      >
+        <ModalOverlay bg="rgba(0,0,0,.72)" />
+        <ModalContent mx={3} bg="#111d17" color="gray.100" borderWidth="1px" borderColor="#33483b">
+          <ModalHeader>تمدید «{renewalUser?.username}» با پلن</ModalHeader>
+          <ModalCloseButton />
+          <ModalBody>
+            <FormControl isRequired>
+              <FormLabel>پلن قابل‌دسترسی</FormLabel>
+              <Select
+                minH="44px"
+                value={renewalPlanId}
+                onChange={(event) => setRenewalPlanId(event.target.value)}
+                isDisabled={plans.isLoading || plans.isError}
+              >
+                <option value="">انتخاب پلن</option>
+                {(plans.data || []).map((plan) => (
+                  <option key={plan.id} value={plan.id}>
+                    {plan.name} · v{plan.version_number} · {formatBytes(plan.version.data_limit)} · {plan.version.duration_days} روز
+                  </option>
+                ))}
+              </Select>
+              {plans.isError && <Text mt={2} color="red.300" fontSize="sm">دریافت پلن‌ها انجام نشد.</Text>}
+              {!plans.isLoading && !plans.isError && (plans.data || []).length === 0 && (
+                <Text mt={2} color="gray.400" fontSize="sm">پلن فعالی برای این حساب در دسترس نیست.</Text>
+              )}
+            </FormControl>
+          </ModalBody>
+          <ModalFooter gap={3}>
+            <Button minH="44px" variant="ghost" onClick={renewalModal.onClose}>انصراف</Button>
+            <Button
+              minH="44px"
+              colorScheme="primary"
+              color="#07130e"
+              isDisabled={!renewalUser || !renewalPlanId}
+              isLoading={renew.isLoading}
+              onClick={() => renewalUser && renewalPlanId && renew.mutate({ user: renewalUser, planId: Number(renewalPlanId) })}
+            >
+              تأیید تمدید
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
     </Box>
   );
 };

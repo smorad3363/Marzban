@@ -22,7 +22,7 @@ from app.models.node import (
 )
 from app.utils.node_watchdog import send_telegram_message
 from app.models.proxy import ProxyHost
-from app.utils import responses
+from app.utils import admin_hierarchy, responses
 from app.utils.audit import AuditLogService, sanitize_audit_value
 
 router = APIRouter(
@@ -177,7 +177,8 @@ async def node_logs(node_id: int, websocket: WebSocket, db: Session = Depends(ge
     if not admin:
         return await websocket.close(reason="Unauthorized", code=4401)
 
-    if not admin.is_sudo:
+    dbadmin = crud.get_admin(db, admin.username)
+    if admin.auth_method != "session" or dbadmin is None or not admin_hierarchy.is_owner(db, dbadmin):
         return await websocket.close(reason="You're not allowed", code=4403)
 
     if not xray.nodes.get(node_id):

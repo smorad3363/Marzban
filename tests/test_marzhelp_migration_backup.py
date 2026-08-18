@@ -10,6 +10,9 @@ import config as app_config
 
 
 REQUIRED_TABLES = {
+    "admin_hierarchy",
+    "admin_hierarchy_settings",
+    "admin_roles",
     "admin_audit_logs",
     "marzhelp_metadata",
     "marzhelp_admin_settings",
@@ -22,6 +25,7 @@ REQUIRED_TABLES = {
     "marzhelp_accounting_transactions",
     "marzhelp_admin_allowed_inbounds",
     "marzhelp_admin_allowed_user_limits",
+    "system_owner",
 }
 
 
@@ -57,6 +61,21 @@ def test_fresh_and_existing_migration_preserve_data(tmp_path, monkeypatch):
     marker = dict(connection.execute("SELECT key, value FROM marzhelp_metadata"))
     assert marker["source_id"] == "smorad3363-marzban"
     assert marker["schema_version"] == "1"
+    assert connection.execute(
+        "SELECT id, code FROM admin_roles ORDER BY id"
+    ).fetchall() == [(1, "OWNER"), (2, "SUPER_ADMIN"), (3, "ADMIN")]
+    assert connection.execute(
+        "SELECT enabled, max_depth FROM admin_hierarchy_settings WHERE id = 1"
+    ).fetchone() == (0, 64)
+    assert connection.execute("SELECT COUNT(*) FROM system_owner").fetchone() == (0,)
+    assert connection.execute(
+        "SELECT role_id, parent_admin_id, external_api_enabled "
+        "FROM admins WHERE username = 'preserved-admin'"
+    ).fetchone() == (None, None, 0)
+    assert connection.execute(
+        "SELECT depth FROM admin_hierarchy "
+        "WHERE ancestor_id = descendant_id"
+    ).fetchall() == [(0,)]
     settings_columns = {
         row[1] for row in connection.execute("PRAGMA table_info(marzhelp_admin_settings)")
     }

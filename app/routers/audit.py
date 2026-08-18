@@ -3,12 +3,13 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import or_
+from sqlalchemy import exists, or_
 
-from app.db import Session, get_db
-from app.db.models import AdminAuditLog
+from app.db import Session, crud, get_db
+from app.db.models import AdminAuditLog, AdminHierarchy
 from app.models.admin import Admin
 from app.models.audit import AuditLogList, AuditLogOptions
+from app.utils import admin_hierarchy
 
 
 router = APIRouter(
@@ -35,21 +36,35 @@ def _tehran_date_boundary(value: Optional[date], end: bool = False) -> Optional[
     return local_value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
+def _scoped_audit_query(db: Session, admin: Admin):
+    query = db.query(AdminAuditLog)
+    actor = crud.get_admin(db, admin.username)
+    if actor is not None and not admin_hierarchy.is_owner(db, actor):
+        query = query.filter(
+            exists().where(
+                (AdminHierarchy.ancestor_id == actor.id)
+                & (AdminHierarchy.descendant_id == AdminAuditLog.admin_id)
+            )
+        )
+    return query
+
+
 @router.get("/audit-logs/options", response_model=AuditLogOptions)
 def get_audit_log_options(
     db: Session = Depends(get_db),
-    _: Admin = Depends(Admin.check_sudo_admin),
+    admin: Admin = Depends(Admin.get_current),
 ):
+    scoped = _scoped_audit_query(db, admin)
     admins = [
         value
-        for (value,) in db.query(AdminAuditLog.admin_username)
+        for (value,) in scoped.with_entities(AdminAuditLog.admin_username)
         .distinct()
         .order_by(AdminAuditLog.admin_username.asc())
         .all()
     ]
     actions = [
         value
-        for (value,) in db.query(AdminAuditLog.action)
+        for (value,) in scoped.with_entities(AdminAuditLog.action)
         .distinct()
         .order_by(AdminAuditLog.action.asc())
         .all()
@@ -69,9 +84,9 @@ def get_audit_logs(
     date_to: Optional[date] = None,
     sort: str = Query("newest", pattern="^(newest|oldest)$"),
     db: Session = Depends(get_db),
-    _: Admin = Depends(Admin.check_sudo_admin),
+    admin: Admin = Depends(Admin.get_current),
 ):
-    query = db.query(AdminAuditLog)
+    query = _scoped_audit_query(db, admin)
     if admin_username:
         query = query.filter(
             AdminAuditLog.admin_username == admin_username

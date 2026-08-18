@@ -27,6 +27,7 @@ import React, { FC, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "react-query";
 import { fetch } from "service/http";
+import { AccountSummary } from "types/Admin";
 
 const iconProps = {
   baseStyle: {
@@ -58,10 +59,12 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
     useDashboard();
   const { t, i18n } = useTranslation();
   const { userData } = useGetUser();
+  const account = useQuery<AccountSummary, Error>("account-summary", () => fetch("/account/summary"));
+  const canManageAdmins = userData.is_sudo || userData.role === "OWNER" || userData.role === "SUPER_ADMIN";
   const adminOptions = useQuery<AdminOption[], Error>(
     ["user-filter-admins"],
     fetchAdminOptions,
-    { enabled: userData.is_sudo, staleTime: 30000 }
+    { enabled: canManageAdmins, staleTime: 30000 }
   );
   const [search, setSearch] = useState("");
   const controlStyle = {
@@ -167,7 +170,7 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
               })}
             />
           </IconButton>
-          <Button
+          {account.data?.user_creation_mode !== "PLAN_ONLY" && <Button
             colorScheme="primary"
             size="sm"
             onClick={() => onCreateUser(true)}
@@ -176,7 +179,7 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
             boxShadow="0 0 18px rgba(34, 197, 94, .18)"
           >
             {t("createUser")}
-          </Button>
+          </Button>}
         </HStack>
       </GridItem>
       <GridItem

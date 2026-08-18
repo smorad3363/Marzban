@@ -8,7 +8,17 @@ from sqlalchemy.exc import IntegrityError
 from app import xray
 from app.db import Session, crud, get_db
 from app.dependencies import get_admin_by_username, validate_admin
-from app.db.models import Admin as DBAdmin, MarzhelpAdminSettings, User
+from app.db.models import (
+    Admin as DBAdmin,
+    AdminBulkJob,
+    AdminCreditTransfer,
+    AdminSuspensionEvent,
+    AdminUserPlan,
+    AdminUserPlanVersion,
+    MarzhelpAdminSettings,
+    User,
+    UserPlanAssignment,
+)
 from app.models.admin import (
     Admin,
     AdminCapabilities,
@@ -25,7 +35,7 @@ from app.models.admin import (
 )
 from app.models.user import UserStatus
 from app.device_limit.constants import SubscriptionMode
-from app.utils import marzhelp_policy, report, responses
+from app.utils import admin_hierarchy, marzhelp_policy, report, responses
 from app.utils.audit import (
     AuditLogService,
     AuditStatus,
@@ -53,8 +63,12 @@ def managed_admin_response(
         else MarzhelpAdminPolicy()
     )
     return ManagedAdmin(
+        id=dbadmin.id,
         username=dbadmin.username,
         is_sudo=dbadmin.is_sudo,
+        role=admin_hierarchy.role_code(dbadmin),
+        parent_admin_id=dbadmin.parent_admin_id,
+        external_api_enabled=bool(dbadmin.external_api_enabled),
         telegram_id=dbadmin.telegram_id,
         discord_webhook=dbadmin.discord_webhook,
         users_usage=dbadmin.users_usage,
@@ -149,6 +163,11 @@ def create_admin(
     admin: Admin = Depends(Admin.check_sudo_admin),
 ):
     """Create a new admin if the current admin has sudo privileges."""
+    if new_admin.is_sudo:
+        raise HTTPException(
+            status_code=403,
+            detail="Owner can only be selected with marzban set-owner <username>",
+        )
     try:
         dbadmin = crud.create_admin(db, new_admin)
     except IntegrityError:
@@ -182,6 +201,11 @@ def modify_admin(
     current_admin: Admin = Depends(Admin.check_sudo_admin),
 ):
     """Modify an existing admin's details."""
+    if modified_admin.is_sudo is not None and modified_admin.is_sudo != dbadmin.is_sudo:
+        raise HTTPException(
+            status_code=403,
+            detail="Owner/role cannot be changed through the legacy admin endpoint",
+        )
     if (dbadmin.username != current_admin.username) and dbadmin.is_sudo:
         raise HTTPException(
             status_code=403,
@@ -216,13 +240,51 @@ def remove_admin(
     values: AdminDeleteRequest = Body(default=AdminDeleteRequest()),
     dbadmin: Admin = Depends(get_admin_by_username),
     db: Session = Depends(get_db),
-    current_admin: Admin = Depends(Admin.check_sudo_admin),
+    current_admin: Admin = Depends(Admin.check_admin_manager),
 ):
     """Remove an admin from the database."""
-    if dbadmin.is_sudo:
+    actor = crud.get_admin(db, current_admin.username)
+    if actor is None or not admin_hierarchy.admin_in_scope(db, actor, dbadmin.id):
+        raise HTTPException(status_code=403, detail="Admin is outside your scope")
+    if dbadmin.id == actor.id or admin_hierarchy.role_code(dbadmin) == admin_hierarchy.OWNER:
         raise HTTPException(
             status_code=403,
-            detail="You're not allowed to delete sudo accounts. Use marzban-cli instead.",
+            detail="Owner/self deletion is not allowed",
+        )
+    if dbadmin.children:
+        raise HTTPException(status_code=409, detail="Only a leaf admin can be deleted")
+    settings = db.get(MarzhelpAdminSettings, dbadmin.id)
+    if settings and (
+        int(settings.delegated_traffic or 0) > 0
+        or int(settings.total_traffic or 0) > 0
+        or admin_hierarchy.own_credit_spend(db, settings) > 0
+    ):
+        raise HTTPException(status_code=409, detail="Resolve administrator credit before deletion")
+    historical_rows = sum(
+        query.count()
+        for query in (
+            db.query(AdminCreditTransfer).filter(
+                (AdminCreditTransfer.from_admin_id == dbadmin.id)
+                | (AdminCreditTransfer.to_admin_id == dbadmin.id)
+                | (AdminCreditTransfer.actor_admin_id == dbadmin.id)
+            ),
+            db.query(AdminSuspensionEvent).filter(
+                (AdminSuspensionEvent.admin_id == dbadmin.id)
+                | (AdminSuspensionEvent.actor_admin_id == dbadmin.id)
+            ),
+            db.query(AdminBulkJob).filter(
+                (AdminBulkJob.actor_admin_id == dbadmin.id)
+                | (AdminBulkJob.target_admin_id == dbadmin.id)
+            ),
+            db.query(AdminUserPlan).filter(AdminUserPlan.owner_admin_id == dbadmin.id),
+            db.query(AdminUserPlanVersion).filter(AdminUserPlanVersion.created_by_admin_id == dbadmin.id),
+            db.query(UserPlanAssignment).filter(UserPlanAssignment.actor_admin_id == dbadmin.id),
+        )
+    )
+    if historical_rows:
+        raise HTTPException(
+            status_code=409,
+            detail="Administrator has immutable history; suspend the account instead",
         )
 
     target_id = dbadmin.id
@@ -300,10 +362,18 @@ def get_admins(
     limit: Optional[int] = None,
     username: Optional[str] = None,
     db: Session = Depends(get_db),
-    admin: Admin = Depends(Admin.check_sudo_admin),
+    admin: Admin = Depends(Admin.check_admin_manager),
 ):
     """Fetch a list of admins with optional filters for pagination and username."""
-    return crud.get_admins(db, offset, limit, username)
+    actor = crud.get_admin(db, admin.username)
+    scope_admin_id = (
+        actor.id
+        if actor is not None
+        and admin_hierarchy.hierarchy_enabled(db)
+        and not admin_hierarchy.is_owner(db, actor)
+        else None
+    )
+    return crud.get_admins(db, offset, limit, username, scope_admin_id=scope_admin_id)
 
 
 @router.get(
@@ -316,12 +386,22 @@ def get_managed_admins(
     limit: int = 20,
     username: Optional[str] = None,
     db: Session = Depends(get_db),
-    admin: Admin = Depends(Admin.check_sudo_admin),
+    admin: Admin = Depends(Admin.check_admin_manager),
 ):
     """Return a stable, paginated view of admins and their MarzHelp limits."""
     limit = max(1, min(limit, 100))
     offset = max(offset, 0)
-    dbadmins, total = crud.get_admins_with_count(db, offset, limit, username)
+    actor = crud.get_admin(db, admin.username)
+    scope_admin_id = (
+        actor.id
+        if actor is not None
+        and admin_hierarchy.hierarchy_enabled(db)
+        and not admin_hierarchy.is_owner(db, actor)
+        else None
+    )
+    dbadmins, total = crud.get_admins_with_count(
+        db, offset, limit, username, scope_admin_id=scope_admin_id
+    )
     settings_by_admin = (
         {
             row.admin_id: row
@@ -414,15 +494,36 @@ def create_managed_admin(
     request: Request,
     new_admin: ManagedAdminCreate,
     db: Session = Depends(get_db),
-    admin: Admin = Depends(Admin.check_sudo_admin),
+    admin: Admin = Depends(Admin.check_admin_manager),
 ):
     """Create an admin and its MarzHelp policy in one transaction."""
+    if new_admin.is_sudo:
+        raise HTTPException(
+            status_code=403,
+            detail="Owner can only be selected with marzban set-owner <username>",
+        )
     try:
         dbadmin = crud.create_admin(db, new_admin, commit=False)
+        actor = crud.get_admin(db, admin.username)
+        hierarchy_on = actor is not None and admin_hierarchy.hierarchy_enabled(db)
+        policy = new_admin.policy
+        if hierarchy_on:
+            policy = policy.model_copy(
+                update={"total_traffic": 0, "calculate_volume": "created_traffic"}
+            )
         settings = crud.upsert_marzhelp_admin_policy(
-            db, dbadmin.id, new_admin.policy, commit=False
+            db, dbadmin.id, policy, commit=False
         )
-        db.commit()
+        if hierarchy_on:
+            admin_hierarchy.attach_new_child(
+                db,
+                actor=actor,
+                parent=actor,
+                child=dbadmin,
+                child_role=new_admin.role or admin_hierarchy.ADMIN,
+            )
+        else:
+            db.commit()
         db.refresh(dbadmin)
         db.refresh(settings)
     except IntegrityError:
@@ -453,9 +554,14 @@ def modify_managed_admin(
     modified_admin: ManagedAdminModify,
     dbadmin: Admin = Depends(get_admin_by_username),
     db: Session = Depends(get_db),
-    current_admin: Admin = Depends(Admin.check_sudo_admin),
+    current_admin: Admin = Depends(Admin.check_admin_manager),
 ):
     """Update an admin account and its MarzHelp policy atomically."""
+    actor = crud.get_admin(db, current_admin.username)
+    if actor is not None and not admin_hierarchy.admin_in_scope(db, actor, dbadmin.id):
+        raise HTTPException(status_code=403, detail="Admin is outside your scope")
+    if modified_admin.is_sudo is not None and modified_admin.is_sudo != dbadmin.is_sudo:
+        raise HTTPException(status_code=403, detail="Role cannot be changed through this endpoint")
     if (dbadmin.username != current_admin.username) and dbadmin.is_sudo:
         raise HTTPException(
             status_code=403,
@@ -470,9 +576,15 @@ def modify_managed_admin(
         else MarzhelpAdminPolicy(),
     )
     dbadmin = crud.update_admin(db, dbadmin, modified_admin, commit=False)
-    settings = crud.upsert_marzhelp_admin_policy(
-        db, dbadmin.id, modified_admin.policy, commit=False
-    )
+    policy = modified_admin.policy
+    if admin_hierarchy.hierarchy_enabled(db) and current_settings is not None:
+        policy = policy.model_copy(
+            update={
+                "total_traffic": current_settings.total_traffic,
+                "calculate_volume": current_settings.calculate_volume,
+            }
+        )
+    settings = crud.upsert_marzhelp_admin_policy(db, dbadmin.id, policy, commit=False)
     db.commit()
     db.refresh(dbadmin)
     db.refresh(settings)

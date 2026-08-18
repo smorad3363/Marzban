@@ -60,8 +60,41 @@ jobs:
       - name: Install backend dependencies
         run: python -m pip install -r requirements.txt pytest
 
-      - name: Verify MySQL migration and partial-DDL recovery
-        run: python -m pytest -q tests/test_mysql_device_limit_migration.py
+      - name: Run backend regression suite
+        run: >-
+          python -m pytest -q
+          --ignore=tests/test_mysql_device_limit_migration.py
+          --ignore=tests/test_mysql_admin_hierarchy_migration.py
+
+      - name: Verify MySQL migrations and partial-DDL recovery
+        run: >-
+          python -m pytest -q
+          tests/test_mysql_device_limit_migration.py
+          tests/test_mysql_admin_hierarchy_migration.py
+
+      - name: Verify backup checksum and restore
+        env:
+          MYSQL_PWD: root-test-password
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y default-mysql-client
+          mysqldump --host=127.0.0.1 --user=root --single-transaction --routines --triggers marzban_test > /tmp/marzban_test.sql
+          sha256sum /tmp/marzban_test.sql | tee /tmp/marzban_test.sql.sha256
+          test -s /tmp/marzban_test.sql
+          mysql --host=127.0.0.1 --user=root -e "DROP DATABASE IF EXISTS marzban_restore; CREATE DATABASE marzban_restore CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+          mysql --host=127.0.0.1 --user=root marzban_restore < /tmp/marzban_test.sql
+          source_count="$(mysql --host=127.0.0.1 --user=root --batch --skip-column-names -e 'SELECT COUNT(*) FROM marzban_test.admins')"
+          restore_count="$(mysql --host=127.0.0.1 --user=root --batch --skip-column-names -e 'SELECT COUNT(*) FROM marzban_restore.admins')"
+          test "${source_count}" = "${restore_count}"
+
+      - name: Verify v4.8.0 application rollback compatibility
+        run: >-
+          docker run --rm
+          --add-host host.docker.internal:host-gateway
+          --env SQLALCHEMY_DATABASE_URL=mysql+pymysql://marzban:marzban-test-password@host.docker.internal:3306/marzban_test
+          --entrypoint python
+          ghcr.io/smorad3363/marzban:v4.8.0
+          -c "from app.db import engine; connection = engine.connect(); print(connection.exec_driver_sql('SELECT COUNT(*) FROM admins').scalar()); connection.close()"
 
   build-docker-image:
     needs: test-mysql

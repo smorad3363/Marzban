@@ -9,7 +9,7 @@ from app.models.admin import Admin
 from app.models.proxy import ProxyHost, ProxyInbound, ProxyTypes
 from app.models.system import SystemStats
 from app.models.user import UserStatus
-from app.utils import marzhelp_policy, responses
+from app.utils import admin_hierarchy, marzhelp_policy, responses
 from app.utils.audit import AuditLogService
 from app.utils.system import cpu_usage, memory_usage, realtime_bandwidth
 
@@ -38,45 +38,57 @@ def get_system_stats(
     db: Session = Depends(get_db), admin: Admin = Depends(Admin.get_current)
 ):
     """Fetch system stats including memory, CPU, and user metrics."""
-    mem = memory_usage()
-    cpu = cpu_usage()
-    system = crud.get_system_usage(db)
     dbadmin: Union[Admin, None] = crud.get_admin(db, admin.username)
     effective_admin = dbadmin or admin
+    hierarchy_on = dbadmin is not None and admin_hierarchy.hierarchy_enabled(db)
+    owner_role = admin_hierarchy.is_owner(db, effective_admin)
     allowed_inbounds = marzhelp_policy.allowed_inbound_tags(db, effective_admin)
+    count_scope = dbadmin.id if hierarchy_on and not owner_role else None
+    legacy_admin = dbadmin if not hierarchy_on and not admin.is_sudo else None
 
     total_user = crud.get_users_count(
         db,
-        admin=dbadmin if not admin.is_sudo else None,
+        admin=legacy_admin,
+        scope_admin_id=count_scope,
         allowed_inbounds=allowed_inbounds,
     )
     users_active = crud.get_users_count(
-        db, status=UserStatus.active, admin=dbadmin if not admin.is_sudo else None,
+        db, status=UserStatus.active, admin=legacy_admin, scope_admin_id=count_scope,
         allowed_inbounds=allowed_inbounds,
     )
     users_disabled = crud.get_users_count(
-        db, status=UserStatus.disabled, admin=dbadmin if not admin.is_sudo else None,
+        db, status=UserStatus.disabled, admin=legacy_admin, scope_admin_id=count_scope,
         allowed_inbounds=allowed_inbounds,
     )
     users_on_hold = crud.get_users_count(
-        db, status=UserStatus.on_hold, admin=dbadmin if not admin.is_sudo else None,
+        db, status=UserStatus.on_hold, admin=legacy_admin, scope_admin_id=count_scope,
         allowed_inbounds=allowed_inbounds,
     )
     users_expired = crud.get_users_count(
-        db, status=UserStatus.expired, admin=dbadmin if not admin.is_sudo else None,
+        db, status=UserStatus.expired, admin=legacy_admin, scope_admin_id=count_scope,
         allowed_inbounds=allowed_inbounds,
     )
     users_limited = crud.get_users_count(
-        db, status=UserStatus.limited, admin=dbadmin if not admin.is_sudo else None,
+        db, status=UserStatus.limited, admin=legacy_admin, scope_admin_id=count_scope,
         allowed_inbounds=allowed_inbounds,
     )
     online_users = crud.count_online_users(
         db,
         24,
-        admin=dbadmin if not admin.is_sudo else None,
+        admin=legacy_admin,
+        scope_admin_id=count_scope,
         allowed_inbounds=allowed_inbounds,
     )
-    realtime_bandwidth_stats = realtime_bandwidth()
+    if owner_role:
+        mem = memory_usage()
+        cpu = cpu_usage()
+        system = crud.get_system_usage(db)
+        realtime_bandwidth_stats = realtime_bandwidth()
+    else:
+        mem = type("Resource", (), {"total": 0, "used": 0})()
+        cpu = type("CPU", (), {"cores": 0, "percent": 0.0})()
+        system = type("Bandwidth", (), {"uplink": 0, "downlink": 0})()
+        realtime_bandwidth_stats = type("Realtime", (), {"incoming_bytes": 0, "outgoing_bytes": 0})()
 
     return SystemStats(
         version=__version__,
@@ -91,10 +103,10 @@ def get_system_stats(
         users_expired=users_expired,
         users_limited=users_limited,
         users_on_hold=users_on_hold,
-        incoming_bandwidth=system.uplink if admin.is_sudo else 0,
-        outgoing_bandwidth=system.downlink if admin.is_sudo else 0,
-        incoming_bandwidth_speed=realtime_bandwidth_stats.incoming_bytes if admin.is_sudo else 0,
-        outgoing_bandwidth_speed=realtime_bandwidth_stats.outgoing_bytes if admin.is_sudo else 0,
+        incoming_bandwidth=system.uplink if owner_role else 0,
+        outgoing_bandwidth=system.downlink if owner_role else 0,
+        incoming_bandwidth_speed=realtime_bandwidth_stats.incoming_bytes if owner_role else 0,
+        outgoing_bandwidth_speed=realtime_bandwidth_stats.outgoing_bytes if owner_role else 0,
     )
 
 
