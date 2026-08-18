@@ -1622,6 +1622,226 @@ update_marzban() {
     $COMPOSE -f $COMPOSE_FILE -p "$APP_NAME" pull
 }
 
+mysql_upgrade_container_id() {
+    $COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" ps -q -a mysql 2>/dev/null
+}
+
+mysql_upgrade_wait_for_ready() {
+    local stage="$1"
+    local container_id=""
+    local state=""
+    local attempt
+
+    for attempt in $(seq 1 90); do
+        container_id=$(mysql_upgrade_container_id)
+        if [ -n "$container_id" ]; then
+            if docker exec "$container_id" sh -c \
+                'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysqladmin --user=root --host=127.0.0.1 ping --silent' \
+                >/dev/null 2>&1; then
+                return 0
+            fi
+
+            state=$(docker inspect --format '{{.State.Status}}' "$container_id" 2>/dev/null || true)
+            if [ "$state" = "exited" ] || [ "$state" = "dead" ]; then
+                break
+            fi
+        fi
+
+        if [ $((attempt % 10)) -eq 0 ]; then
+            colorized_echo blue "Waiting for MySQL ${stage} (${attempt}/90)"
+        fi
+        sleep 2
+    done
+
+    colorized_echo red "MySQL ${stage} did not become ready."
+    if [ -n "$container_id" ]; then
+        docker logs --tail 200 "$container_id" || true
+    fi
+    return 1
+}
+
+mysql_upgrade_server_version() {
+    local container_id="$1"
+    docker exec "$container_id" sh -c \
+        'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql --user=root --batch --skip-column-names --execute="SELECT VERSION()"'
+}
+
+mysql_upgrade_command() {
+    if [ "$#" -ne 0 ]; then
+        colorized_echo red "Usage: marzban mysql-upgrade"
+        exit 1
+    fi
+
+    check_running_as_root
+    if ! is_marzban_installed; then
+        colorized_echo red "Marzban's not installed!"
+        exit 1
+    fi
+    if [ ! -f "$COMPOSE_FILE" ] || [ ! -f "$ENV_FILE" ]; then
+        colorized_echo red "MySQL upgrade requires $COMPOSE_FILE and $ENV_FILE."
+        exit 1
+    fi
+
+    detect_compose
+    if ! command -v yq >/dev/null 2>&1; then
+        detect_os
+        install_yq
+    fi
+    if [ "$(yq -r '.services.mysql.image // ""' "$COMPOSE_FILE")" = "" ]; then
+        colorized_echo red "The compose file does not define a mysql service."
+        exit 1
+    fi
+
+    local container_id
+    container_id=$(mysql_upgrade_container_id)
+    if [ -z "$container_id" ] || ! mysql_upgrade_wait_for_ready "source"; then
+        colorized_echo red "The current MySQL server must be healthy before upgrading."
+        colorized_echo yellow "If mysql:latest already failed on an 8.0 data directory, restore image: mysql:8.0, start it, then run this command."
+        exit 1
+    fi
+    container_id=$(mysql_upgrade_container_id)
+
+    local current_version
+    current_version=$(mysql_upgrade_server_version "$container_id" | tr -d '\r[:space:]')
+    local stages=()
+    case "$current_version" in
+        8.0.*|8.1.*|8.2.*|8.3.*)
+            stages=("mysql:8.4" "mysql:9.7" "mysql:latest")
+            ;;
+        8.4.*)
+            stages=("mysql:9.7" "mysql:latest")
+            ;;
+        9.0.*|9.1.*|9.2.*|9.3.*|9.4.*|9.5.*|9.6.*)
+            stages=("mysql:9.7" "mysql:latest")
+            ;;
+        9.7.*)
+            stages=("mysql:latest")
+            ;;
+        26.*)
+            stages=("mysql:latest")
+            ;;
+        *)
+            colorized_echo red "Unsupported MySQL source version: ${current_version}"
+            colorized_echo yellow "No data or compose changes were made."
+            exit 1
+            ;;
+    esac
+
+    colorized_echo blue "Current MySQL version: ${current_version}"
+    colorized_echo yellow "A full logical and physical backup will be created before the first upgrade stage."
+
+    local timestamp
+    local upgrade_backup_dir
+    local logical_backup
+    local physical_backup
+    timestamp=$(date +"%Y%m%d%H%M%S")
+    upgrade_backup_dir="$APP_DIR/backup/mysql-upgrade-$timestamp"
+    logical_backup="$upgrade_backup_dir/mysql-all-databases.sql"
+    physical_backup="$upgrade_backup_dir/mysql-datadir.tar.gz"
+    install -d -m 700 "$upgrade_backup_dir"
+    cp "$COMPOSE_FILE" "$upgrade_backup_dir/docker-compose.yml.before-upgrade"
+    cp "$ENV_FILE" "$upgrade_backup_dir/.env.before-upgrade"
+    chmod 600 "$upgrade_backup_dir/.env.before-upgrade"
+
+    colorized_echo blue "Creating consistent logical MySQL backup"
+    if ! docker exec "$container_id" sh -c \
+        'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysqldump --user=root --all-databases --single-transaction --routines --events --triggers --set-gtid-purged=OFF --hex-blob' \
+        > "$logical_backup"; then
+        colorized_echo red "Logical MySQL backup failed; upgrade aborted."
+        exit 1
+    fi
+    if [ ! -s "$logical_backup" ]; then
+        colorized_echo red "Logical MySQL backup is empty; upgrade aborted."
+        exit 1
+    fi
+    sha256sum "$logical_backup" > "$logical_backup.sha256"
+
+    colorized_echo blue "Stopping services for a physical MySQL data snapshot"
+    down_marzban
+
+    local data_root
+    local mysql_data_dir
+    data_root=$(readlink -f "$DATA_DIR" 2>/dev/null || true)
+    mysql_data_dir=$(readlink -f "$DATA_DIR/mysql" 2>/dev/null || true)
+    if [ -z "$data_root" ] || [ "$data_root" = "/" ] || \
+       [ -z "$mysql_data_dir" ] || [ "$mysql_data_dir" != "$data_root/mysql" ] || \
+       [ ! -d "$mysql_data_dir" ]; then
+        colorized_echo red "Unsafe or missing MySQL data directory: $DATA_DIR/mysql"
+        colorized_echo yellow "The source image is unchanged; start services after correcting the data path."
+        up_marzban || true
+        exit 1
+    fi
+
+    if ! tar --numeric-owner -czpf "$physical_backup" -C "$data_root" mysql; then
+        colorized_echo red "Physical MySQL backup failed; upgrade aborted before changing the image."
+        up_marzban || true
+        exit 1
+    fi
+    if [ ! -s "$physical_backup" ]; then
+        colorized_echo red "Physical MySQL backup is empty; upgrade aborted before changing the image."
+        up_marzban || true
+        exit 1
+    fi
+    sha256sum "$physical_backup" > "$physical_backup.sha256"
+
+    local stage
+    local upgraded_version
+    for stage in "${stages[@]}"; do
+        colorized_echo blue "Upgrading MySQL to ${stage}"
+        yq -i ".services.mysql.image = \"${stage}\"" "$COMPOSE_FILE"
+        if ! $COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" pull mysql; then
+            colorized_echo red "Could not pull ${stage}."
+            colorized_echo yellow "Upgrade stopped. Backups: ${upgrade_backup_dir}"
+            exit 1
+        fi
+        if ! $COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" up -d mysql; then
+            colorized_echo red "Could not start ${stage}."
+            colorized_echo yellow "Do not switch back to an older image after a data-dictionary upgrade. Backups: ${upgrade_backup_dir}"
+            exit 1
+        fi
+        if ! mysql_upgrade_wait_for_ready "$stage"; then
+            colorized_echo yellow "Upgrade stopped at ${stage}. Do not start an older MySQL image against this data directory."
+            colorized_echo yellow "Logical and physical backups: ${upgrade_backup_dir}"
+            exit 1
+        fi
+
+        container_id=$(mysql_upgrade_container_id)
+        upgraded_version=$(mysql_upgrade_server_version "$container_id" | tr -d '\r[:space:]')
+        case "$stage" in
+            mysql:8.4)
+                [[ "$upgraded_version" == 8.4.* ]] || {
+                    colorized_echo red "Expected MySQL 8.4, got ${upgraded_version}. Backups: ${upgrade_backup_dir}"
+                    exit 1
+                }
+                ;;
+            mysql:9.7)
+                [[ "$upgraded_version" == 9.7.* ]] || {
+                    colorized_echo red "Expected MySQL 9.7, got ${upgraded_version}. Backups: ${upgrade_backup_dir}"
+                    exit 1
+                }
+                ;;
+        esac
+        colorized_echo green "MySQL stage ready: ${upgraded_version}"
+        $COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" stop mysql
+    done
+
+    colorized_echo blue "Starting all Marzban services on mysql:latest"
+    up_marzban
+    if ! mysql_upgrade_wait_for_ready "latest"; then
+        colorized_echo yellow "MySQL upgrade completed but the final server is not healthy. Backups: ${upgrade_backup_dir}"
+        exit 1
+    fi
+    if ! verify_marzban_health; then
+        colorized_echo yellow "MySQL is healthy, but Marzban health verification failed. Backups: ${upgrade_backup_dir}"
+        exit 1
+    fi
+
+    container_id=$(mysql_upgrade_container_id)
+    upgraded_version=$(mysql_upgrade_server_version "$container_id" | tr -d '\r[:space:]')
+    colorized_echo green "MySQL upgraded successfully: ${current_version} -> ${upgraded_version}"
+    colorized_echo green "Verified backups: ${upgrade_backup_dir}"
+}
+
 rollback_command() {
     if [ "$#" -ne 1 ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
         colorized_echo red "Usage: marzban rollback <version>"
@@ -1691,6 +1911,7 @@ usage() {
     colorized_echo yellow "  install         $(tput sgr0)– Install Marzban"
     colorized_echo yellow "  update          $(tput sgr0)– Update to latest or an exact version"
     colorized_echo yellow "  rollback        $(tput sgr0)– Roll back to an exact version"
+    colorized_echo yellow "  mysql-upgrade   $(tput sgr0)– Safely upgrade an existing MySQL data directory to latest"
     colorized_echo yellow "  uninstall       $(tput sgr0)– Uninstall Marzban"
     colorized_echo yellow "  install-script  $(tput sgr0)– Install Marzban script"
     colorized_echo yellow "  backup          $(tput sgr0)– Manual backup launch"
@@ -1734,6 +1955,8 @@ case "$1" in
         shift; update_command "$@";;
     rollback)
         shift; rollback_command "$@";;
+    mysql-upgrade)
+        shift; mysql_upgrade_command "$@";;
     uninstall)
         shift; uninstall_command "$@";;
     install-script)

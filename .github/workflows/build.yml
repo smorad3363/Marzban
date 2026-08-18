@@ -90,7 +90,7 @@ jobs:
           mysql_container="$(docker ps --filter publish=3306 --format '{{.ID}}' | head -1)"
           test -n "${mysql_container}"
           docker exec -e MYSQL_PWD=root-test-password "${mysql_container}" \
-            mysqldump --user=root --single-transaction --routines --triggers marzban_test > /tmp/marzban_test.sql
+            mysqldump --user=root --single-transaction --routines --events --triggers --set-gtid-purged=OFF marzban_test > /tmp/marzban_test.sql
           sha256sum /tmp/marzban_test.sql | tee /tmp/marzban_test.sql.sha256
           test -s /tmp/marzban_test.sql
           docker exec -e MYSQL_PWD=root-test-password "${mysql_container}" mysql --user=root \
@@ -110,8 +110,74 @@ jobs:
           ghcr.io/smorad3363/marzban:v4.8.0
           -c "from app.db import engine; connection = engine.connect(); print(connection.exec_driver_sql('SELECT COUNT(*) FROM admins').scalar()); connection.close()"
 
+  test-mysql-upgrade:
+    name: test-mysql existing-volume upgrade
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify 8.0 to 8.4 to 9.7 to latest data upgrade
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          volume_name="marzban-mysql-upgrade-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          container_name="marzban-mysql-upgrade"
+          cleanup() {
+            docker rm --force "${container_name}" >/dev/null 2>&1 || true
+            docker volume rm "${volume_name}" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker volume create "${volume_name}" >/dev/null
+
+          start_mysql() {
+            local image="$1"
+            docker rm --force "${container_name}" >/dev/null 2>&1 || true
+            docker run --detach --name "${container_name}" \
+              --env MYSQL_ROOT_PASSWORD=root-test-password \
+              --env MYSQL_DATABASE=marzban \
+              --volume "${volume_name}:/var/lib/mysql" \
+              "${image}" --mysqlx=OFF >/dev/null
+            for attempt in $(seq 1 120); do
+              if docker exec -e MYSQL_PWD=root-test-password "${container_name}" \
+                mysqladmin --user=root --host=127.0.0.1 ping --silent >/dev/null 2>&1; then
+                return 0
+              fi
+              state="$(docker inspect --format '{{.State.Status}}' "${container_name}" 2>/dev/null || true)"
+              if [[ "${state}" == "exited" || "${state}" == "dead" ]]; then
+                docker logs "${container_name}"
+                return 1
+              fi
+              sleep 2
+            done
+            docker logs "${container_name}"
+            return 1
+          }
+
+          query_mysql() {
+            docker exec -e MYSQL_PWD=root-test-password "${container_name}" \
+              mysql --user=root --batch --skip-column-names --execute "$1"
+          }
+
+          start_mysql mysql:8.0
+          query_mysql "CREATE TABLE marzban.upgrade_sentinel (id BIGINT PRIMARY KEY, value VARCHAR(64) NOT NULL); INSERT INTO marzban.upgrade_sentinel VALUES (1, 'preserved-through-upgrade');"
+          query_mysql "SELECT VERSION(); SELECT value FROM marzban.upgrade_sentinel WHERE id = 1;"
+          docker stop --time 60 "${container_name}" >/dev/null
+
+          for image in mysql:8.4 mysql:9.7 mysql:latest; do
+            start_mysql "${image}"
+            version="$(query_mysql 'SELECT VERSION()')"
+            value="$(query_mysql 'SELECT value FROM marzban.upgrade_sentinel WHERE id = 1')"
+            echo "${image}: ${version}"
+            test "${value}" = "preserved-through-upgrade"
+            case "${image}" in
+              mysql:8.4) [[ "${version}" == 8.4.* ]] ;;
+              mysql:9.7) [[ "${version}" == 9.7.* ]] ;;
+            esac
+            docker stop --time 60 "${container_name}" >/dev/null
+          done
+
   build-docker-image:
-    needs: test-mysql
+    needs:
+      - test-mysql
+      - test-mysql-upgrade
     if: ${{ github.event_name != 'workflow_dispatch' || inputs.tests_only != true }}
     runs-on: ubuntu-latest
     steps:

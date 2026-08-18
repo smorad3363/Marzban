@@ -139,7 +139,7 @@ def test_installer_targets_master_and_latest_mysql_image():
     assert 'elif [ "$database_type" == "mysql" ]; then' in installer
     assert 'image: $(marzban_docker_image "${marzban_version}")' in installer
     assert "image: mysql:latest" in installer
-    assert "image: mysql:8.0" not in installer
+    assert "    image: mysql:8.0\n" not in installer
     assert 'requested_version="latest"' in installer
     assert 'previous_image=$(yq -r' in installer
     assert "for attempt in $(seq 1 150)" in installer
@@ -148,3 +148,21 @@ def test_installer_targets_master_and_latest_mysql_image():
     assert "Update health check failed" in installer
     assert 'update_command --version "$1"' in installer
     assert 'rollback)' in installer
+
+
+def test_mysql_latest_upgrade_is_staged_and_backed_up():
+    installer = Path("scripts/marzban.sh").read_text(encoding="utf-8")
+
+    stage_84 = installer.index('stages=("mysql:8.4" "mysql:9.7" "mysql:latest")')
+    stage_97 = installer.index('stages=("mysql:9.7" "mysql:latest")', stage_84)
+    stage_latest = installer.index('stages=("mysql:latest")', stage_97)
+    assert stage_84 < stage_97 < stage_latest
+    assert "--all-databases --single-transaction" in installer
+    assert "--set-gtid-purged=OFF" in installer
+    assert 'physical_backup="$upgrade_backup_dir/mysql-datadir.tar.gz"' in installer
+    assert 'sha256sum "$logical_backup"' in installer
+    assert 'sha256sum "$physical_backup"' in installer
+    assert 'tar --numeric-owner -czpf "$physical_backup"' in installer
+    assert "Do not switch back to an older image" in installer
+    assert 'mysql-upgrade)' in installer
+    assert 'mysql_upgrade_command "$@"' in installer
