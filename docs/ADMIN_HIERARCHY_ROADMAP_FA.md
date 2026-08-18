@@ -2,7 +2,7 @@
 
 آخرین به‌روزرسانی: `2026-08-19`
 
-وضعیت: `V4.9.2_RELEASE_RETRY_PENDING` — schema، backend، API، CLI و UI پیاده شده‌اند. اجرای واقعی MySQL 8.0 برای `v4.9.1` خطای `1170` مربوط به unique index روی `BLOB token_hash` را آشکار کرد؛ اصلاح نوع به `BINARY(32)` برای `v4.9.2` آماده آزمون است. تا تعیین Owner، رفتار اجرایی قدیمی `is_sudo` حفظ می‌شود.
+وضعیت: `V4.9.2_RELEASED` — schema، backend، API، CLI و UI پیاده و منتشر شدند. migration تازه/قدیمی/partial-DDL، backup/checksum/restore و rollback برنامه `v4.8.0` روی MySQL 8.0 موفق‌اند. تا تعیین Owner، رفتار اجرایی قدیمی `is_sudo` حفظ می‌شود.
 
 ## قانون اجباری شروع هر چت و هر جلسه
 
@@ -782,7 +782,7 @@ reason codeهای حداقلی برای لاگ parent:
 
 ## نقطه دقیق ادامه
 
-مرحله بعد: اصلاح کوچک MySQL برای `v4.9.2` تست و commit شود؛ سپس tag جدید push و workflow تا پایان دنبال شود. tagهای تغییرناپذیر و ناموفق `v4.9.0` و `v4.9.1` جابه‌جا یا حذف نمی‌شوند. اجرای `32196467586` در job `95901398510` با خطای دقیق `(1170, "BLOB/TEXT column 'token_hash' used in key specification without a key length")` شکست خورد؛ علت `LargeBinary(32)` بود که MySQL آن را `BLOB` می‌سازد. اصلاح هدفمند `BINARY(32)` است. انتشار فقط پس از موفقیت MySQL 8.0، partial-DDL recovery، backup/checksum/restore و rollback application `v4.8.0` انجام شود.
+پیاده‌سازی و انتشار کامل است. tag `v4.9.2` روی commit `ded182ec2f50b3fe553752947eff27be7912c83e` قرار دارد؛ GitHub Actions run `32196890824` موفق شد؛ Release دارای نشان Latest است؛ imageهای `v4.9.2`، `latest` و `sha-ded182ec2f50` همگی digest برابر `sha256:c0fdbfb7c4af7b2360ca8718c83f20ccf4dca7534fa38becb550e81bd6096973` دارند. tagهای ناموفق `v4.9.0` و `v4.9.1` برای حفظ تاریخچه جابه‌جا یا حذف نشدند. قدم عملیاتی بعدی فقط backup دیتابیس واقعی و update/install کنترل‌شده `v4.9.2` است.
 
 ### گزارش DB برش foundation
 
@@ -831,3 +831,4 @@ git log -3 --oneline --decorate
 | `2026-08-19` | ۳ تا ۱۳ | پیاده‌سازی محلی کامل؛ گیت خارجی باز | تکمیل hierarchy/API/CLI/UI، تمدید مستقل با Plan، audit عملیات حساس، بستن conflict کلید idempotency، اصلاح جهت reclaim ledger، حذف دو index تکراری و حذف N+1 در tree؛ Graphify=`4796 nodes/10304 edges` | `14d9592` | `82 passed, 2 skipped`؛ skipها فقط MySQL؛ TypeScript=`0`، Vite production build=`0`، `compileall`=`0`، `bash -n`=`0`، YAML parse=`OK` | احراز هویت GitHub؛ push branch/tag `v4.9.0`؛ انتظار برای workflow MySQL/backup/rollback و انتشار |
 | `2026-08-19` | ۱۴ | شکست گیت MySQL؛ اصلاح محلی کامل | branch و tag `v4.9.0` push شدند؛ workflow `32195714228` در job `95899175897` با MySQL error `3818` شکست خورد، چون `SMALLINT` primary key جدول singleton به‌طور ضمنی `AUTO_INCREMENT` شده بود؛ build/release skip شد. برای `v4.9.1` شناسه شش جدول مرجع ثابت و singleton صریحاً `autoincrement=False` شد | `dc357cc` + working tree | `83 passed, 2 skipped`؛ تست DDL جدید هر شش جدول؛ compileall/YAML/diff-check سبز؛ Graphify=`4796/10304/442` | commit و tag `v4.9.1`؛ دنبال‌کردن workflow و release تا نتیجه نهایی |
 | `2026-08-19` | ۱۴ | شکست دوم گیت MySQL؛ اصلاح کوچک در حال آزمون | `v4.9.1@cb696c4` خطای قبلی را رفع کرد، ولی run `32196467586` در job `95901398510` با MySQL error `1170` روی unique index فیلد `token_hash BLOB` شکست خورد. نوع hash ثابت SHA-256 برای `v4.9.2` به `BINARY(32)` تغییر کرد | `cb696c4` + working tree | backend regression سبز؛ migration واقعی در run دوم خطا داد | تست regression؛ commit/tag `v4.9.2`؛ یک retry نهایی workflow |
+| `2026-08-19` | ۱۵ | کامل و منتشرشده | `v4.9.2` منتشر شد؛ MySQL 8.0 fresh/legacy/partial-DDL، backup/checksum/restore، rollback application `v4.8.0`، frontend build و image چندمعماری همگی موفق؛ Latest Release و GHCR `v4.9.2/latest` ساخته شدند | `ded182ec2f50b3fe553752947eff27be7912c83e` | Actions run `32196890824`=`success`؛ digest=`sha256:c0fdbfb7c4af7b2360ca8718c83f20ccf4dca7534fa38becb550e81bd6096973` | backup دیتابیس واقعی و rollout کنترل‌شده `v4.9.2` |
