@@ -603,7 +603,11 @@ def update_user(
 
     sync_device_slots(db, dbuser)
 
-    if renewal or int(getattr(dbuser, "_marzhelp_volume_delta", 0)) != 0:
+    if (
+        renewal
+        or int(getattr(dbuser, "_marzhelp_volume_delta", 0)) != 0
+        or int(getattr(dbuser, "_marzhelp_allowance_delta", 0)) != 0
+    ):
         db.flush()
         marzhelp_policy.record_renewal(db, dbuser, allowance_consumed)
 
@@ -1107,9 +1111,16 @@ def upsert_marzhelp_admin_policy(
         .with_for_update()
         .first()
     )
+    is_new = settings is None
     if settings is None:
         settings = MarzhelpAdminSettings(admin_id=admin_id)
         db.add(settings)
+
+    previous_mode = "used_traffic" if is_new else (settings.calculate_volume or "used_traffic")
+    switching_to_allocated = (
+        policy.calculate_volume == "created_traffic"
+        and previous_mode != "created_traffic"
+    )
 
     used_capacity = marzhelp_policy.capacity_used(db, admin_id)
     current_users = marzhelp_policy.user_count_used(db, admin_id)
@@ -1134,31 +1145,42 @@ def upsert_marzhelp_admin_policy(
         )
     settings.capacity_used = used_capacity
     settings.user_count_used = current_users
-    used_volume = marzhelp_policy.provisioned_volume_used(db, admin_id)
+
+    if policy.calculate_volume == "created_traffic":
+        credit_used = (
+            max(
+                int(settings.used_traffic or 0),
+                marzhelp_policy.allocated_credit_baseline(db, admin_id),
+            )
+            if switching_to_allocated
+            else int(settings.used_traffic or 0)
+        )
+    else:
+        credit_used = marzhelp_policy.used_traffic_spend(db, admin_id)
     if (
-        policy.provisioning_volume_limit is not None
-        and used_volume > policy.provisioning_volume_limit
+        policy.total_traffic is not None
+        and policy.total_traffic > 0
+        and credit_used > policy.total_traffic
     ):
         raise marzhelp_policy.MarzhelpPolicyError(
-            "volume_limit_below_usage",
+            "credit_limit_below_usage",
             (
-                "MarzHelp: provisioning volume cannot be lower than current allocation "
-                f"({used_volume})"
+                "MarzHelp: traffic credit cannot be lower than current usage "
+                f"({credit_used})"
             ),
         )
-    settings.provisioning_volume_used = used_volume
 
     values = policy.model_dump(
         exclude={
             "allowed_inbounds",
             "allowed_user_limits",
             "allowed_subscription_modes",
-            "provisioning_volume_used",
-            "renewals_used",
         }
     )
     for field, value in values.items():
         setattr(settings, field, value)
+    if switching_to_allocated:
+        settings.used_traffic = credit_used
 
     settings.inbound_permissions = [
         MarzhelpAdminInboundPermission(admin_id=admin_id, inbound_tag=tag)

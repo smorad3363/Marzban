@@ -94,6 +94,41 @@ def test_policy_rejects_negative_or_unknown_volume_rules():
         MarzhelpAdminPolicy(max_users=0)
     with pytest.raises(ValidationError):
         MarzhelpAdminPolicy(calculate_volume="invalid")
+    with pytest.raises(ValidationError):
+        MarzhelpAdminPolicy(admin_traffic_warning_percent=0)
+    with pytest.raises(ValidationError):
+        MarzhelpAdminPolicy(sudo_traffic_warning_percent=101)
+
+
+def test_policy_update_cannot_reset_internal_allocated_credit(session):
+    admin = crud.create_admin(
+        session,
+        AdminCreate(username="credit-owner", password="secret", is_sudo=False),
+    )
+    settings = crud.upsert_marzhelp_admin_policy(
+        session,
+        admin.id,
+        MarzhelpAdminPolicy(
+            total_traffic=100 * 1024**3,
+            calculate_volume="created_traffic",
+        ),
+    )
+    settings.used_traffic = 40 * 1024**3
+    session.commit()
+
+    updated = crud.upsert_marzhelp_admin_policy(
+        session,
+        admin.id,
+        MarzhelpAdminPolicy(
+            total_traffic=100 * 1024**3,
+            calculate_volume="created_traffic",
+            admin_traffic_warning_percent=75,
+            sudo_traffic_warning_percent=90,
+        ),
+    )
+
+    assert updated.used_traffic == 40 * 1024**3
+    assert "used_traffic" not in MarzhelpAdminPolicy().model_dump()
 
 
 def test_selected_permission_modes_require_values():

@@ -42,11 +42,9 @@ class MarzhelpPolicyError(ValueError):
 
 
 def calculate_delete_refund(data_limit: int | None, actual_used_traffic: int | None) -> int:
-    """Return only unused finite traffic. Never return a negative value."""
+    """Allocated credit is final; deleting a user never restores admin credit."""
 
-    if data_limit is None:
-        return 0
-    return max(int(data_limit) - max(int(actual_used_traffic or 0), 0), 0)
+    return 0
 
 
 def _settings(db: Session, admin_id: int | None, lock: bool = False) -> MarzhelpAdminSettings | None:
@@ -143,60 +141,148 @@ def user_count_used(db: Session, admin_id: int, excluded_user_id: int | None = N
     return int(db.query(func.count(User.id)).filter(*filters).scalar() or 0)
 
 
-def provisioned_volume_used(
-    db: Session,
-    admin_id: int,
-    excluded_user_id: int | None = None,
-) -> int:
-    filters = [User.admin_id == admin_id]
-    if excluded_user_id is not None:
-        filters.append(User.id != excluded_user_id)
-    return int(
-        db.query(func.coalesce(func.sum(func.coalesce(User.data_limit, 0)), 0))
-        .filter(*filters)
+def allocated_credit_baseline(db: Session, admin_id: int) -> int:
+    """Best available non-refundable allocation total for legacy rows."""
+
+    current = (
+        db.query(func.coalesce(func.sum(func.coalesce(User.data_limit, User.used_traffic, 0)), 0))
+        .filter(User.admin_id == admin_id)
         .scalar()
         or 0
     )
+    deleted = (
+        db.query(
+            func.coalesce(
+                func.sum(
+                    func.coalesce(
+                        MarzhelpDeletedUser.allocated_traffic,
+                        MarzhelpDeletedUser.used_traffic_total,
+                        0,
+                    )
+                ),
+                0,
+            )
+        )
+        .filter(MarzhelpDeletedUser.admin_id == admin_id)
+        .scalar()
+        or 0
+    )
+    return int(current) + int(deleted)
 
 
-def quota_summary(db: Session, admin_id: int) -> dict[str, int | None]:
-    settings = _settings(db, admin_id)
-    users = user_count_used(db, admin_id)
-    volume = provisioned_volume_used(db, admin_id)
-    if settings is None:
-        return {
-            "current_users": users,
-            "max_users": None,
-            "remaining_user_slots": None,
-            "provisioned_volume": volume,
-            "provisioning_volume_limit": None,
-            "remaining_provisioning_volume": None,
-            "renewals_used": 0,
-            "renewal_limit": None,
-            "renewals_remaining": None,
-        }
+def quota_summary(db: Session, admin_id: int) -> dict[str, Any]:
+    return quota_summaries(db, [admin_id]).get(admin_id, _quota_summary_values(None))
+
+
+def _quota_summary_values(
+    settings: MarzhelpAdminSettings | None,
+    *,
+    current_users: int = 0,
+    current_usage: int = 0,
+    reset_usage: int = 0,
+    deleted_usage: int = 0,
+) -> dict[str, Any]:
+    mode = (settings.calculate_volume if settings is not None else None) or "used_traffic"
+    used = (
+        int(settings.used_traffic or 0)
+        if settings is not None and mode == "created_traffic"
+        else int(current_usage) + int(reset_usage) + int(deleted_usage)
+    )
+    configured_limit = settings.total_traffic if settings is not None else None
+    limit = int(configured_limit) if configured_limit is not None and configured_limit > 0 else None
+    percent = round((used * 100) / limit, 2) if limit is not None else None
+    admin_threshold = int(
+        settings.admin_traffic_warning_percent or 80
+        if settings is not None
+        else 80
+    )
+    sudo_threshold = int(
+        settings.sudo_traffic_warning_percent or 80
+        if settings is not None
+        else 80
+    )
+    usage_warning_enabled = mode == "used_traffic" and percent is not None
+    maximum_users = settings.max_users if settings is not None else None
     return {
-        "current_users": users,
-        "max_users": settings.max_users,
+        "current_users": current_users,
+        "max_users": maximum_users,
         "remaining_user_slots": (
-            max(int(settings.max_users) - users, 0)
-            if settings.max_users is not None
+            max(int(maximum_users) - current_users, 0)
+            if maximum_users is not None
             else None
         ),
-        "provisioned_volume": volume,
-        "provisioning_volume_limit": settings.provisioning_volume_limit,
-        "remaining_provisioning_volume": (
-            max(int(settings.provisioning_volume_limit) - volume, 0)
-            if settings.provisioning_volume_limit is not None
-            else None
-        ),
-        "renewals_used": int(settings.renewals_used or 0),
-        "renewal_limit": settings.renewal_limit,
-        "renewals_remaining": (
-            max(int(settings.renewal_limit) - int(settings.renewals_used or 0), 0)
-            if settings.renewal_limit is not None
-            else None
-        ),
+        "credit_limit": limit,
+        "credit_used": used,
+        "credit_remaining": max(limit - used, 0) if limit is not None else None,
+        "credit_usage_percent": percent,
+        "credit_calculation_mode": mode,
+        "operation_allowance_remaining": settings.user_limit if settings is not None else None,
+        "admin_warning_percent": admin_threshold,
+        "sudo_warning_percent": sudo_threshold,
+        "admin_warning_active": bool(usage_warning_enabled and percent >= admin_threshold),
+        "sudo_warning_active": bool(usage_warning_enabled and percent >= sudo_threshold),
+    }
+
+
+def quota_summaries(
+    db: Session,
+    admin_ids: list[int],
+    settings_by_admin: dict[int, MarzhelpAdminSettings] | None = None,
+) -> dict[int, dict[str, Any]]:
+    """Return quota state for many admins with three grouped queries."""
+
+    ids = sorted(set(admin_ids))
+    if not ids:
+        return {}
+    if settings_by_admin is None:
+        settings_by_admin = {
+            row.admin_id: row
+            for row in db.query(MarzhelpAdminSettings)
+            .filter(MarzhelpAdminSettings.admin_id.in_(ids))
+            .all()
+        }
+
+    user_totals = {
+        int(admin_id): (int(count or 0), int(used or 0))
+        for admin_id, count, used in db.query(
+            User.admin_id,
+            func.count(User.id),
+            func.coalesce(func.sum(func.coalesce(User.used_traffic, 0)), 0),
+        )
+        .filter(User.admin_id.in_(ids))
+        .group_by(User.admin_id)
+        .all()
+    }
+    reset_totals = {
+        int(admin_id): int(used or 0)
+        for admin_id, used in db.query(
+            User.admin_id,
+            func.coalesce(func.sum(UserUsageResetLogs.used_traffic_at_reset), 0),
+        )
+        .join(User, User.id == UserUsageResetLogs.user_id)
+        .filter(User.admin_id.in_(ids))
+        .group_by(User.admin_id)
+        .all()
+    }
+    deleted_totals = {
+        int(admin_id): int(used or 0)
+        for admin_id, used in db.query(
+            MarzhelpDeletedUser.admin_id,
+            func.coalesce(func.sum(MarzhelpDeletedUser.used_traffic_total), 0),
+        )
+        .filter(MarzhelpDeletedUser.admin_id.in_(ids))
+        .group_by(MarzhelpDeletedUser.admin_id)
+        .all()
+    }
+    return {
+        admin_id: _quota_summary_values(
+            settings_by_admin.get(admin_id),
+            current_users=user_totals.get(admin_id, (0, 0))[0],
+            current_usage=user_totals.get(admin_id, (0, 0))[1],
+            reset_usage=reset_totals.get(admin_id, 0),
+            deleted_usage=deleted_totals.get(admin_id, 0),
+        )
+        for admin_id in ids
     }
 
 
@@ -376,104 +462,6 @@ def _adjust_user_count(db: Session, settings: MarzhelpAdminSettings, delta: int)
     )
 
 
-def _adjust_volume(db: Session, settings: MarzhelpAdminSettings, delta: int) -> None:
-    if delta == 0:
-        return
-    for _ in range(3):
-        db.expire(settings, ["provisioning_volume_used"])
-        stored = int(settings.provisioning_volume_used or 0)
-        actual = provisioned_volume_used(db, settings.admin_id)
-        baseline = max(stored, actual)
-        target = max(baseline + delta, 0)
-        if (
-            settings.provisioning_volume_limit is not None
-            and target > int(settings.provisioning_volume_limit)
-        ):
-            logger.warning(
-                "quota_rejected admin_id=%s dimension=provisioning_volume requested_delta=%s used=%s limit=%s",
-                settings.admin_id,
-                delta,
-                baseline,
-                settings.provisioning_volume_limit,
-            )
-            raise MarzhelpPolicyError(
-                "provisioning_volume_exceeded",
-                "MarzHelp: provisioning volume quota is exhausted",
-                audit_admin_id=settings.admin_id,
-                audit_operation_type="provisioning_volume",
-                audit_details={
-                    "requested_delta": delta,
-                    "used": baseline,
-                    "limit": int(settings.provisioning_volume_limit),
-                },
-            )
-        result = db.execute(
-            update(MarzhelpAdminSettings)
-            .where(
-                MarzhelpAdminSettings.admin_id == settings.admin_id,
-                MarzhelpAdminSettings.provisioning_volume_used == stored,
-                or_(
-                    MarzhelpAdminSettings.provisioning_volume_limit.is_(None),
-                    target <= MarzhelpAdminSettings.provisioning_volume_limit,
-                ),
-            )
-            .values(provisioning_volume_used=target, updated_at=func.now())
-        )
-        if result.rowcount == 1:
-            settings.provisioning_volume_used = target
-            logger.info(
-                "quota_consumed admin_id=%s dimension=provisioning_volume delta=%s used=%s",
-                settings.admin_id,
-                delta,
-                target,
-            )
-            return
-        db.expire(settings, ["provisioning_volume_used", "provisioning_volume_limit"])
-    raise MarzhelpPolicyError(
-        "provisioning_volume_conflict",
-        "MarzHelp: provisioning volume changed concurrently; retry the request",
-    )
-
-
-def _consume_renewal(db: Session, settings: MarzhelpAdminSettings) -> None:
-    if settings.renewal_limit is None:
-        return
-    result = db.execute(
-        update(MarzhelpAdminSettings)
-        .where(
-            MarzhelpAdminSettings.admin_id == settings.admin_id,
-            MarzhelpAdminSettings.renewals_used < MarzhelpAdminSettings.renewal_limit,
-        )
-        .values(
-            renewals_used=MarzhelpAdminSettings.renewals_used + 1,
-            updated_at=func.now(),
-        )
-    )
-    if result.rowcount != 1:
-        logger.warning(
-            "quota_rejected admin_id=%s dimension=renewal used=%s limit=%s",
-            settings.admin_id,
-            settings.renewals_used,
-            settings.renewal_limit,
-        )
-        raise MarzhelpPolicyError(
-            "renewal_quota_exhausted",
-            "MarzHelp: renewal quota is exhausted",
-            audit_admin_id=settings.admin_id,
-            audit_operation_type="renewal",
-            audit_details={
-                "requested_delta": 1,
-                "used": int(settings.renewals_used or 0),
-                "limit": int(settings.renewal_limit),
-            },
-        )
-    db.expire(settings, ["renewals_used"])
-    logger.info(
-        "quota_consumed admin_id=%s dimension=renewal delta=1",
-        settings.admin_id,
-    )
-
-
 def _validate_account(settings: MarzhelpAdminSettings) -> None:
     if settings.expiry_date is not None and settings.expiry_date < date.today():
         raise MarzhelpPolicyError("admin_expired", "MarzHelp: admin account is expired")
@@ -520,72 +508,77 @@ def _validate_expiration(
         )
 
 
-def _current_spend(db: Session, admin_id: int, mode: str, excluded_user_id: int | None = None) -> int:
-    user_filter = [User.admin_id == admin_id]
-    if excluded_user_id is not None:
-        user_filter.append(User.id != excluded_user_id)
-
-    if mode == "created_traffic":
-        current_allocation = (
-            db.query(func.coalesce(func.sum(func.coalesce(User.data_limit, User.used_traffic)), 0))
-            .filter(*user_filter)
-            .scalar()
-            or 0
-        )
-        unlimited_reset_usage = (
-            db.query(func.coalesce(func.sum(UserUsageResetLogs.used_traffic_at_reset), 0))
-            .join(User, User.id == UserUsageResetLogs.user_id)
-            .filter(*user_filter, User.data_limit.is_(None))
-            .scalar()
-            or 0
-        )
-        current = int(current_allocation) + int(unlimited_reset_usage)
-    else:
-        current_usage = db.query(func.coalesce(func.sum(User.used_traffic), 0)).filter(*user_filter).scalar() or 0
-        reset_usage = (
-            db.query(func.coalesce(func.sum(UserUsageResetLogs.used_traffic_at_reset), 0))
-            .join(User, User.id == UserUsageResetLogs.user_id)
-            .filter(*user_filter)
-            .scalar()
-            or 0
-        )
-        current = int(current_usage) + int(reset_usage)
-
+def used_traffic_spend(db: Session, admin_id: int) -> int:
+    current_usage = (
+        db.query(func.coalesce(func.sum(User.used_traffic), 0))
+        .filter(User.admin_id == admin_id)
+        .scalar()
+        or 0
+    )
+    reset_usage = (
+        db.query(func.coalesce(func.sum(UserUsageResetLogs.used_traffic_at_reset), 0))
+        .join(User, User.id == UserUsageResetLogs.user_id)
+        .filter(User.admin_id == admin_id)
+        .scalar()
+        or 0
+    )
     deleted = (
         db.query(func.coalesce(func.sum(MarzhelpDeletedUser.used_traffic_total), 0))
         .filter(MarzhelpDeletedUser.admin_id == admin_id)
         .scalar()
         or 0
     )
-    return int(current) + int(deleted)
+    return int(current_usage) + int(reset_usage) + int(deleted)
+
+
+def _current_spend(db: Session, settings: MarzhelpAdminSettings) -> int:
+    if (settings.calculate_volume or "used_traffic") == "created_traffic":
+        return int(settings.used_traffic or 0)
+    return used_traffic_spend(db, settings.admin_id)
 
 
 def _validate_traffic_credit(
     db: Session,
     settings: MarzhelpAdminSettings,
-    data_limit: int | None,
-    excluded_user_id: int | None = None,
+    *,
+    allocated_charge: int = 0,
+    unlimited_requested: bool = False,
 ) -> None:
-    if settings.total_traffic is None or settings.total_traffic <= 0:
-        return
-
     mode = settings.calculate_volume or "used_traffic"
-    # Replacing a finite package must exclude the old allocation. Usage-based
-    # accounting, however, still includes the user's already-consumed traffic.
-    spend_exclusion = excluded_user_id if mode == "created_traffic" else None
-    spent = _current_spend(db, settings.admin_id, mode, spend_exclusion)
+    limit = (
+        int(settings.total_traffic)
+        if settings.total_traffic is not None and settings.total_traffic > 0
+        else None
+    )
     if mode == "created_traffic":
-        if data_limit is None:
+        if unlimited_requested and limit is not None:
             raise MarzhelpPolicyError(
                 "unlimited_traffic_forbidden",
                 "MarzHelp: unlimited traffic is not allowed with finite admin credit",
             )
-        spent += int(data_limit)
+        spent = int(settings.used_traffic or 0)
+        target = spent + max(int(allocated_charge), 0)
+        if limit is not None and target > limit:
+            raise MarzhelpPolicyError(
+                "traffic_exhausted",
+                "MarzHelp: admin traffic credit is exhausted",
+                audit_admin_id=settings.admin_id,
+                audit_operation_type="traffic_credit",
+                audit_details={"requested_delta": allocated_charge, "used": spent, "limit": limit},
+            )
+        settings.used_traffic = target
+        return
 
-    if spent > int(settings.total_traffic) or (
-        mode == "used_traffic" and spent >= int(settings.total_traffic)
-    ):
-        raise MarzhelpPolicyError("traffic_exhausted", "MarzHelp: admin traffic credit is exhausted")
+    if limit is not None:
+        spent = _current_spend(db, settings)
+        if spent >= limit:
+            raise MarzhelpPolicyError(
+                "traffic_exhausted",
+                "MarzHelp: admin traffic credit is exhausted",
+                audit_admin_id=settings.admin_id,
+                audit_operation_type="traffic_credit",
+                audit_details={"requested_delta": 0, "used": spent, "limit": limit},
+            )
 
 
 def _consume_allowance(db: Session, settings: MarzhelpAdminSettings) -> None:
@@ -602,7 +595,7 @@ def _consume_allowance(db: Session, settings: MarzhelpAdminSettings) -> None:
     if result.rowcount != 1:
         raise MarzhelpPolicyError(
             "operation_allowance_exhausted",
-            "MarzHelp: admin create/renew allowance is exhausted",
+            "MarzHelp: admin create/renew/time-change allowance is exhausted",
         )
 
 
@@ -693,13 +686,12 @@ def validate_create(db: Session, admin_id: int | None, user: Any) -> MarzhelpAdm
     _validate_data_limit(settings, data_limit)
     _validate_subscription_mode(settings, data_limit, concurrent_user_limit)
     _validate_expiration(settings, expire, getattr(user, "on_hold_expire_duration", None))
-    _validate_traffic_credit(db, settings, data_limit)
-    if settings.provisioning_volume_limit is not None and data_limit is None:
-        raise MarzhelpPolicyError(
-            "unlimited_provisioning_forbidden",
-            "MarzHelp: unlimited user traffic is not allowed with finite provisioning volume",
-        )
-    _adjust_volume(db, settings, int(data_limit or 0))
+    _validate_traffic_credit(
+        db,
+        settings,
+        allocated_charge=int(data_limit or 0),
+        unlimited_requested=data_limit is None,
+    )
 
     next_plan = getattr(user, "next_plan", None)
     if next_plan is not None:
@@ -754,6 +746,11 @@ def validate_update(db: Session, dbuser: User, modify: Any) -> tuple[bool, bool]
 
     renewal = _is_renewal(dbuser, modify)
     fields_set = getattr(modify, "model_fields_set", set())
+    expire_requested = "expire" in fields_set if fields_set else modify.expire is not None
+    expiration_changed = expire_requested and (
+        _effective_expire(modify.expire) != _effective_expire(dbuser.expire)
+    )
+    allowance_operation = renewal or expiration_changed
     concurrent_limit_changed = (
         "concurrent_user_limit" in fields_set
         and getattr(modify, "concurrent_user_limit", None) != dbuser.concurrent_user_limit
@@ -815,16 +812,16 @@ def validate_update(db: Session, dbuser: User, modify: Any) -> tuple[bool, bool]
     _validate_data_limit(settings, data_limit)
     _validate_subscription_mode(settings, data_limit, concurrent_user_limit)
     _validate_expiration(settings, expire, on_hold_duration)
-    _validate_traffic_credit(db, settings, data_limit, excluded_user_id=dbuser.id)
-    if settings.provisioning_volume_limit is not None and data_limit is None:
-        raise MarzhelpPolicyError(
-            "unlimited_provisioning_forbidden",
-            "MarzHelp: unlimited user traffic is not allowed with finite provisioning volume",
-        )
     volume_delta = int(data_limit or 0) - int(old_data_limit or 0)
-    _adjust_volume(db, settings, volume_delta)
+    _validate_traffic_credit(
+        db,
+        settings,
+        allocated_charge=max(volume_delta, 0),
+        unlimited_requested=data_limit is None,
+    )
     dbuser._marzhelp_volume_delta = volume_delta
     dbuser._marzhelp_is_renewal = renewal
+    dbuser._marzhelp_allowance_delta = 0
 
     if modify.next_plan is not None:
         next_data_limit = _effective_data_limit(modify.next_plan.data_limit)
@@ -832,9 +829,10 @@ def validate_update(db: Session, dbuser: User, modify: Any) -> tuple[bool, bool]
         _validate_subscription_mode(settings, next_data_limit, concurrent_user_limit)
         _validate_expiration(settings, _effective_expire(modify.next_plan.expire))
 
-    if renewal:
-        _consume_renewal(db, settings)
-        dbuser._marzhelp_renewal_sequence = int(settings.renewals_used or 0)
+    if allowance_operation:
+        limited_allowance = settings.user_limit is not None
+        _consume_allowance(db, settings)
+        dbuser._marzhelp_allowance_delta = -1 if limited_allowance else 0
     return renewal, True
 
 
@@ -844,7 +842,8 @@ def record_renewal(db: Session, dbuser: User, quota_enforced: bool) -> None:
     # Absolute plan updates are naturally idempotent: retrying an already-applied
     # value is not classified as another renewal.
     renewal = bool(getattr(dbuser, "_marzhelp_is_renewal", True))
-    operation = "renew" if renewal else "volume_adjustment"
+    allowance_delta = int(getattr(dbuser, "_marzhelp_allowance_delta", 0))
+    operation = "renew" if renewal else ("plan_change" if allowance_delta else "volume_adjustment")
     sequence = (
         db.query(func.count(MarzhelpAccountingTransaction.id))
         .filter(
@@ -863,6 +862,7 @@ def record_renewal(db: Session, dbuser: User, quota_enforced: bool) -> None:
         dbuser.admin_id,
         dbuser.id,
         dbuser.username,
+        allowance_delta=allowance_delta,
         volume_delta=int(getattr(dbuser, "_marzhelp_volume_delta", 0)),
         renewal_delta=1 if renewal else 0,
         details={"data_limit": dbuser.data_limit, "expire": dbuser.expire},
@@ -892,17 +892,19 @@ def validate_next_plan_activation(db: Session, dbuser: User) -> bool:
     _validate_data_limit(settings, data_limit)
     _validate_subscription_mode(settings, data_limit, dbuser.concurrent_user_limit)
     _validate_expiration(settings, expire)
-    _validate_traffic_credit(db, settings, data_limit, excluded_user_id=dbuser.id)
-    if settings.provisioning_volume_limit is not None and data_limit is None:
-        raise MarzhelpPolicyError(
-            "unlimited_provisioning_forbidden",
-            "MarzHelp: unlimited user traffic is not allowed with finite provisioning volume",
-        )
+    next_allocation = _effective_data_limit(dbuser.next_plan.data_limit)
+    _validate_traffic_credit(
+        db,
+        settings,
+        allocated_charge=int(next_allocation or 0),
+        unlimited_requested=next_allocation is None,
+    )
     volume_delta = int(data_limit or 0) - int(_effective_data_limit(dbuser.data_limit) or 0)
-    _adjust_volume(db, settings, volume_delta)
-    _consume_renewal(db, settings)
+    limited_allowance = settings.user_limit is not None
+    _consume_allowance(db, settings)
     dbuser._marzhelp_volume_delta = volume_delta
     dbuser._marzhelp_is_renewal = True
+    dbuser._marzhelp_allowance_delta = -1 if limited_allowance else 0
     return True
 
 
@@ -939,8 +941,7 @@ def validate_activation(db: Session, dbuser: User) -> None:
     _validate_traffic_credit(
         db,
         settings,
-        dbuser.data_limit,
-        excluded_user_id=dbuser.id,
+        unlimited_requested=_effective_data_limit(dbuser.data_limit) is None,
     )
 
 
@@ -966,21 +967,20 @@ def validate_transfer(db: Session, dbuser: User, new_admin_id: int) -> None:
             dbuser.concurrent_user_limit,
         )
         _validate_expiration(settings, dbuser.expire, dbuser.on_hold_expire_duration)
-        _validate_traffic_credit(db, settings, dbuser.data_limit)
-        if settings.provisioning_volume_limit is not None and dbuser.data_limit is None:
-            raise MarzhelpPolicyError(
-                "unlimited_provisioning_forbidden",
-                "MarzHelp: unlimited user traffic is not allowed with finite provisioning volume",
-            )
+        data_limit = _effective_data_limit(dbuser.data_limit)
+        _validate_traffic_credit(
+            db,
+            settings,
+            allocated_charge=int(data_limit or 0) if owner_changes else 0,
+            unlimited_requested=data_limit is None,
+        )
         if owner_changes:
             _adjust_user_count(db, settings, 1)
             _adjust_capacity(db, settings, capacity_weight(dbuser.concurrent_user_limit))
-            _adjust_volume(db, settings, int(dbuser.data_limit or 0))
     previous_settings = _settings(db, dbuser.admin_id, lock=True)
     if owner_changes and previous_settings is not None:
         _adjust_user_count(db, previous_settings, -1)
         _adjust_capacity(db, previous_settings, -capacity_weight(dbuser.concurrent_user_limit))
-        _adjust_volume(db, previous_settings, -int(dbuser.data_limit or 0))
 
 
 def capture_delete(db: Session, dbuser: User) -> int:
@@ -1000,10 +1000,9 @@ def capture_delete(db: Session, dbuser: User) -> int:
     if settings is not None:
         _adjust_user_count(db, settings, -1)
         _adjust_capacity(db, settings, -capacity_weight(dbuser.concurrent_user_limit))
-        _adjust_volume(db, settings, -int(dbuser.data_limit or 0))
 
     used = max(int(dbuser.lifetime_used_traffic or 0), 0)
-    refund = calculate_delete_refund(dbuser.data_limit, used)
+    refund = 0
     ledger = MarzhelpDeletedUser(
         user_id=dbuser.id,
         admin_id=dbuser.admin_id,
@@ -1016,16 +1015,21 @@ def capture_delete(db: Session, dbuser: User) -> int:
     _record(
         db,
         f"delete:{dbuser.id}",
-        "delete_refund",
+        "delete",
         dbuser.admin_id,
         dbuser.id,
         dbuser.username,
-        traffic_delta=refund,
-        volume_delta=-int(dbuser.data_limit or 0),
+        traffic_delta=0,
+        volume_delta=0,
         details={
             "allocated_traffic": dbuser.data_limit,
             "actual_used_traffic": used,
-            "refundable_traffic": refund,
+            "refundable_traffic": 0,
+            "credit_retained": (
+                int(dbuser.data_limit or 0)
+                if settings is not None and settings.calculate_volume == "created_traffic"
+                else used
+            ),
         },
     )
     return refund

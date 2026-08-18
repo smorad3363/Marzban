@@ -132,7 +132,7 @@ class MarzhelpAdminSettings(Base):
     used_traffic = Column(BigInteger, nullable=False, default=0)
     expiry_date = Column(Date, nullable=True)
     status = Column(JSON, nullable=True)
-    # Remaining successful create operations. NULL means unrestricted.
+    # Remaining successful create/renew/time-change operations. NULL is unrestricted.
     user_limit = Column(BigInteger, nullable=True)
     # Maximum owned user accounts. NULL means unrestricted.
     max_users = Column(BigInteger, nullable=True)
@@ -144,6 +144,8 @@ class MarzhelpAdminSettings(Base):
     provisioning_volume_used = Column(BigInteger, nullable=False, default=0)
     renewal_limit = Column(BigInteger, nullable=True)
     renewals_used = Column(BigInteger, nullable=False, default=0)
+    admin_traffic_warning_percent = Column(Integer, nullable=False, default=80)
+    sudo_traffic_warning_percent = Column(Integer, nullable=False, default=80)
     all_inbounds = Column(Boolean, nullable=False, default=True)
     all_user_limits = Column(Boolean, nullable=False, default=True)
     max_user_duration_days = Column(Integer, nullable=True)
@@ -645,7 +647,7 @@ class UserUsageResetLogs(Base):
     __tablename__ = "user_usage_logs"
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
     user = relationship("User", back_populates="usage_logs")
     used_traffic_at_reset = Column(BigInteger, nullable=False)
     reset_at = Column(DateTime, default=datetime.utcnow)

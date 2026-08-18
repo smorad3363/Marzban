@@ -151,15 +151,12 @@ class MarzhelpAdminPolicy(BaseModel):
     """Editable MarzHelp limits exposed to sudo admins in the dashboard."""
 
     total_traffic: Optional[int] = Field(default=None, ge=0)
-    used_traffic: int = Field(default=0, ge=0)
     expiry_date: Optional[date] = None
     user_limit: Optional[int] = Field(default=None, ge=0)
     max_users: Optional[int] = Field(default=None, ge=1)
     device_capacity_limit: Optional[int] = Field(default=None, ge=1)
-    provisioning_volume_limit: Optional[int] = Field(default=None, ge=0)
-    provisioning_volume_used: int = Field(default=0, ge=0)
-    renewal_limit: Optional[int] = Field(default=None, ge=0)
-    renewals_used: int = Field(default=0, ge=0)
+    admin_traffic_warning_percent: int = Field(default=80, ge=1, le=100)
+    sudo_traffic_warning_percent: int = Field(default=80, ge=1, le=100)
     all_inbounds: bool = True
     allowed_inbounds: list[str] = Field(default_factory=list)
     all_user_limits: bool = True
@@ -211,12 +208,16 @@ class AdminQuotaSummary(BaseModel):
     current_users: int
     max_users: Optional[int] = None
     remaining_user_slots: Optional[int] = None
-    provisioned_volume: int
-    provisioning_volume_limit: Optional[int] = None
-    remaining_provisioning_volume: Optional[int] = None
-    renewals_used: int
-    renewal_limit: Optional[int] = None
-    renewals_remaining: Optional[int] = None
+    credit_limit: Optional[int] = None
+    credit_used: int = 0
+    credit_remaining: Optional[int] = None
+    credit_usage_percent: Optional[float] = None
+    credit_calculation_mode: Literal["used_traffic", "created_traffic"] = "used_traffic"
+    operation_allowance_remaining: Optional[int] = None
+    admin_warning_percent: int = 80
+    sudo_warning_percent: int = 80
+    admin_warning_active: bool = False
+    sudo_warning_active: bool = False
 
 
 class ManagedAdmin(Admin):
@@ -241,8 +242,6 @@ class AdminCapabilities(BaseModel):
     quota: AdminQuotaSummary = Field(
         default_factory=lambda: AdminQuotaSummary(
             current_users=0,
-            provisioned_volume=0,
-            renewals_used=0,
         )
     )
 

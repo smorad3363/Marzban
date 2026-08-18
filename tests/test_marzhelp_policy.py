@@ -18,7 +18,6 @@ from app.db.models import (
     Proxy,
     ProxyInbound,
     User,
-    UserUsageResetLogs,
 )
 from app.db import crud
 from app.dependencies import get_validated_user
@@ -69,7 +68,7 @@ def plan(data_limit=10 * GB, expire=None, on_hold_expire_duration=None, next_pla
 
 @pytest.mark.parametrize(
     ("used", "expected"),
-    [(50 * GB, 0), (30 * GB, 20 * GB), (0, 50 * GB), (60 * GB, 0)],
+    [(50 * GB, 0), (30 * GB, 0), (0, 0), (60 * GB, 0)],
 )
 def test_delete_refund_formula(used, expected):
     assert policy.calculate_delete_refund(50 * GB, used) == expected
@@ -104,32 +103,33 @@ def test_unlimited_traffic_does_not_bypass_account_limit(session):
     assert exc.value.code == "max_users_exceeded"
 
 
-def test_provisioning_volume_rejects_overspend_atomically(session):
+def test_allocated_credit_rejects_overspend_atomically(session):
     admin, settings = add_admin(
         session,
-        provisioning_volume_limit=20 * GB,
+        total_traffic=20 * GB,
+        calculate_volume="created_traffic",
     )
     with pytest.raises(policy.MarzhelpPolicyError) as exc:
         policy.validate_create(session, admin.id, plan(data_limit=50 * GB))
-    assert exc.value.code == "provisioning_volume_exceeded"
+    assert exc.value.code == "traffic_exhausted"
     session.rollback()
-    assert settings.provisioning_volume_used == 0
+    assert settings.used_traffic == 0
 
     policy.record_quota_rejection(exc.value, session)
     rejection = session.query(MarzhelpAccountingTransaction).one()
-    assert rejection.operation_type == "provisioning_volume"
+    assert rejection.operation_type == "traffic_credit"
     assert rejection.volume_delta == 0
     assert rejection.renewal_delta == 0
     assert rejection.result == "rejected"
     assert rejection.details == {
-        "code": "provisioning_volume_exceeded",
+        "code": "traffic_exhausted",
         "requested_delta": 50 * GB,
         "used": 0,
         "limit": 20 * GB,
     }
 
 
-def test_delete_is_idempotent_and_records_actual_usage(session):
+def test_delete_is_idempotent_records_usage_and_never_refunds_credit(session):
     admin, _ = add_admin(session)
     user = User(
         username="delete-me",
@@ -141,45 +141,53 @@ def test_delete_is_idempotent_and_records_actual_usage(session):
     session.add(user)
     session.commit()
 
-    assert policy.capture_delete(session, user) == 20 * GB
+    assert policy.quota_summary(session, admin.id)["credit_used"] == 30 * GB
     assert policy.capture_delete(session, user) == 0
+    assert policy.capture_delete(session, user) == 0
+    session.delete(user)
     session.commit()
 
     ledger = session.query(MarzhelpDeletedUser).one()
     assert ledger.used_traffic_total == 30 * GB
-    assert ledger.refunded_traffic == 20 * GB
+    assert ledger.refunded_traffic == 0
+    assert policy.quota_summary(session, admin.id)["credit_used"] == 30 * GB
     assert session.query(MarzhelpAccountingTransaction).count() == 1
 
 
-def test_create_and_renewal_quotas_are_independent(session):
-    admin, _ = add_admin(session, allowance=12, renewal_limit=8)
-    for _ in range(12):
-        policy.validate_create(session, admin.id, plan())
-        session.commit()
+def test_create_renewal_and_time_change_share_one_allowance(session):
+    admin, settings = add_admin(session, allowance=3)
+    policy.validate_create(session, admin.id, plan())
+    session.commit()
+    assert settings.user_limit == 2
 
+    now = int(datetime.now(timezone.utc).timestamp())
     user = User(
         username="renew-me",
         admin_id=admin.id,
         status=UserStatus.active,
         data_limit=GB,
+        expire=now + 30 * 86400,
         used_traffic=0,
     )
     session.add(user)
     session.commit()
-    for index in range(8):
-        modification = plan(data_limit=(index + 2) * GB)
-        renewal, consumed = policy.validate_update(session, user, modification)
-        assert renewal and consumed
-        user.data_limit = modification.data_limit
-        session.commit()
 
-    settings = session.get(MarzhelpAdminSettings, admin.id)
+    renewal, consumed = policy.validate_update(session, user, plan(data_limit=2 * GB))
+    assert renewal and consumed
+    user.data_limit = 2 * GB
+    session.commit()
+    assert settings.user_limit == 1
+
+    renewal, consumed = policy.validate_update(
+        session,
+        user,
+        plan(data_limit=2 * GB, expire=now + 20 * 86400),
+    )
+    assert not renewal and consumed
+    session.commit()
     assert settings.user_limit == 0
-    assert settings.renewals_used == 8
     with pytest.raises(policy.MarzhelpPolicyError, match="allowance"):
         policy.validate_create(session, admin.id, plan())
-    with pytest.raises(policy.MarzhelpPolicyError, match="renewal quota"):
-        policy.validate_update(session, user, plan(data_limit=11 * GB))
 
 
 def test_failed_operation_rollback_does_not_consume_allowance(session):
@@ -237,7 +245,7 @@ def test_unlimited_traffic_rejected_on_create_edit_and_next_plan(session):
 
 
 def test_conversion_to_unlimited_counts_as_renewal(session):
-    admin, _ = add_admin(session, allowance=1, renewal_limit=1)
+    admin, _ = add_admin(session, allowance=1)
     user = User(
         username="upgrade-to-unlimited",
         admin_id=admin.id,
@@ -252,30 +260,59 @@ def test_conversion_to_unlimited_counts_as_renewal(session):
 
     assert renewal and consumed
     settings = session.get(MarzhelpAdminSettings, admin.id)
-    assert settings.user_limit == 1
-    assert settings.renewals_used == 1
+    assert settings.user_limit == 0
 
 
-def test_created_traffic_counts_usage_and_resets_for_existing_unlimited_users(session):
-    admin, _ = add_admin(
+def test_allocated_credit_uses_persistent_non_refundable_counter(session):
+    admin, settings = add_admin(
         session,
-        total_traffic=10 * GB,
+        total_traffic=50 * GB,
         calculate_volume="created_traffic",
     )
+    policy.validate_create(session, admin.id, plan(data_limit=50 * GB))
     user = User(
-        username="legacy-unlimited",
+        username="allocated-delete",
         admin_id=admin.id,
         status=UserStatus.active,
-        data_limit=None,
-        used_traffic=8 * GB,
+        data_limit=50 * GB,
+        used_traffic=50 * GB,
     )
     session.add(user)
-    session.flush()
-    session.add(UserUsageResetLogs(user_id=user.id, used_traffic_at_reset=3 * GB))
     session.commit()
 
+    policy.capture_delete(session, user)
+    session.delete(user)
+    session.commit()
+    assert settings.used_traffic == 50 * GB
+    assert policy.quota_summary(session, admin.id)["credit_remaining"] == 0
     with pytest.raises(policy.MarzhelpPolicyError, match="credit is exhausted"):
         policy.validate_create(session, admin.id, plan(data_limit=GB))
+    session.rollback()
+    assert settings.used_traffic == 50 * GB
+
+
+def test_actual_usage_warning_thresholds_are_independent(session):
+    admin, _ = add_admin(
+        session,
+        total_traffic=100 * GB,
+        calculate_volume="used_traffic",
+        admin_traffic_warning_percent=70,
+        sudo_traffic_warning_percent=90,
+    )
+    session.add(
+        User(
+            username="warning-user",
+            admin_id=admin.id,
+            data_limit=100 * GB,
+            used_traffic=75 * GB,
+        )
+    )
+    session.commit()
+
+    quota = policy.quota_summary(session, admin.id)
+    assert quota["credit_usage_percent"] == 75
+    assert quota["admin_warning_active"] is True
+    assert quota["sudo_warning_active"] is False
 
 
 def test_maximum_duration_create_and_renewal(session):

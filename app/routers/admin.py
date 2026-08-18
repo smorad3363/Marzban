@@ -45,6 +45,7 @@ def managed_admin_response(
     settings=None,
     user_count: int = 0,
     capacity_used: int = 0,
+    quota: AdminQuotaSummary | None = None,
 ) -> ManagedAdmin:
     policy = (
         MarzhelpAdminPolicy.model_validate(settings)
@@ -60,7 +61,8 @@ def managed_admin_response(
         user_count=user_count,
         capacity_used=capacity_used,
         policy=policy,
-        quota=AdminQuotaSummary.model_validate(
+        quota=quota
+        or AdminQuotaSummary.model_validate(
             marzhelp_policy.quota_summary(db, dbadmin.id)
         ),
     )
@@ -330,16 +332,14 @@ def get_managed_admins(
         if dbadmins
         else {}
     )
-    user_counts = (
-        dict(
-            db.query(User.admin_id, func.count(User.id))
-            .filter(User.admin_id.in_([item.id for item in dbadmins]))
-            .group_by(User.admin_id)
-            .all()
-        )
-        if dbadmins
-        else {}
-    )
+    quota_by_admin = {
+        admin_id: AdminQuotaSummary.model_validate(summary)
+        for admin_id, summary in marzhelp_policy.quota_summaries(
+            db,
+            [item.id for item in dbadmins],
+            settings_by_admin,
+        ).items()
+    }
     capacity_weight = case(
         (User.concurrent_user_limit.is_(None), 1),
         (User.concurrent_user_limit < 1, 1),
@@ -361,8 +361,9 @@ def get_managed_admins(
                 db,
                 item,
                 settings_by_admin.get(item.id),
-                user_counts.get(item.id, 0),
+                quota_by_admin[item.id].current_users,
                 int(capacity_usage.get(item.id, 0)),
+                quota_by_admin[item.id],
             )
             for item in dbadmins
         ],

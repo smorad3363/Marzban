@@ -6,15 +6,12 @@ export type SubscriptionMode =
 
 export type AdminPolicy = {
   total_traffic: number | null;
-  used_traffic: number;
   expiry_date: string | null;
   user_limit: number | null;
   max_users: number | null;
   device_capacity_limit: number | null;
-  provisioning_volume_limit: number | null;
-  provisioning_volume_used: number;
-  renewal_limit: number | null;
-  renewals_used: number;
+  admin_traffic_warning_percent: number;
+  sudo_traffic_warning_percent: number;
   all_inbounds: boolean;
   allowed_inbounds: string[];
   all_user_limits: boolean;
@@ -46,12 +43,16 @@ export type AdminQuotaSummary = {
   current_users: number;
   max_users: number | null;
   remaining_user_slots: number | null;
-  provisioned_volume: number;
-  provisioning_volume_limit: number | null;
-  remaining_provisioning_volume: number | null;
-  renewals_used: number;
-  renewal_limit: number | null;
-  renewals_remaining: number | null;
+  credit_limit: number | null;
+  credit_used: number;
+  credit_remaining: number | null;
+  credit_usage_percent: number | null;
+  credit_calculation_mode: "used_traffic" | "created_traffic";
+  operation_allowance_remaining: number | null;
+  admin_warning_percent: number;
+  sudo_warning_percent: number;
+  admin_warning_active: boolean;
+  sudo_warning_active: boolean;
 };
 
 export type ManagedAdminList = {

@@ -81,15 +81,12 @@ const GIB = 1024 ** 3;
 
 const emptyPolicy = (): AdminPolicy => ({
   total_traffic: null,
-  used_traffic: 0,
   expiry_date: null,
   user_limit: null,
   max_users: null,
   device_capacity_limit: null,
-  provisioning_volume_limit: null,
-  provisioning_volume_used: 0,
-  renewal_limit: null,
-  renewals_used: 0,
+  admin_traffic_warning_percent: 80,
+  sudo_traffic_warning_percent: 80,
   all_inbounds: true,
   allowed_inbounds: [],
   all_user_limits: true,
@@ -136,6 +133,28 @@ const AdminStat: FC<StatProps> = ({ label, value, icon }) => (
   </Card>
 );
 
+const CreditRemaining: FC<{ admin: ManagedAdmin }> = ({ admin }) => {
+  const { t } = useTranslation();
+  const quota = admin.quota;
+  return (
+    <Stack spacing={1} align="start">
+      <Text>
+        {quota.credit_remaining === null
+          ? t("unlimited")
+          : formatBytes(quota.credit_remaining)}
+      </Text>
+      {quota.credit_usage_percent !== null && (
+        <HStack spacing={2}>
+          <Text fontSize="xs" color="gray.400">{quota.credit_usage_percent}%</Text>
+          {quota.sudo_warning_active && (
+            <Badge colorScheme="orange" variant="subtle">{t("admins.creditWarning")}</Badge>
+          )}
+        </HStack>
+      )}
+    </Stack>
+  );
+};
+
 type FormModalProps = {
   isOpen: boolean;
   admin: ManagedAdmin | null;
@@ -178,6 +197,7 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
     {
       onSuccess: () => {
         queryClient.invalidateQueries("admin-management");
+        queryClient.invalidateQueries("admin-capabilities");
         toast({ title: t(isEditing ? "admins.updated" : "admins.created"), status: "success", duration: 3000 });
         onClose();
       },
@@ -307,9 +327,17 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
               <Text color="gray.400" fontSize="sm" mt={1}>{t("admins.limitsSectionHelp")}</Text>
               <SimpleGrid columns={{ base: 1, lg: 2 }} gap={5} mt={4}>
                 <FormControl>
-                  <FormLabel>{t("admins.totalTraffic")}</FormLabel>
+                  <FormLabel>{t("admins.creditLimit")}</FormLabel>
                   <Input type="number" min={0} step="0.01" dir="ltr" value={form.policy.total_traffic === null ? "" : form.policy.total_traffic / GIB} onChange={(e) => setPolicy("total_traffic", e.target.value === "" ? null : Math.round(Number(e.target.value) * GIB))} />
-                  <FormHelperText>{t("admins.blankUnlimited")}</FormHelperText>
+                  <FormHelperText>{t("admins.creditLimitHelp")}</FormHelperText>
+                </FormControl>
+                <FormControl>
+                  <FormLabel>{t("admins.volumeMode")}</FormLabel>
+                  <Select value={form.policy.calculate_volume} onChange={(e) => setPolicy("calculate_volume", e.target.value as AdminPolicy["calculate_volume"])}>
+                    <option value="used_traffic">{t("admins.usedTrafficMode")}</option>
+                    <option value="created_traffic">{t("admins.createdTrafficMode")}</option>
+                  </Select>
+                  <FormHelperText>{t("admins.volumeModeHelp")}</FormHelperText>
                 </FormControl>
                 <FormControl>
                   <FormLabel>{t("admins.operationLimit")}</FormLabel>
@@ -327,16 +355,6 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
                   <FormHelperText>{t("admins.deviceCapacityHelp")}</FormHelperText>
                 </FormControl>
                 <FormControl>
-                  <FormLabel>{t("admins.provisioningVolume")}</FormLabel>
-                  <Input type="number" min={0} step="0.01" dir="ltr" value={form.policy.provisioning_volume_limit === null ? "" : form.policy.provisioning_volume_limit / GIB} onChange={(e) => setPolicy("provisioning_volume_limit", e.target.value === "" ? null : Math.round(Number(e.target.value) * GIB))} />
-                  <FormHelperText>{t("admins.blankUnlimited")}</FormHelperText>
-                </FormControl>
-                <FormControl>
-                  <FormLabel>{t("admins.renewalLimit")}</FormLabel>
-                  <Input type="number" min={0} dir="ltr" value={form.policy.renewal_limit ?? ""} onChange={(e) => setPolicy("renewal_limit", nullableNumber(e))} />
-                  <FormHelperText>{t("admins.renewalLimitHelp")}</FormHelperText>
-                </FormControl>
-                <FormControl>
                   <FormLabel>{t("admins.maxDuration")}</FormLabel>
                   <Input type="number" min={1} dir="ltr" value={form.policy.max_user_duration_days ?? ""} onChange={(e) => setPolicy("max_user_duration_days", nullableNumber(e))} />
                   <FormHelperText>{t("admins.blankUnlimited")}</FormHelperText>
@@ -345,13 +363,20 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
                   <FormLabel>{t("admins.expiryDate")}</FormLabel>
                   <Input type="date" dir="ltr" value={form.policy.expiry_date || ""} onChange={(e) => setPolicy("expiry_date", e.target.value || null)} />
                 </FormControl>
-                <FormControl>
-                  <FormLabel>{t("admins.volumeMode")}</FormLabel>
-                  <Select value={form.policy.calculate_volume} onChange={(e) => setPolicy("calculate_volume", e.target.value as AdminPolicy["calculate_volume"])}>
-                    <option value="used_traffic">{t("admins.usedTrafficMode")}</option>
-                    <option value="created_traffic">{t("admins.createdTrafficMode")}</option>
-                  </Select>
-                </FormControl>
+                {form.policy.calculate_volume === "used_traffic" && (
+                  <FormControl isRequired>
+                    <FormLabel>{t("admins.adminWarningPercent")}</FormLabel>
+                    <Input type="number" min={1} max={100} step={1} dir="ltr" value={form.policy.admin_traffic_warning_percent} onChange={(e) => setPolicy("admin_traffic_warning_percent", Number(e.target.value))} />
+                    <FormHelperText>{t("admins.adminWarningPercentHelp")}</FormHelperText>
+                  </FormControl>
+                )}
+                {form.policy.calculate_volume === "used_traffic" && (
+                  <FormControl isRequired>
+                    <FormLabel>{t("admins.sudoWarningPercent")}</FormLabel>
+                    <Input type="number" min={1} max={100} step={1} dir="ltr" value={form.policy.sudo_traffic_warning_percent} onChange={(e) => setPolicy("sudo_traffic_warning_percent", Number(e.target.value))} />
+                    <FormHelperText>{t("admins.sudoWarningPercentHelp")}</FormHelperText>
+                  </FormControl>
+                )}
               </SimpleGrid>
             </Box>
 
@@ -534,7 +559,7 @@ export const Admins: FC = () => {
   const query = useQuery<ManagedAdminList, Error>(
     ["admin-management", page, search],
     () => fetch(`/admin-management?offset=${page * PAGE_SIZE}&limit=${PAGE_SIZE}&username=${encodeURIComponent(search)}`),
-    { keepPreviousData: true, enabled: userData.is_sudo }
+    { keepPreviousData: true, enabled: userData.is_sudo, refetchInterval: 15000 }
   );
 
   const removeMutation = useMutation(
@@ -600,14 +625,14 @@ export const Admins: FC = () => {
             <>
               <TableContainer display={{ base: "none", lg: "block" }}>
                 <Table size="sm">
-                  <Thead><Tr><Th>{t("admins.admin")}</Th><Th>{t("admins.access")}</Th><Th>{t("admins.usersCount")}</Th><Th>{t("admins.provisioningRemaining")}</Th><Th>{t("admins.renewalsRemaining")}</Th><Th>{t("admins.maxDuration")}</Th><Th>{t("admins.expiryDate")}</Th><Th textAlign="end">{t("admins.actions")}</Th></Tr></Thead>
+                  <Thead><Tr><Th>{t("admins.admin")}</Th><Th>{t("admins.access")}</Th><Th>{t("admins.usersCount")}</Th><Th>{t("admins.creditRemaining")}</Th><Th>{t("admins.operationRemaining")}</Th><Th>{t("admins.maxDuration")}</Th><Th>{t("admins.expiryDate")}</Th><Th textAlign="end">{t("admins.actions")}</Th></Tr></Thead>
                   <Tbody>{admins.map((item) => (
                     <Tr key={item.username}>
                       <Td><Text color="white" fontWeight="650">{item.username}</Text><Text fontSize="xs" color="gray.400">{item.telegram_id ? `Telegram: ${item.telegram_id}` : t("admins.noContact")}</Text></Td>
                       <Td><Badge bg={item.is_sudo ? "rgba(168, 85, 247, .18)" : "whiteAlpha.100"} color={item.is_sudo ? "purple.200" : "gray.200"} borderWidth="1px" borderColor={item.is_sudo ? "rgba(192, 132, 252, .4)" : "whiteAlpha.200"}>{t(item.is_sudo ? "admins.sudo" : "admins.adminRole")}</Badge></Td>
                       <Td>{item.quota.current_users} / {item.quota.max_users ?? t("unlimited")}</Td>
-                      <Td>{item.quota.remaining_provisioning_volume === null ? t("unlimited") : formatBytes(item.quota.remaining_provisioning_volume)}</Td>
-                      <Td>{item.quota.renewals_remaining ?? t("unlimited")}</Td>
+                      <Td><CreditRemaining admin={item} /></Td>
+                      <Td>{item.quota.operation_allowance_remaining ?? t("unlimited")}</Td>
                       <Td>{item.policy.max_user_duration_days ? `${item.policy.max_user_duration_days} ${t("days")}` : t("unlimited")}</Td>
                       <Td>{item.policy.expiry_date || t("unlimited")}</Td>
                       <Td><HStack justify="end"><IconButton aria-label={t("edit")} size="sm" variant="ghost" icon={<EditIcon />} isDisabled={!canEdit(item)} onClick={() => openEdit(item)} /><IconButton aria-label={t("delete")} size="sm" variant="ghost" colorScheme="red" icon={<RemoveIcon />} isDisabled={item.is_sudo} onClick={() => openDelete(item)} /></HStack></Td>
@@ -620,7 +645,7 @@ export const Admins: FC = () => {
                 {admins.map((item) => (
                   <Box key={item.username} p={4}>
                     <HStack justify="space-between" align="start"><Box><Text color="white" fontWeight="700">{item.username}</Text><Badge mt={1} bg={item.is_sudo ? "rgba(168, 85, 247, .18)" : "whiteAlpha.100"} color={item.is_sudo ? "purple.200" : "gray.200"} borderWidth="1px" borderColor={item.is_sudo ? "rgba(192, 132, 252, .4)" : "whiteAlpha.200"}>{t(item.is_sudo ? "admins.sudo" : "admins.adminRole")}</Badge></Box><HStack><IconButton aria-label={t("edit")} size="sm" variant="ghost" icon={<EditIcon />} isDisabled={!canEdit(item)} onClick={() => openEdit(item)} /><IconButton aria-label={t("delete")} size="sm" variant="ghost" colorScheme="red" icon={<RemoveIcon />} isDisabled={item.is_sudo} onClick={() => openDelete(item)} /></HStack></HStack>
-                    <SimpleGrid columns={2} gap={3} mt={4} fontSize="sm"><Box><Text color="gray.400" fontSize="xs">{t("admins.usersCount")}</Text><Text color="gray.100" mt={1}>{item.quota.current_users} / {item.quota.max_users ?? t("unlimited")}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.provisioningRemaining")}</Text><Text color="gray.100" mt={1}>{item.quota.remaining_provisioning_volume === null ? t("unlimited") : formatBytes(item.quota.remaining_provisioning_volume)}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.renewalsRemaining")}</Text><Text color="gray.100" mt={1}>{item.quota.renewals_remaining ?? t("unlimited")}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.maxDuration")}</Text><Text color="gray.100" mt={1}>{item.policy.max_user_duration_days ? `${item.policy.max_user_duration_days} ${t("days")}` : t("unlimited")}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.expiryDate")}</Text><Text color="gray.100" mt={1}>{item.policy.expiry_date || t("unlimited")}</Text></Box></SimpleGrid>
+                    <SimpleGrid columns={2} gap={3} mt={4} fontSize="sm"><Box><Text color="gray.400" fontSize="xs">{t("admins.usersCount")}</Text><Text color="gray.100" mt={1}>{item.quota.current_users} / {item.quota.max_users ?? t("unlimited")}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.creditRemaining")}</Text><Box mt={1}><CreditRemaining admin={item} /></Box></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.operationRemaining")}</Text><Text color="gray.100" mt={1}>{item.quota.operation_allowance_remaining ?? t("unlimited")}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.maxDuration")}</Text><Text color="gray.100" mt={1}>{item.policy.max_user_duration_days ? `${item.policy.max_user_duration_days} ${t("days")}` : t("unlimited")}</Text></Box><Box><Text color="gray.400" fontSize="xs">{t("admins.expiryDate")}</Text><Text color="gray.100" mt={1}>{item.policy.expiry_date || t("unlimited")}</Text></Box></SimpleGrid>
                   </Box>
                 ))}
               </Stack>
