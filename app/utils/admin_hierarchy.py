@@ -413,10 +413,10 @@ def own_credit_spend(db: Session, settings: MarzhelpAdminSettings) -> int:
 
 
 def available_credit(db: Session, settings: MarzhelpAdminSettings) -> int | None:
+    if settings.total_traffic is None:
+        return None
     admin = db.get(Admin, settings.admin_id)
     if admin is not None and is_owner(db, admin):
-        return None
-    if settings.total_traffic is None:
         return None
     return max(
         int(settings.total_traffic or 0)
