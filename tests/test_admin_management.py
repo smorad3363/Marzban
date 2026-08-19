@@ -131,6 +131,45 @@ def test_policy_update_cannot_reset_internal_allocated_credit(session):
     assert "used_traffic" not in MarzhelpAdminPolicy().model_dump()
 
 
+def test_policy_calculation_mode_can_be_changed_without_resetting_usage(session):
+    admin = crud.create_admin(
+        session,
+        AdminCreate(username="mode-change", password="secret", is_sudo=False),
+    )
+    settings = crud.upsert_marzhelp_admin_policy(
+        session,
+        admin.id,
+        MarzhelpAdminPolicy(
+            total_traffic=100 * 1024**3,
+            calculate_volume="created_traffic",
+        ),
+    )
+    settings.used_traffic = 25 * 1024**3
+    session.commit()
+
+    used_mode = crud.upsert_marzhelp_admin_policy(
+        session,
+        admin.id,
+        MarzhelpAdminPolicy(
+            total_traffic=100 * 1024**3,
+            calculate_volume="used_traffic",
+        ),
+    )
+    assert used_mode.calculate_volume == "used_traffic"
+    assert used_mode.used_traffic == 25 * 1024**3
+
+    allocated_mode = crud.upsert_marzhelp_admin_policy(
+        session,
+        admin.id,
+        MarzhelpAdminPolicy(
+            total_traffic=100 * 1024**3,
+            calculate_volume="created_traffic",
+        ),
+    )
+    assert allocated_mode.calculate_volume == "created_traffic"
+    assert allocated_mode.used_traffic >= 25 * 1024**3
+
+
 def test_selected_permission_modes_require_values():
     with pytest.raises(ValidationError):
         MarzhelpAdminPolicy(all_inbounds=False)

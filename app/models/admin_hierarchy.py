@@ -119,6 +119,24 @@ class AccountSummary(BaseModel):
     can_manage_plans: bool = False
 
 
+class PlanCategoryCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    description: Optional[str] = Field(default=None, max_length=512)
+
+
+class PlanCategoryUpdate(PlanCategoryCreate):
+    pass
+
+
+class PlanCategoryResponse(BaseModel):
+    id: int
+    owner_admin_id: int
+    name: str
+    description: Optional[str] = None
+    archived_at: Optional[datetime] = None
+    plan_count: int = 0
+
+
 class PlanVersionInput(BaseModel):
     data_limit: int = Field(ge=0)
     duration_days: int = Field(ge=1, le=3650)
@@ -137,6 +155,7 @@ class PlanVersionInput(BaseModel):
 class PlanCreate(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     description: Optional[str] = Field(default=None, max_length=512)
+    category_id: Optional[int] = None
     version: PlanVersionInput
     allowed_admin_ids: list[int] = Field(default_factory=list)
     include_subtree: bool = False
@@ -144,6 +163,7 @@ class PlanCreate(BaseModel):
 
 class PlanUpdate(BaseModel):
     description: Optional[str] = Field(default=None, max_length=512)
+    category_id: Optional[int] = None
     version: PlanVersionInput
     allowed_admin_ids: list[int] = Field(default_factory=list)
     include_subtree: bool = False
@@ -154,6 +174,8 @@ class PlanResponse(BaseModel):
     owner_admin_id: int
     name: str
     description: Optional[str]
+    category_id: Optional[int] = None
+    category_name: Optional[str] = None
     current_version_id: int
     version_number: int
     archived_at: Optional[datetime]

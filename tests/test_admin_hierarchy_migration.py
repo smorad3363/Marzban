@@ -34,6 +34,22 @@ assert MIGRATION_SPEC and MIGRATION_SPEC.loader
 migration = importlib.util.module_from_spec(MIGRATION_SPEC)
 MIGRATION_SPEC.loader.exec_module(migration)
 
+CATEGORY_MIGRATION_PATH = (
+    Path(__file__).parents[1]
+    / "app"
+    / "db"
+    / "migrations"
+    / "versions"
+    / "4f9c3a2b1d06_add_plan_categories.py"
+)
+CATEGORY_MIGRATION_SPEC = importlib.util.spec_from_file_location(
+    "admin_plan_category_migration",
+    CATEGORY_MIGRATION_PATH,
+)
+assert CATEGORY_MIGRATION_SPEC and CATEGORY_MIGRATION_SPEC.loader
+category_migration = importlib.util.module_from_spec(CATEGORY_MIGRATION_SPEC)
+CATEGORY_MIGRATION_SPEC.loader.exec_module(category_migration)
+
 
 def test_fixed_identifier_tables_do_not_compile_mysql_auto_increment():
     for model in (
@@ -69,6 +85,12 @@ def _upgrade(connection: sa.Connection, monkeypatch) -> None:
     operations = Operations(MigrationContext.configure(connection))
     monkeypatch.setattr(migration, "op", operations)
     migration.upgrade()
+
+
+def _upgrade_categories(connection: sa.Connection, monkeypatch) -> None:
+    operations = Operations(MigrationContext.configure(connection))
+    monkeypatch.setattr(category_migration, "op", operations)
+    category_migration.upgrade()
 
 
 def test_upgrade_adds_disabled_hierarchy_without_guessing_legacy_parents(monkeypatch):
@@ -149,6 +171,46 @@ def test_upgrade_adds_disabled_hierarchy_without_guessing_legacy_parents(monkeyp
                 "FROM admin_hierarchy ORDER BY ancestor_id"
             )
         ).all() == [(10, 10, 0), (20, 20, 0)]
+
+
+def test_plan_category_upgrade_preserves_existing_plans(monkeypatch):
+    engine = sa.create_engine("sqlite+pysqlite:///:memory:")
+    with engine.begin() as connection:
+        _legacy_schema(connection)
+        connection.execute(
+            sa.text(
+                "INSERT INTO admins (id, username, is_sudo) "
+                "VALUES (10, 'legacy-sudo', 1)"
+            )
+        )
+        _upgrade(connection, monkeypatch)
+        connection.execute(
+            sa.text(
+                "INSERT INTO admin_user_plans "
+                "(id, owner_admin_id, name, current_version_id, archived_at, created_at, updated_at) "
+                "VALUES (100, 10, 'legacy-plan', NULL, NULL, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+            )
+        )
+
+        _upgrade_categories(connection, monkeypatch)
+
+        inspector = sa.inspect(connection)
+        assert {"admin_plan_categories", "admin_plan_category_access"} <= set(
+            inspector.get_table_names()
+        )
+        assert "category_id" in {
+            column["name"] for column in inspector.get_columns("admin_user_plans")
+        }
+        assert any(
+            index.get("column_names") == ["category_id", "archived_at", "id"]
+            for index in inspector.get_indexes("admin_user_plans")
+        )
+        assert connection.execute(
+            sa.text(
+                "SELECT id, owner_admin_id, name, category_id "
+                "FROM admin_user_plans WHERE id = 100"
+            )
+        ).one() == (100, 10, "legacy-plan", None)
 
 
 def test_upgrade_is_safe_to_rerun_after_partial_admin_column_ddl(monkeypatch):

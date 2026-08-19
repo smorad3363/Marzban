@@ -138,9 +138,35 @@ detect_compose() {
     fi
 }
 
+marzban_script_ref() {
+    local requested_version="${1:-latest}"
+    local release_ref=""
+    if [[ "$requested_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "$requested_version"
+        return
+    fi
+    if [ "$requested_version" = "latest" ] && command -v jq >/dev/null 2>&1; then
+        release_ref=$(curl -fsSL "${MARZBAN_RELEASES_API}/latest" 2>/dev/null | jq -r '.tag_name // empty' || true)
+    fi
+    echo "${release_ref:-$MARZBAN_GITHUB_BRANCH}"
+}
+
 install_marzban_script_from_repo() {
-    colorized_echo blue "Installing marzban script from ${MARZBAN_GITHUB_REPO}"
-    curl -sSL "$MARZBAN_SCRIPT_URL" | install -m 755 /dev/stdin /usr/local/bin/marzban
+    local requested_version="${1:-latest}"
+    local script_ref
+    local script_url
+    local temp_script
+    script_ref=$(marzban_script_ref "$requested_version")
+    script_url="https://raw.githubusercontent.com/${MARZBAN_GITHUB_REPO}/${script_ref}/${MARZBAN_SCRIPTS_PATH}"
+    temp_script=$(mktemp)
+    colorized_echo blue "Installing marzban script from ${MARZBAN_GITHUB_REPO}@${script_ref}"
+    if ! curl -fsSL "$script_url" -o "$temp_script"; then
+        rm -f "$temp_script"
+        colorized_echo red "Could not download marzban script from ${script_ref}."
+        return 1
+    fi
+    install -m 755 "$temp_script" /usr/local/bin/marzban
+    rm -f "$temp_script"
     colorized_echo green "marzban script installed successfully"
 }
 
@@ -1138,7 +1164,7 @@ install_command() {
         install_yq
     fi
     detect_compose
-    install_marzban_script_from_repo
+    install_marzban_script_from_repo "$marzban_version"
     # Function to check if a version exists in the GitHub releases
     check_version_exists() {
         local version=$1
@@ -1277,12 +1303,27 @@ marzban_cli() {
 }
 
 set_owner_command() {
-    if [ "$#" -ne 1 ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
-        colorized_echo red "Usage: marzban set-owner <username>"
-        [ "$#" -eq 1 ] && exit 0
-        exit 1
+    if [ "$#" -eq 0 ]; then
+        # Let Typer prompt for an existing username. This keeps the documented
+        # `marzban set-owner` command usable without requiring hidden CLI flags.
+        cli_command admin set-owner
+        return
     fi
-    cli_command admin set-owner --username "$1"
+    if [ "$#" -eq 1 ] && { [ "$1" = "-h" ] || [ "$1" = "--help" ]; }; then
+        colorized_echo blue "Usage: marzban set-owner [username]"
+        cli_command admin set-owner --help
+        return
+    fi
+    if [ "$#" -eq 1 ]; then
+        cli_command admin set-owner --username "$1"
+        return
+    fi
+    if [ "$#" -eq 2 ] && { [ "$1" = "-u" ] || [ "$1" = "--username" ]; }; then
+        cli_command admin set-owner --username "$2"
+        return
+    fi
+    colorized_echo red "Usage: marzban set-owner [username]"
+    exit 1
 }
 
 
@@ -1578,9 +1619,21 @@ update_command() {
 
     detect_compose
 
-    update_marzban_script
     if ! command -v yq >/dev/null 2>&1; then
         install_yq
+    fi
+
+    local mysql_upgrade_state
+    if mysql_upgrade_required_for_update; then
+        colorized_echo yellow "mysql:latest requires a staged in-place upgrade from ${MYSQL_UPDATE_SOURCE_VERSION}."
+        mysql_upgrade_command
+    else
+        mysql_upgrade_state=$?
+        if [ "$mysql_upgrade_state" -eq 2 ]; then
+            colorized_echo red "mysql:latest is configured, but the current MySQL server is not healthy enough to upgrade safely."
+            colorized_echo yellow "Restore the compose image that last worked, start MySQL, then run marzban update again."
+            exit 1
+        fi
     fi
 
     local previous_image
@@ -1609,17 +1662,49 @@ update_command() {
         exit 1
     fi
 
+    update_marzban_script "$requested_version"
     colorized_echo green "Marzban updated successfully to ${requested_version}"
 }
 
 update_marzban_script() {
+    local requested_version="${1:-latest}"
     colorized_echo blue "Updating marzban script"
-    curl -sSL "$MARZBAN_SCRIPT_URL" | install -m 755 /dev/stdin /usr/local/bin/marzban
+    install_marzban_script_from_repo "$requested_version"
     colorized_echo green "marzban script updated successfully"
 }
 
 update_marzban() {
     $COMPOSE -f $COMPOSE_FILE -p "$APP_NAME" pull
+}
+
+mysql_upgrade_required_for_update() {
+    local desired_image
+    local container_id
+    desired_image=$(yq -r '.services.mysql.image // ""' "$COMPOSE_FILE")
+    case "$desired_image" in
+        mysql|mysql:latest|docker.io/mysql:latest|docker.io/library/mysql:latest)
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+
+    container_id=$(mysql_upgrade_container_id)
+    if [ -z "$container_id" ]; then
+        return 2
+    fi
+    MYSQL_UPDATE_SOURCE_VERSION=$(mysql_upgrade_server_version "$container_id" 2>/dev/null | tr -d '\r[:space:]' || true)
+    if [ -z "$MYSQL_UPDATE_SOURCE_VERSION" ]; then
+        return 2
+    fi
+    case "$MYSQL_UPDATE_SOURCE_VERSION" in
+        26.*)
+            return 1
+            ;;
+        *)
+            return 0
+            ;;
+    esac
 }
 
 mysql_upgrade_container_id() {

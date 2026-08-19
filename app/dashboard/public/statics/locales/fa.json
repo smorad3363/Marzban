@@ -561,5 +561,9 @@
   "admins.role.SUPER_ADMIN": "مدیر ارشد",
   "admins.role.ADMIN": "ادمین",
   "admins.managerAdmins": "مدیران شاخه",
-  "admins.creditLedgerHelp": "اعتبار در ساختار سلسله‌مراتبی فقط از دفترکل واگذاری یا بازپس‌گیری تغییر می‌کند."
+  "admins.creditLedgerHelp": "اعتبار در ساختار سلسله‌مراتبی فقط از دفترکل واگذاری یا بازپس‌گیری تغییر می‌کند.",
+  "admins.planCategories": "دسته‌بندی‌های پلن مجاز",
+  "admins.planCategoriesHelp": "دسته‌هایی را انتخاب کنید که این ادمین بتواند پلن‌های داخل آن‌ها را ببیند و استفاده کند.",
+  "admins.planCategoriesLoadFailed": "دسته‌بندی‌های پلن دریافت نشدند.",
+  "admins.noPlanCategories": "هنوز دسته‌بندی فعالی ساخته نشده است."
 }

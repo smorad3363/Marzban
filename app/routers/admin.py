@@ -35,7 +35,7 @@ from app.models.admin import (
 )
 from app.models.user import UserStatus
 from app.device_limit.constants import SubscriptionMode
-from app.utils import admin_hierarchy, marzhelp_policy, report, responses
+from app.utils import admin_hierarchy, admin_plans, marzhelp_policy, report, responses
 from app.utils.audit import (
     AuditLogService,
     AuditStatus,
@@ -56,6 +56,7 @@ def managed_admin_response(
     user_count: int = 0,
     capacity_used: int = 0,
     quota: AdminQuotaSummary | None = None,
+    plan_category_ids: list[int] | None = None,
 ) -> ManagedAdmin:
     policy = (
         MarzhelpAdminPolicy.model_validate(settings)
@@ -78,6 +79,11 @@ def managed_admin_response(
         quota=quota
         or AdminQuotaSummary.model_validate(
             marzhelp_policy.quota_summary(db, dbadmin.id)
+        ),
+        plan_category_ids=(
+            admin_plans.admin_category_ids(db, dbadmin.id)
+            if plan_category_ids is None
+            else plan_category_ids
         ),
     )
 
@@ -435,6 +441,10 @@ def get_managed_admins(
         if dbadmins
         else {}
     )
+    category_ids_by_admin = admin_plans.admin_category_ids_map(
+        db,
+        [item.id for item in dbadmins],
+    )
     return ManagedAdminList(
         admins=[
             managed_admin_response(
@@ -444,6 +454,7 @@ def get_managed_admins(
                 quota_by_admin[item.id].current_users,
                 int(capacity_usage.get(item.id, 0)),
                 quota_by_admin[item.id],
+                category_ids_by_admin[item.id],
             )
             for item in dbadmins
         ],
@@ -509,7 +520,7 @@ def create_managed_admin(
         policy = new_admin.policy
         if hierarchy_on:
             policy = policy.model_copy(
-                update={"total_traffic": 0, "calculate_volume": "created_traffic"}
+                update={"total_traffic": 0}
             )
         settings = crud.upsert_marzhelp_admin_policy(
             db, dbadmin.id, policy, commit=False
@@ -521,7 +532,15 @@ def create_managed_admin(
                 parent=actor,
                 child=dbadmin,
                 child_role=new_admin.role or admin_hierarchy.ADMIN,
+                commit=False,
             )
+            admin_plans.replace_admin_categories(
+                db,
+                actor=actor,
+                target=dbadmin,
+                category_ids=new_admin.plan_category_ids,
+            )
+            db.commit()
         else:
             db.commit()
         db.refresh(dbadmin)
@@ -529,6 +548,9 @@ def create_managed_admin(
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="Admin already exists")
+    except admin_hierarchy.HierarchyError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail={"code": exc.code, "message": str(exc)})
     response = managed_admin_response(db, dbadmin, settings, 0, 0)
     AuditLogService.log(
         db,
@@ -569,6 +591,9 @@ def modify_managed_admin(
         )
 
     current_settings = db.get(MarzhelpAdminSettings, dbadmin.id)
+    previous_calculation_mode = (
+        current_settings.calculate_volume if current_settings is not None else None
+    )
     previous_value = admin_audit_state(
         dbadmin,
         MarzhelpAdminPolicy.model_validate(current_settings)
@@ -581,10 +606,33 @@ def modify_managed_admin(
         policy = policy.model_copy(
             update={
                 "total_traffic": current_settings.total_traffic,
-                "calculate_volume": current_settings.calculate_volume,
             }
         )
     settings = crud.upsert_marzhelp_admin_policy(db, dbadmin.id, policy, commit=False)
+    if (
+        previous_calculation_mode is not None
+        and previous_calculation_mode != policy.calculate_volume
+        and policy.calculate_volume == "created_traffic"
+    ):
+        settings.used_traffic = max(
+            int(settings.used_traffic or 0),
+            marzhelp_policy.allocated_credit_baseline(db, dbadmin.id),
+        )
+    if (
+        actor is not None
+        and admin_hierarchy.hierarchy_enabled(db)
+        and modified_admin.plan_category_ids is not None
+    ):
+        try:
+            admin_plans.replace_admin_categories(
+                db,
+                actor=actor,
+                target=dbadmin,
+                category_ids=modified_admin.plan_category_ids,
+            )
+        except admin_hierarchy.HierarchyError as exc:
+            db.rollback()
+            raise HTTPException(status_code=400, detail={"code": exc.code, "message": str(exc)})
     db.commit()
     db.refresh(dbadmin)
     db.refresh(settings)

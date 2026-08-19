@@ -298,6 +298,7 @@ class ManagedAdmin(Admin):
     capacity_used: int = 0
     policy: MarzhelpAdminPolicy
     quota: AdminQuotaSummary
+    plan_category_ids: list[int] = Field(default_factory=list)
 
 
 class AdminCapabilities(BaseModel):
@@ -328,10 +329,12 @@ class ManagedAdminList(BaseModel):
 
 class ManagedAdminCreate(AdminCreate):
     policy: MarzhelpAdminPolicy = Field(default_factory=MarzhelpAdminPolicy)
+    plan_category_ids: list[int] = Field(default_factory=list)
 
 
 class ManagedAdminModify(AdminModify):
     policy: MarzhelpAdminPolicy
+    plan_category_ids: Optional[list[int]] = None
 
 
 class AdminDeleteRequest(BaseModel):

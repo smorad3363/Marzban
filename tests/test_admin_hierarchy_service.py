@@ -11,6 +11,7 @@ from app.db.models import (
     AdminAccountStatus,
     AdminBulkJob,
     AdminHierarchySettings,
+    AdminPlanCategoryAccess,
     AdminRole,
     AdminSuspensionReason,
     AdminUserCreationMode,
@@ -18,7 +19,7 @@ from app.db.models import (
     User,
     UserPlanAssignment,
 )
-from app.models.admin_hierarchy import PlanCreate, PlanVersionInput
+from app.models.admin_hierarchy import PlanCategoryCreate, PlanCreate, PlanVersionInput
 from app.models.admin import Admin as APIAdmin
 from app.models.user import UserStatus
 from app.routers.admin_hierarchy import get_admin_tree
@@ -90,6 +91,81 @@ def test_set_owner_backfills_without_deleting_ids_or_users(db):
     assert db.get(User, unowned.id).admin_id == owner.id
     assert admin_hierarchy.hierarchy_enabled(db)
     assert report["closure_rows"] == 5
+
+
+def test_owner_credit_is_unlimited_for_plan_validation(db, monkeypatch):
+    owner, _, _, _, _ = _legacy_tree(db)
+    wallet = db.get(MarzhelpAdminSettings, owner.id)
+    monkeypatch.setattr(
+        admin_plans.xray.config,
+        "inbounds_by_tag",
+        {"VLESS TCP": {"tag": "VLESS TCP", "protocol": "vless"}},
+    )
+
+    assert wallet.total_traffic is None
+    assert admin_hierarchy.available_credit(db, wallet) is None
+    plan = admin_plans.create_plan(
+        db,
+        owner,
+        PlanCreate(
+            name="owner-unlimited",
+            version=PlanVersionInput(
+                data_limit=10**15,
+                duration_days=30,
+                inbounds=["VLESS TCP"],
+            ),
+        ),
+    )
+
+    assert plan.owner_admin_id == owner.id
+
+
+def test_plan_category_assignment_controls_admin_access(db, monkeypatch):
+    owner, sibling, leaf, _, _ = _legacy_tree(db)
+    monkeypatch.setattr(
+        admin_plans.xray.config,
+        "inbounds_by_tag",
+        {"VLESS TCP": {"tag": "VLESS TCP", "protocol": "vless"}},
+    )
+    category = admin_plans.create_category(
+        db,
+        owner,
+        PlanCategoryCreate(name="reseller plans"),
+    )
+    admin_plans.replace_admin_categories(
+        db,
+        actor=owner,
+        target=sibling,
+        category_ids=[category.id],
+    )
+    db.commit()
+    plan = admin_plans.create_plan(
+        db,
+        owner,
+        PlanCreate(
+            name="category-plan",
+            category_id=category.id,
+            version=PlanVersionInput(
+                data_limit=100,
+                duration_days=30,
+                inbounds=["VLESS TCP"],
+            ),
+        ),
+    )
+
+    assert admin_plans.admin_category_ids(db, sibling.id) == [category.id]
+    assert db.query(AdminPlanCategoryAccess).count() == 1
+    assert admin_plans.can_use_plan(db, sibling, plan.id)
+    assert not admin_plans.can_use_plan(db, leaf, plan.id)
+
+    admin_plans.replace_admin_categories(
+        db,
+        actor=owner,
+        target=sibling,
+        category_ids=[],
+    )
+    db.commit()
+    assert not admin_plans.can_use_plan(db, sibling, plan.id)
 
 
 def test_scope_blocks_siblings_and_allows_ancestor(db):

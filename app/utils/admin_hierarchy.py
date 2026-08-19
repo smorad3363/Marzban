@@ -307,15 +307,14 @@ def set_owner(db: Session, username: str) -> dict:
         for item in admins:
             policy = existing_settings.get(item.id)
             if policy is None:
-                db.add(
-                    MarzhelpAdminSettings(
-                        admin_id=item.id,
-                        calculate_volume="created_traffic",
-                        renewal_enabled=True,
-                        user_creation_mode_id=USER_CREATION_MODE_IDS[FREE_FORM],
-                        account_status_id=ACCOUNT_STATUS_IDS[ACTIVE],
-                    )
+                policy = MarzhelpAdminSettings(
+                    admin_id=item.id,
+                    calculate_volume="created_traffic",
+                    renewal_enabled=True,
+                    user_creation_mode_id=USER_CREATION_MODE_IDS[FREE_FORM],
+                    account_status_id=ACCOUNT_STATUS_IDS[ACTIVE],
                 )
+                db.add(policy)
             else:
                 # Compatibility conversion happens only at the explicit cutover.
                 # Legacy zero meant unlimited; canonical hierarchy uses NULL for it.
@@ -326,6 +325,9 @@ def set_owner(db: Session, username: str) -> dict:
                     marzhelp_policy.allocated_credit_baseline(db, item.id),
                 )
                 policy.calculate_volume = "created_traffic"
+
+            if item.id == selected.id:
+                policy.total_traffic = None
 
         settings.enabled = True
         settings.updated_at = utc_now_naive()
@@ -378,6 +380,7 @@ def attach_new_child(
     parent: Admin,
     child: Admin,
     child_role: str,
+    commit: bool = True,
 ) -> None:
     if not can_manage_children(db, actor) or not admin_in_scope(db, actor, parent.id):
         raise HierarchyError("admin_create_forbidden", "Parent administrator is outside actor scope")
@@ -391,14 +394,16 @@ def attach_new_child(
     child.external_api_enabled = False
     policy = db.get(MarzhelpAdminSettings, child.id)
     if policy is not None:
-        policy.calculate_volume = "created_traffic"
         policy.renewal_enabled = True
         policy.user_creation_mode_id = USER_CREATION_MODE_IDS[FREE_FORM]
         policy.account_status_id = ACCOUNT_STATUS_IDS[ACTIVE]
     admins = db.query(Admin).order_by(Admin.id).with_for_update().all()
     settings = hierarchy_settings(db, lock=True)
     _rebuild_closure(db, admins, int(settings.max_depth if settings else 64))
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
 
 
 def own_credit_spend(db: Session, settings: MarzhelpAdminSettings) -> int:
@@ -408,6 +413,9 @@ def own_credit_spend(db: Session, settings: MarzhelpAdminSettings) -> int:
 
 
 def available_credit(db: Session, settings: MarzhelpAdminSettings) -> int | None:
+    admin = db.get(Admin, settings.admin_id)
+    if admin is not None and is_owner(db, admin):
+        return None
     if settings.total_traffic is None:
         return None
     return max(

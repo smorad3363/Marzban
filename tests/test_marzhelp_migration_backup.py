@@ -166,3 +166,8 @@ def test_mysql_latest_upgrade_is_staged_and_backed_up():
     assert "Do not switch back to an older image" in installer
     assert 'mysql-upgrade)' in installer
     assert 'mysql_upgrade_command "$@"' in installer
+    auto_upgrade = installer.index("if mysql_upgrade_required_for_update; then")
+    app_pull = installer.index("target_image=$(marzban_docker_image", auto_upgrade)
+    assert auto_upgrade < app_pull
+    assert 'mysql_upgrade_command\n' in installer[auto_upgrade:app_pull]
+    assert 'mysql|mysql:latest|docker.io/mysql:latest|docker.io/library/mysql:latest)' in installer

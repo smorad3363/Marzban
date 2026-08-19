@@ -67,7 +67,7 @@ import { useTranslation } from "react-i18next";
 import { Navigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 import { fetch } from "service/http";
-import { AdminPolicy, ManagedAdmin, ManagedAdminList, ManagedAdminPayload, SubscriptionMode } from "types/Admin";
+import { AdminPolicy, ManagedAdmin, ManagedAdminList, ManagedAdminPayload, PlanCategory, SubscriptionMode } from "types/Admin";
 import { formatBytes } from "utils/formatByte";
 
 const SearchIcon = chakra(MagnifyingGlassIcon, { baseStyle: { w: 4, h: 4 } });
@@ -115,10 +115,13 @@ const emptyAdmin = (): ManagedAdminPayload => ({
   telegram_id: null,
   discord_webhook: null,
   policy: emptyPolicy(),
+  plan_category_ids: [],
 });
 
-const getErrorMessage = (error: any) =>
-  error?.data?.detail || error?.response?._data?.detail || error?.message;
+const getErrorMessage = (error: any) => {
+  const detail = error?.data?.detail || error?.response?._data?.detail || error?.message;
+  return typeof detail === "object" ? detail.message || detail.code : detail;
+};
 
 type StatProps = { label: string; value: string | number; icon: JSX.Element };
 const AdminStat: FC<StatProps> = ({ label, value, icon }) => (
@@ -182,6 +185,7 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
       telegram_id: admin.telegram_id,
       discord_webhook: admin.discord_webhook,
       policy: { ...admin.policy },
+      plan_category_ids: [...admin.plan_category_ids],
     } : emptyAdmin());
   }, [admin, isOpen]);
 
@@ -208,6 +212,12 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
         toast({ title: t("admins.saveFailed"), description: getErrorMessage(error), status: "error", duration: 5000 });
       },
     }
+  );
+
+  const categoriesQuery = useQuery<PlanCategory[], Error>(
+    "plan-categories",
+    () => fetch("/plan-categories"),
+    { enabled: isOpen, staleTime: 30000 }
   );
 
   const setField = <K extends keyof ManagedAdminPayload>(key: K, value: ManagedAdminPayload[K]) =>
@@ -278,6 +288,15 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
     );
   };
 
+  const togglePlanCategory = (categoryId: number, checked: boolean) => {
+    setField(
+      "plan_category_ids",
+      checked
+        ? [...new Set([...form.plan_category_ids, categoryId])]
+        : form.plan_category_ids.filter((value) => value !== categoryId)
+    );
+  };
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} size="5xl" scrollBehavior="inside">
       <ModalOverlay bg="rgba(0, 0, 0, .72)" backdropFilter="blur(4px)" />
@@ -343,9 +362,15 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
                   <Input type="number" min={0} step="0.01" dir="ltr" value={form.policy.total_traffic === null ? "" : form.policy.total_traffic / GIB} readOnly />
                   <FormHelperText>{t("admins.creditLedgerHelp")}</FormHelperText>
                 </FormControl>
-                <FormControl isReadOnly>
+                <FormControl>
                   <FormLabel>{t("admins.volumeMode")}</FormLabel>
-                  <Select value={form.policy.calculate_volume} isReadOnly isDisabled>
+                  <Select
+                    value={form.policy.calculate_volume}
+                    onChange={(event) => setPolicy(
+                      "calculate_volume",
+                      event.target.value as AdminPolicy["calculate_volume"]
+                    )}
+                  >
                     <option value="used_traffic">{t("admins.usedTrafficMode")}</option>
                     <option value="created_traffic">{t("admins.createdTrafficMode")}</option>
                   </Select>
@@ -390,6 +415,36 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
                   </FormControl>
                 )}
               </SimpleGrid>
+            </Box>
+
+            <Box p={{ base: 4, md: 5 }} bg="#0d1812" borderWidth="1px" borderColor="#33483b" borderRadius="12px">
+              <Text fontWeight="700">{t("admins.planCategories")}</Text>
+              <Text color="gray.400" fontSize="sm" mt={1}>{t("admins.planCategoriesHelp")}</Text>
+              {categoriesQuery.isError ? (
+                <Alert status="error" mt={4}><AlertIcon />{t("admins.planCategoriesLoadFailed")}</Alert>
+              ) : categoriesQuery.isLoading ? (
+                <Skeleton mt={4} h="64px" borderRadius="10px" />
+              ) : (categoriesQuery.data || []).length === 0 ? (
+                <Text color="gray.400" fontSize="sm" mt={4}>{t("admins.noPlanCategories")}</Text>
+              ) : (
+                <SimpleGrid columns={{ base: 1, md: 2 }} gap={3} mt={4}>
+                  {(categoriesQuery.data || []).map((category) => (
+                    <Checkbox
+                      key={category.id}
+                      minH="48px"
+                      px={3}
+                      colorScheme="primary"
+                      borderWidth="1px"
+                      borderColor="rgba(148,163,184,.18)"
+                      borderRadius="10px"
+                      isChecked={form.plan_category_ids.includes(category.id)}
+                      onChange={(event) => togglePlanCategory(category.id, event.target.checked)}
+                    >
+                      <Text fontSize="sm" fontWeight="650">{category.name}</Text>
+                    </Checkbox>
+                  ))}
+                </SimpleGrid>
+              )}
             </Box>
 
             <Box p={{ base: 4, md: 5 }} bg="#0d1812" borderWidth="1px" borderColor="#33483b" borderRadius="12px">

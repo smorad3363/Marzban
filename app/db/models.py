@@ -268,21 +268,60 @@ class AdminBulkJob(Base):
     updated_at = Column(DateTime, nullable=False, default=utc_now_naive, onupdate=utc_now_naive)
 
 
-class AdminUserPlan(Base):
-    __tablename__ = "admin_user_plans"
+class AdminPlanCategory(Base):
+    __tablename__ = "admin_plan_categories"
     __table_args__ = (
-        Index("ix_admin_user_plans_owner_active", "owner_admin_id", "archived_at", "id"),
-        UniqueConstraint("owner_admin_id", "name", name="uq_admin_user_plans_owner_name"),
+        Index("ix_admin_plan_categories_owner_active", "owner_admin_id", "archived_at", "id"),
+        UniqueConstraint("owner_admin_id", "name", name="uq_admin_plan_categories_owner_name"),
     )
 
     id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
     owner_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
     name = Column(String(128), nullable=False)
     description = Column(String(512), nullable=True)
+    archived_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utc_now_naive)
+    updated_at = Column(DateTime, nullable=False, default=utc_now_naive, onupdate=utc_now_naive)
+
+
+class AdminPlanCategoryAccess(Base):
+    __tablename__ = "admin_plan_category_access"
+    __table_args__ = (
+        Index("ix_admin_plan_category_access_admin_category", "admin_id", "category_id"),
+    )
+
+    category_id = Column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        ForeignKey("admin_plan_categories.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    admin_id = Column(Integer, ForeignKey("admins.id", ondelete="CASCADE"), primary_key=True)
+    assigned_by_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=utc_now_naive)
+
+
+class AdminUserPlan(Base):
+    __tablename__ = "admin_user_plans"
+    __table_args__ = (
+        Index("ix_admin_user_plans_owner_active", "owner_admin_id", "archived_at", "id"),
+        Index("ix_admin_user_plans_category_active", "category_id", "archived_at", "id"),
+        UniqueConstraint("owner_admin_id", "name", name="uq_admin_user_plans_owner_name"),
+    )
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    owner_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
+    category_id = Column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        ForeignKey("admin_plan_categories.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    name = Column(String(128), nullable=False)
+    description = Column(String(512), nullable=True)
     current_version_id = Column(BigInteger().with_variant(Integer, "sqlite"), nullable=True)
     archived_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=utc_now_naive)
     updated_at = Column(DateTime, nullable=False, default=utc_now_naive, onupdate=utc_now_naive)
+    category = relationship("AdminPlanCategory", lazy="joined")
 
 
 class AdminUserPlanVersion(Base):

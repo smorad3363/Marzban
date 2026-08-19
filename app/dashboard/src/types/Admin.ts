@@ -41,6 +41,7 @@ export type ManagedAdmin = {
   capacity_used: number;
   policy: AdminPolicy;
   quota: AdminQuotaSummary;
+  plan_category_ids: number[];
 };
 
 export type AdminQuotaSummary = {
@@ -121,12 +122,23 @@ export type UserPlan = {
   owner_admin_id: number;
   name: string;
   description: string | null;
+  category_id: number | null;
+  category_name: string | null;
   current_version_id: number;
   version_number: number;
   archived_at: string | null;
   version: UserPlanVersion;
   allowed_admin_ids: number[];
   include_subtree: boolean;
+};
+
+export type PlanCategory = {
+  id: number;
+  owner_admin_id: number;
+  name: string;
+  description: string | null;
+  archived_at: string | null;
+  plan_count: number;
 };
 
 export type AdminCapabilities = {

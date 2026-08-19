@@ -14,6 +14,7 @@ from app.db.models import (
     AdminAuditLog,
     AdminCreditTransfer,
     AdminHierarchy,
+    AdminPlanCategory,
     AdminRole,
     AdminSuspensionReason,
     AdminUserCreationMode,
@@ -34,6 +35,9 @@ from app.models.admin_hierarchy import (
     HierarchyAdminNode,
     HierarchyChildCreate,
     PlanCreate,
+    PlanCategoryCreate,
+    PlanCategoryResponse,
+    PlanCategoryUpdate,
     PlanRenewRequest,
     PlanResponse,
     PlanUpdate,
@@ -71,7 +75,7 @@ def _target(db: Session, username: str) -> DBAdmin:
 
 def _raise_domain(exc: Exception):
     if isinstance(exc, admin_hierarchy.HierarchyError):
-        code = 404 if exc.code.endswith("not_found") else 409 if "conflict" in exc.code else 403
+        code = 404 if exc.code.endswith("not_found") else 409 if "conflict" in exc.code or exc.code == "category_in_use" else 403
         if exc.code.startswith("invalid_") or exc.code in {
             "cycle_detected",
             "credit_exhausted",
@@ -745,6 +749,111 @@ def get_user_plans(
         query = query.filter(AdminUserPlan.id < before_id)
     plans = query.order_by(AdminUserPlan.id.desc()).limit(limit).all()
     return [admin_plans.plan_response(db, plan) for plan in plans]
+
+
+@router.get("/plan-categories", response_model=list[PlanCategoryResponse])
+def get_plan_categories(
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
+    actor = _db_actor(db, admin)
+    categories = (
+        admin_plans.effective_categories_query(db, actor)
+        .order_by(AdminPlanCategory.name, AdminPlanCategory.id)
+        .all()
+    )
+    return admin_plans.category_responses(db, categories)
+
+
+@router.post("/plan-categories", response_model=PlanCategoryResponse)
+def create_plan_category(
+    values: PlanCategoryCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
+    actor = _db_actor(db, admin)
+    try:
+        category = admin_plans.create_category(db, actor, values)
+        result = admin_plans.category_response(db, category)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Category name already exists in this owner scope")
+    except Exception as exc:
+        _raise_domain(exc)
+    AuditLogService.log(
+        db,
+        actor,
+        "plan_category.create",
+        "admin_plan_category",
+        f"Admin {actor.username} created plan category {category.name}",
+        target_id=category.id,
+        target_name=category.name,
+        request=request,
+    )
+    return result
+
+
+@router.put("/plan-categories/{category_id}", response_model=PlanCategoryResponse)
+def update_plan_category(
+    category_id: int,
+    values: PlanCategoryUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
+    actor = _db_actor(db, admin)
+    category = db.get(AdminPlanCategory, category_id)
+    if category is None:
+        raise HTTPException(status_code=404, detail="Plan category not found")
+    try:
+        category = admin_plans.update_category(db, actor, category, values)
+        result = admin_plans.category_response(db, category)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Category name already exists in this owner scope")
+    except Exception as exc:
+        _raise_domain(exc)
+    AuditLogService.log(
+        db,
+        actor,
+        "plan_category.update",
+        "admin_plan_category",
+        f"Admin {actor.username} updated plan category {category.name}",
+        target_id=category.id,
+        target_name=category.name,
+        request=request,
+    )
+    return result
+
+
+@router.delete("/plan-categories/{category_id}")
+def archive_plan_category(
+    category_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
+    actor = _db_actor(db, admin)
+    category = db.get(AdminPlanCategory, category_id)
+    if category is None:
+        raise HTTPException(status_code=404, detail="Plan category not found")
+    category_name = category.name
+    try:
+        admin_plans.archive_category(db, actor, category)
+    except Exception as exc:
+        _raise_domain(exc)
+    AuditLogService.log(
+        db,
+        actor,
+        "plan_category.archive",
+        "admin_plan_category",
+        f"Admin {actor.username} archived plan category {category_name}",
+        target_id=category_id,
+        target_name=category_name,
+        request=request,
+    )
+    return {"detail": "Plan category archived"}
 
 
 @router.post("/user-plans", response_model=PlanResponse)

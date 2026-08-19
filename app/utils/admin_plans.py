@@ -13,6 +13,8 @@ from app.db import crud
 from app.db.models import (
     Admin,
     AdminHierarchy,
+    AdminPlanCategory,
+    AdminPlanCategoryAccess,
     AdminUserPlan,
     AdminUserPlanAccess,
     AdminUserPlanInbound,
@@ -22,7 +24,15 @@ from app.db.models import (
     UserPlanAssignment,
     UserUsageResetLogs,
 )
-from app.models.admin_hierarchy import PlanCreate, PlanResponse, PlanUpdate, PlanVersionInput
+from app.models.admin_hierarchy import (
+    PlanCategoryCreate,
+    PlanCategoryResponse,
+    PlanCategoryUpdate,
+    PlanCreate,
+    PlanResponse,
+    PlanUpdate,
+    PlanVersionInput,
+)
 from app.models.proxy import ProxyTypes
 from app.models.user import UserCreate, UserDataLimitResetStrategy, UserStatus, UserStatusCreate
 from app.utils import admin_hierarchy
@@ -36,6 +46,185 @@ def _can_manage_plans(db: Session, actor: Admin) -> bool:
         admin_hierarchy.role_code(actor) == admin_hierarchy.SUPER_ADMIN
         and bool(settings and settings.can_manage_plans)
     )
+
+
+def effective_categories_query(db: Session, actor: Admin):
+    query = db.query(AdminPlanCategory).filter(AdminPlanCategory.archived_at.is_(None))
+    if admin_hierarchy.is_owner(db, actor):
+        return query
+    assigned = exists().where(
+        and_(
+            AdminPlanCategoryAccess.category_id == AdminPlanCategory.id,
+            AdminPlanCategoryAccess.admin_id == actor.id,
+        )
+    )
+    return query.filter(or_(AdminPlanCategory.owner_admin_id == actor.id, assigned))
+
+
+def category_response(
+    db: Session,
+    category: AdminPlanCategory,
+    plan_count: int | None = None,
+) -> PlanCategoryResponse:
+    return PlanCategoryResponse(
+        id=category.id,
+        owner_admin_id=category.owner_admin_id,
+        name=category.name,
+        description=category.description,
+        archived_at=category.archived_at,
+        plan_count=plan_count if plan_count is not None else (
+            db.query(func.count(AdminUserPlan.id))
+            .filter(
+                AdminUserPlan.category_id == category.id,
+                AdminUserPlan.archived_at.is_(None),
+            )
+            .scalar()
+            or 0
+        ),
+    )
+
+
+def category_responses(
+    db: Session,
+    categories: list[AdminPlanCategory],
+) -> list[PlanCategoryResponse]:
+    category_ids = [category.id for category in categories]
+    counts = (
+        dict(
+            db.query(AdminUserPlan.category_id, func.count(AdminUserPlan.id))
+            .filter(
+                AdminUserPlan.category_id.in_(category_ids),
+                AdminUserPlan.archived_at.is_(None),
+            )
+            .group_by(AdminUserPlan.category_id)
+            .all()
+        )
+        if category_ids
+        else {}
+    )
+    return [
+        category_response(db, category, int(counts.get(category.id, 0)))
+        for category in categories
+    ]
+
+
+def create_category(
+    db: Session,
+    actor: Admin,
+    values: PlanCategoryCreate,
+) -> AdminPlanCategory:
+    if not _can_manage_plans(db, actor):
+        raise admin_hierarchy.HierarchyError("plan_management_forbidden", "Plan management is not enabled")
+    category = AdminPlanCategory(
+        owner_admin_id=actor.id,
+        name=values.name.strip(),
+        description=values.description,
+    )
+    db.add(category)
+    db.commit()
+    db.refresh(category)
+    return category
+
+
+def update_category(
+    db: Session,
+    actor: Admin,
+    category: AdminPlanCategory,
+    values: PlanCategoryUpdate,
+) -> AdminPlanCategory:
+    if not admin_hierarchy.is_owner(db, actor) and category.owner_admin_id != actor.id:
+        raise admin_hierarchy.HierarchyError("category_update_forbidden", "Only category owner can update it")
+    if not _can_manage_plans(db, actor):
+        raise admin_hierarchy.HierarchyError("plan_management_forbidden", "Plan management is not enabled")
+    category.name = values.name.strip()
+    category.description = values.description
+    db.commit()
+    db.refresh(category)
+    return category
+
+
+def archive_category(db: Session, actor: Admin, category: AdminPlanCategory) -> None:
+    if not admin_hierarchy.is_owner(db, actor) and category.owner_admin_id != actor.id:
+        raise admin_hierarchy.HierarchyError("category_archive_forbidden", "Only category owner can archive it")
+    active_plans = db.query(AdminUserPlan.id).filter(
+        AdminUserPlan.category_id == category.id,
+        AdminUserPlan.archived_at.is_(None),
+    ).first()
+    if active_plans:
+        raise admin_hierarchy.HierarchyError(
+            "category_in_use",
+            "Archive or move active plans before archiving this category",
+        )
+    category.archived_at = admin_hierarchy.utc_now_naive()
+    db.commit()
+
+
+def admin_category_ids(db: Session, admin_id: int) -> list[int]:
+    return [
+        row[0]
+        for row in db.query(AdminPlanCategoryAccess.category_id)
+        .filter(AdminPlanCategoryAccess.admin_id == admin_id)
+        .order_by(AdminPlanCategoryAccess.category_id)
+        .all()
+    ]
+
+
+def admin_category_ids_map(db: Session, admin_ids: list[int]) -> dict[int, list[int]]:
+    result = {admin_id: [] for admin_id in admin_ids}
+    if not admin_ids:
+        return result
+    for admin_id, category_id in (
+        db.query(AdminPlanCategoryAccess.admin_id, AdminPlanCategoryAccess.category_id)
+        .filter(AdminPlanCategoryAccess.admin_id.in_(admin_ids))
+        .order_by(AdminPlanCategoryAccess.admin_id, AdminPlanCategoryAccess.category_id)
+        .all()
+    ):
+        result[admin_id].append(category_id)
+    return result
+
+
+def replace_admin_categories(
+    db: Session,
+    *,
+    actor: Admin,
+    target: Admin,
+    category_ids: list[int],
+) -> None:
+    if not admin_hierarchy.admin_in_scope(db, actor, target.id):
+        raise admin_hierarchy.HierarchyError("admin_scope_forbidden", "Administrator is outside actor scope")
+    wanted = sorted(set(category_ids))
+    available = {
+        row[0]
+        for row in effective_categories_query(db, actor)
+        .with_entities(AdminPlanCategory.id)
+        .filter(AdminPlanCategory.id.in_(wanted))
+        .all()
+    } if wanted else set()
+    if available != set(wanted):
+        raise admin_hierarchy.HierarchyError(
+            "category_access_forbidden",
+            "One or more plan categories are unavailable to the assigning administrator",
+        )
+    db.query(AdminPlanCategoryAccess).filter(
+        AdminPlanCategoryAccess.admin_id == target.id
+    ).delete(synchronize_session=False)
+    db.add_all(
+        AdminPlanCategoryAccess(
+            category_id=category_id,
+            admin_id=target.id,
+            assigned_by_admin_id=actor.id,
+        )
+        for category_id in wanted
+    )
+    db.flush()
+
+
+def _validate_category(db: Session, actor: Admin, category_id: int | None) -> None:
+    if category_id is None:
+        return
+    category = effective_categories_query(db, actor).filter(AdminPlanCategory.id == category_id).first()
+    if category is None:
+        raise admin_hierarchy.HierarchyError("category_access_forbidden", "Plan category is unavailable")
 
 
 def _validate_version(db: Session, actor: Admin, version: PlanVersionInput) -> None:
@@ -130,9 +319,11 @@ def create_plan(db: Session, actor: Admin, values: PlanCreate) -> AdminUserPlan:
     if not _can_manage_plans(db, actor):
         raise admin_hierarchy.HierarchyError("plan_management_forbidden", "Plan management is not enabled")
     _validate_version(db, actor, values.version)
+    _validate_category(db, actor, values.category_id)
     _validate_access_targets(db, actor, values.allowed_admin_ids)
     plan = AdminUserPlan(
         owner_admin_id=actor.id,
+        category_id=values.category_id,
         name=values.name.strip(),
         description=values.description,
     )
@@ -155,9 +346,11 @@ def update_plan(db: Session, actor: Admin, plan: AdminUserPlan, values: PlanUpda
     if not _can_manage_plans(db, actor):
         raise admin_hierarchy.HierarchyError("plan_management_forbidden", "Plan management is not enabled")
     _validate_version(db, actor, values.version)
+    _validate_category(db, actor, values.category_id)
     _validate_access_targets(db, actor, values.allowed_admin_ids)
     plan = db.query(AdminUserPlan).filter(AdminUserPlan.id == plan.id).with_for_update().one()
     plan.description = values.description
+    plan.category_id = values.category_id
     _add_version(db, plan, actor, values.version)
     _replace_access(db, plan, values.allowed_admin_ids, values.include_subtree)
     db.commit()
@@ -187,8 +380,14 @@ def effective_plans_query(db: Session, actor: Admin):
             ),
         )
     )
+    category_access = exists().where(
+        and_(
+            AdminPlanCategoryAccess.category_id == AdminUserPlan.category_id,
+            AdminPlanCategoryAccess.admin_id == actor.id,
+        )
+    )
     return query.filter(
-        or_(AdminUserPlan.owner_admin_id == actor.id, direct, inherited)
+        or_(AdminUserPlan.owner_admin_id == actor.id, category_access, direct, inherited)
     )
 
 
@@ -218,6 +417,8 @@ def plan_response(db: Session, plan: AdminUserPlan) -> PlanResponse:
         owner_admin_id=plan.owner_admin_id,
         name=plan.name,
         description=plan.description,
+        category_id=plan.category_id,
+        category_name=plan.category.name if plan.category is not None else None,
         current_version_id=version.id,
         version_number=version.version_number,
         archived_at=plan.archived_at,
