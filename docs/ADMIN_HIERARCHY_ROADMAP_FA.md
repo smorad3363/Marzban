@@ -2,7 +2,7 @@
 
 آخرین به‌روزرسانی: `2026-08-19`
 
-وضعیت: `V4.9.2_RELEASED` — schema، backend، API، CLI و UI پیاده و منتشر شدند. migration تازه/قدیمی/partial-DDL، backup/checksum/restore و rollback برنامه `v4.8.0` روی MySQL 8.0 موفق‌اند. تا تعیین Owner، رفتار اجرایی قدیمی `is_sudo` حفظ می‌شود.
+وضعیت: `V4.9.3_RELEASE_CANDIDATE` — پشتیبانی نصب تازه با MySQL latest و ارتقای مرحله‌ای دیتای موجود `8.0 → 8.4 → 9.7 → latest` پیاده و در CI با حفظ یک volume واقعی تأیید شد. انتشار immutable `v4.9.3` در انتظار گیت نهایی است.
 
 ## قانون اجباری شروع هر چت و هر جلسه
 
@@ -832,3 +832,4 @@ git log -3 --oneline --decorate
 | `2026-08-19` | ۱۴ | شکست گیت MySQL؛ اصلاح محلی کامل | branch و tag `v4.9.0` push شدند؛ workflow `32195714228` در job `95899175897` با MySQL error `3818` شکست خورد، چون `SMALLINT` primary key جدول singleton به‌طور ضمنی `AUTO_INCREMENT` شده بود؛ build/release skip شد. برای `v4.9.1` شناسه شش جدول مرجع ثابت و singleton صریحاً `autoincrement=False` شد | `dc357cc` + working tree | `83 passed, 2 skipped`؛ تست DDL جدید هر شش جدول؛ compileall/YAML/diff-check سبز؛ Graphify=`4796/10304/442` | commit و tag `v4.9.1`؛ دنبال‌کردن workflow و release تا نتیجه نهایی |
 | `2026-08-19` | ۱۴ | شکست دوم گیت MySQL؛ اصلاح کوچک در حال آزمون | `v4.9.1@cb696c4` خطای قبلی را رفع کرد، ولی run `32196467586` در job `95901398510` با MySQL error `1170` روی unique index فیلد `token_hash BLOB` شکست خورد. نوع hash ثابت SHA-256 برای `v4.9.2` به `BINARY(32)` تغییر کرد | `cb696c4` + working tree | backend regression سبز؛ migration واقعی در run دوم خطا داد | تست regression؛ commit/tag `v4.9.2`؛ یک retry نهایی workflow |
 | `2026-08-19` | ۱۵ | کامل و منتشرشده | `v4.9.2` منتشر شد؛ MySQL 8.0 fresh/legacy/partial-DDL، backup/checksum/restore، rollback application `v4.8.0`، frontend build و image چندمعماری همگی موفق؛ Latest Release و GHCR `v4.9.2/latest` ساخته شدند | `ded182ec2f50b3fe553752947eff27be7912c83e` | Actions run `32196890824`=`success`؛ digest=`sha256:c0fdbfb7c4af7b2360ca8718c83f20ccf4dca7534fa38becb550e81bd6096973` | backup دیتابیس واقعی و rollout کنترل‌شده `v4.9.2` |
+| `2026-08-19` | ۱۶ | پیاده‌سازی کامل؛ آماده انتشار | root cause تغییر `mysql:latest` از 8.x به `26.7.0` مشخص شد؛ نصب تازه latest، دستور امن `marzban mysql-upgrade`، logical/physical backup با checksum، مسیر `8.0 → 8.4 → 9.7 → latest`، health gate هر مرحله و اصلاح restore مبتنی بر GTID اضافه شد | `8ac5a23` + `150e9d6` | Actions run `32199333844`: MySQL 8.0=`success`، MySQL latest=`success`، existing-volume upgrade=`success`؛ تست محلی هدفمند `4 passed` | bump/tag/release immutable `v4.9.3` و ثبت digest نهایی GHCR |
