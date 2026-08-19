@@ -138,7 +138,9 @@ export const Plans: FC = () => {
         queryClient.invalidateQueries("plan-categories");
         toast({ title: "دسته‌بندی ساخته شد", status: "success", duration: 3000 });
       },
-      onError: (error) => toast({ title: "ساخت دسته‌بندی انجام نشد", description: errorText(error), status: "error", duration: 5000 }),
+      onError: (error) => {
+        toast({ title: "ساخت دسته‌بندی انجام نشد", description: errorText(error), status: "error", duration: 5000 });
+      },
     }
   );
 

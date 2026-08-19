@@ -36,7 +36,7 @@ marzban update --version v4.6.1
 Fresh-install an exact release directly from GitHub:
 
 ```bash
-sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v4.9.5/scripts/marzban.sh)" @ install --version v4.9.5 --database mysql
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v4.9.6/scripts/marzban.sh)" @ install --version v4.9.6 --database mysql
 ```
 
 The previous release remains directly installable:
@@ -53,7 +53,7 @@ Roll back the application image while preserving the current database and data:
 marzban rollback v4.5.2
 ```
 
-Rollback from `v4.9.5` to the previous published release:
+Rollback from `v4.9.6` to the previous published release:
 
 ```bash
 marzban rollback v4.9.3
@@ -69,7 +69,7 @@ Rollback changes the application container only. It does not automatically
 downgrade database migrations. Take a database backup before rolling back
 across versions with incompatible schema changes.
 
-The `v4.9.5` release adds nullable plan-category tables and a nullable plan
+The `v4.9.6` release adds nullable plan-category tables and a nullable plan
 column. Application-image rollback to `v4.9.3` can leave that additive schema
 in place; Alembic downgrade is not required for an emergency application rollback.
 MySQL server downgrade is a separate operation and must use the physical backup
