@@ -133,7 +133,19 @@ jobs:
               --env MYSQL_ROOT_PASSWORD=root-test-password \
               --env MYSQL_DATABASE=marzban \
               --volume "${volume_name}:/var/lib/mysql" \
-              "${image}" --mysqlx=OFF >/dev/null
+              "${image}" \
+              --mysqlx=OFF \
+              --bind-address=127.0.0.1 \
+              --character_set_server=utf8mb4 \
+              --collation_server=utf8mb4_unicode_ci \
+              --host-cache-size=0 \
+              --innodb-open-files=1024 \
+              --innodb-buffer-pool-size=256M \
+              --general_log=0 \
+              --slow_query_log=1 \
+              --slow_query_log_file=/var/lib/mysql/slow.log \
+              --long_query_time=2 \
+              --skip-log-bin >/dev/null
             for attempt in $(seq 1 120); do
               if docker exec -e MYSQL_PWD=root-test-password "${container_name}" \
                 mysqladmin --user=root --host=127.0.0.1 ping --silent >/dev/null 2>&1; then
