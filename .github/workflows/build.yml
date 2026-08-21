@@ -87,6 +87,11 @@ jobs:
               tail -n 200 "${pytest_log}"
               echo '```'
             } >> "${GITHUB_STEP_SUMMARY}"
+            failure_annotation="$(tail -n 120 "${pytest_log}")"
+            failure_annotation="${failure_annotation//'%'/'%25'}"
+            failure_annotation="${failure_annotation//$'\r'/'%0D'}"
+            failure_annotation="${failure_annotation//$'\n'/'%0A'}"
+            echo "::error title=Backend regression failure::${failure_annotation}"
             exit 1
           fi
 
