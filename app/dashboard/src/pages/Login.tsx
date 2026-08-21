@@ -16,6 +16,7 @@ import {
 import { ArrowRightOnRectangleIcon, BeakerIcon, ShieldCheckIcon } from "@heroicons/react/24/outline";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { BrandMark } from "components/BrandMark";
+import { resetDashboardState } from "contexts/DashboardContext";
 import { Footer } from "components/Footer";
 import { Input } from "components/Input";
 import { FC, useEffect, useState } from "react";
@@ -49,6 +50,7 @@ export const Login: FC = () => {
 
   useEffect(() => {
     removeAuthToken();
+    resetDashboardState();
     if (location.pathname !== "/login") navigate("/login", { replace: true });
   }, []);
 
@@ -61,10 +63,16 @@ export const Login: FC = () => {
     setLoading(true);
     fetch("/admin/token", { method: "post", body: formData })
       .then(({ access_token: token }) => {
+        if (typeof token !== "string" || !token) {
+          throw new Error("Login response did not contain an access token");
+        }
         setAuthToken(token);
+        resetDashboardState();
         navigate("/");
       })
-      .catch((err) => setError(err.response._data.detail))
+      .catch((err) =>
+        setError(err?.response?._data?.detail ?? err?.message ?? "Login failed")
+      )
       .finally(setLoading.bind(null, false));
   };
 

@@ -5,6 +5,7 @@ from rich.table import Table
 
 from app.db import GetDB, crud
 from app.db.models import User
+from app.utils.audit import AuditLogService
 from app.utils.system import readable_size
 
 from . import utils
@@ -79,6 +80,24 @@ def set_owner(
         ):
             utils.error("Aborted.")
 
-        crud.set_owner(db, user, dbadmin)
+        previous_owner = user.admin.username if user.admin is not None else None
+        try:
+            crud.set_owner(db, user, dbadmin, commit=False)
+            AuditLogService.log(
+                db,
+                "cli",
+                "user.owner_change",
+                "user",
+                f'CLI changed owner of user {username} to {admin}',
+                target_id=user.id,
+                target_name=user.username,
+                previous_value={"admin": previous_owner},
+                new_value={"admin": dbadmin.username},
+                commit=False,
+            )
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
 
         utils.success(f'{username}\'s owner successfully set to "{admin}".')

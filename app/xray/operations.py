@@ -137,6 +137,29 @@ def remove_user(dbuser: "DBUser"):
                     _remove_user_from_inbound(node.api, inbound_tag, email)
 
 
+def remove_user_by_id(user_id: int):
+    """Load the user in a fresh session before background removal."""
+
+    with GetDB() as db:
+        dbuser = crud.get_user_by_id(db, user_id)
+        if dbuser is not None:
+            remove_user(dbuser)
+
+
+def restart_all_cores(config=None):
+    """Reload all running cores, terminating already-established streams."""
+
+    if config is None:
+        config = xray.config.include_db_users()
+
+    if xray.core.started:
+        xray.core.restart(config)
+
+    for node_id, node in list(xray.nodes.items()):
+        if node.connected:
+            restart_node(node_id, config)
+
+
 def update_user(dbuser: "DBUser"):
     """Atomically replace a user's slot accounts without restarting Xray."""
 
@@ -319,6 +342,8 @@ def restart_node(node_id, config=None):
 __all__ = [
     "add_user",
     "remove_user",
+    "remove_user_by_id",
+    "restart_all_cores",
     "add_node",
     "remove_node",
     "connect_node",

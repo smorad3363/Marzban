@@ -1,6 +1,7 @@
 import { StatisticsQueryKey } from "components/Statistics";
 import { fetch } from "service/http";
 import { User, UserCreate } from "types/User";
+import { getAuthToken } from "utils/authStorage";
 import { queryClient } from "utils/react-query";
 import { getUsersPerPageLimitSize } from "utils/userPreferenceStorage";
 import { create } from "zustand";
@@ -72,29 +73,39 @@ type DashboardStateType = {
 };
 
 const fetchUsers = (query: FilterType): Promise<User[]> => {
+  const authToken = getAuthToken();
   for (const key in query) {
     if (!query[key as keyof FilterType]) delete query[key as keyof FilterType];
   }
   useDashboard.setState({ loading: true });
   return fetch("/users", { query })
     .then((users) => {
-      useDashboard.setState({ users });
+      if (getAuthToken() === authToken) {
+        useDashboard.setState({ users });
+      }
       return users;
     })
     .finally(() => {
-      useDashboard.setState({ loading: false });
+      if (getAuthToken() === authToken) {
+        useDashboard.setState({ loading: false });
+      }
     });
 };
 
 export const fetchInbounds = () => {
+  const authToken = getAuthToken();
   return fetch("/inbounds")
     .then((inbounds: Inbounds) => {
-      useDashboard.setState({
-        inbounds: new Map(Object.entries(inbounds)) as Inbounds,
-      });
+      if (getAuthToken() === authToken) {
+        useDashboard.setState({
+          inbounds: new Map(Object.entries(inbounds)) as Inbounds,
+        });
+      }
     })
     .finally(() => {
-      useDashboard.setState({ loading: false });
+      if (getAuthToken() === authToken) {
+        useDashboard.setState({ loading: false });
+      }
     });
 };
 
@@ -213,3 +224,28 @@ export const useDashboard = create(
     },
   }))
 );
+
+export const resetDashboardState = () => {
+  useDashboard.setState({
+    version: null,
+    editingUser: null,
+    deletingUser: null,
+    isCreatingNewUser: false,
+    QRcodeLinks: null,
+    subscribeUrl: null,
+    users: { users: [], total: 0 },
+    loading: true,
+    isResetingAllUsage: false,
+    isEditingHosts: false,
+    isEditingNodes: false,
+    isShowingNodesUsage: false,
+    resetUsageUser: null,
+    revokeSubscriptionUser: null,
+    filters: {
+      limit: getUsersPerPageLimitSize(),
+      sort: "-created_at",
+    },
+    inbounds: new Map(),
+    isEditingCore: false,
+  });
+};

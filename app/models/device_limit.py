@@ -65,6 +65,26 @@ class DeviceLimitSettingsUpdate(BaseModel):
         return self
 
 
+class DeviceLimitDiagnosticsResponse(BaseModel):
+    runtime_enabled: bool
+    ip_detection_enabled: bool
+    active_collectors: list[str]
+    received_lines: int
+    accepted_lines: int
+    rejected_runtime_disabled: int
+    rejected_not_accepted: int
+    rejected_source_parse: int
+    rejected_identity_parse: int
+    rejected_invalid_ip: int
+    rejected_private_or_loopback: int
+    rejected_user_not_limited: int
+    recorded_events: int
+    dropped_buffer_events: int
+    hit_buffer_capacity: int
+    last_log_seen_at: datetime | None
+    last_valid_match_at: datetime | None
+
+
 class DeviceClientObservationResponse(BaseModel):
     id: int
     slot_id: int | None

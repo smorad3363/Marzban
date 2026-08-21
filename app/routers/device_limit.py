@@ -24,6 +24,7 @@ from app.models.admin import Admin
 from app.models.device_limit import (
     DeviceLimitIncidentList,
     DeviceLimitIncidentResponse,
+    DeviceLimitDiagnosticsResponse,
     DeviceLimitPenaltyStageResponse,
     DeviceLimitPenaltyStagesUpdate,
     DeviceLimitSettingsResponse,
@@ -87,6 +88,13 @@ def get_settings(
     _: Admin = Depends(Admin.check_sudo_admin),
 ):
     return _settings(db)
+
+
+@router.get("/diagnostics", response_model=DeviceLimitDiagnosticsResponse)
+def get_diagnostics(
+    _: Admin = Depends(Admin.check_sudo_admin),
+):
+    return engine.diagnostics()
 
 
 @router.put("/settings", response_model=DeviceLimitSettingsResponse)

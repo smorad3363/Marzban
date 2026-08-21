@@ -1,0 +1,26 @@
+{
+  "xray_version": "26.7.28",
+  "xray_build": "5ca6f4b",
+  "sources": [
+    "https://github.com/XTLS/Xray-core/releases/tag/v26.7.28",
+    "https://github.com/XTLS/Xray-core/issues/4496",
+    "https://github.com/XTLS/Xray-core/issues/6145",
+    "https://github.com/XTLS/Xray-core/issues/4354"
+  ],
+  "cases": {
+    "direct_public_ipv4": "2026/08/21 12:00:00.100001 from 8.8.8.8:51000 accepted tcp:example.com:443 [vless-in >> direct] email: 42.demo",
+    "tcp_public_ipv4": "2026/08/21 12:00:00.100002 from tcp:1.1.1.1:51001 accepted tcp:example.com:443 [vless-in >> direct] email: 42.demo.slot2",
+    "direct_public_ipv6": "2026/08/21 12:00:00.100003 from [2606:4700:4700::1111]:51002 accepted tcp:example.com:443 [vless-in >> direct] email: 42.demo",
+    "tcp_public_ipv6": "2026/08/21 12:00:00.100004 from tcp:[2606:4700:4700::1001]:51003 accepted tcp:example.com:443 [vless-in >> direct] email: 42.demo.slot2",
+    "private_ipv4": "2026/08/21 12:00:00.100005 from tcp:192.168.1.4:51004 accepted tcp:example.com:443 [vless-in >> direct] email: 42.demo",
+    "loopback_ipv6": "2026/08/21 12:00:00.100006 from tcp:[::1]:51005 accepted tcp:example.com:443 [vless-in >> direct] email: 42.demo",
+    "malformed_source": "2026/08/21 12:00:00.100007 from tcp:not-an-ip:51006 accepted tcp:8.8.8.8:443 [vless-in >> direct] email: 42.demo",
+    "source_unparseable": "2026/08/21 12:00:00.100007 from tcp:[broken accepted tcp:8.8.8.8:443 [vless-in >> direct] email: 42.demo",
+    "not_accepted": "2026/08/21 12:00:00.100008 from tcp:8.8.4.4:51007 rejected tcp:example.com:443 [vless-in >> block] email: 42.demo",
+    "missing_email": "2026/08/21 12:00:00.100009 from tcp:8.8.4.4:51008 accepted tcp:example.com:443 [vless-in >> direct]",
+    "unrelated_email": "2026/08/21 12:00:00.100010 from tcp:8.8.4.4:51009 accepted tcp:example.com:443 [vless-in >> direct] email: external-user",
+    "valid_username": "2026/08/21 12:00:00.100011 from tcp:8.8.4.4:51010 accepted tcp:example.com:443 [vless-in >> direct] email: 42.demo-user",
+    "valid_slot": "2026/08/21 12:00:00.100012 from tcp:9.9.9.9:51011 accepted tcp:example.com:443 [vless-in >> direct] email: 42.demo-user.slot3",
+    "user_not_limited": "2026/08/21 12:00:00.100013 from tcp:208.67.222.222:51012 accepted tcp:example.com:443 [vless-in >> direct] email: 99.other-user"
+  }
+}

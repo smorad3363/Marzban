@@ -23,7 +23,7 @@ import {
   ShieldCheckIcon,
   RectangleStackIcon,
 } from "@heroicons/react/24/outline";
-import { useDashboard } from "contexts/DashboardContext";
+import { resetDashboardState, useDashboard } from "contexts/DashboardContext";
 import useGetUser from "hooks/useGetUser";
 import { FC, ReactElement } from "react";
 import { useTranslation } from "react-i18next";
@@ -88,6 +88,7 @@ export const Header: FC = () => {
       await fetch("/admin/logout", { method: "POST" });
     } finally {
       removeAuthToken();
+      resetDashboardState();
       navigate("/login/");
     }
   };

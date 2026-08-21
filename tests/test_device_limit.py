@@ -1,5 +1,8 @@
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
+import inspect
+import json
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -22,16 +25,23 @@ from app.db.models import (
 )
 from app.device_limit.clients import observe_subscription_client, parse_user_agent
 from app.device_limit.constants import SubscriptionMode
-from app.device_limit.engine import DeviceLimitEngine, mask_ip
+from app.device_limit.engine import DeviceLimitEngine, HIT_BUFFER_CAPACITY, mask_ip
 from app.device_limit.slots import slot_email, sync_device_slots
 from app.models.user import UserStatus
 from app.models.user import UserCreate
 from app.models.device_limit import DeviceLimitSettingsUpdate
 from app.models.admin import Admin as AdminSchema
 from app.models.proxy import ProxyTypes
-from app.routers.device_limit import delete_warning
+from app.routers.device_limit import delete_warning, get_diagnostics
 from app.xray import operations
 from app.utils import marzhelp_policy
+
+
+XRAY_ACCESS_FIXTURE = json.loads(
+    (Path(__file__).parent / "fixtures" / "xray_access_v26.7.28.json").read_text(
+        encoding="utf-8"
+    )
+)
 
 
 @pytest.fixture()
@@ -63,6 +73,175 @@ def test_xray_access_parser_is_bounded_and_requires_hit_threshold():
     assert sources == {"node:7"}
     assert per_slot == {2: {"8.8.8.8"}}
     assert mask_ip("8.8.8.8") == "8.8.***.***"
+
+
+def test_xray_26_7_28_access_source_variants_and_slot_identity_parse():
+    tracker = DeviceLimitEngine()
+    tracker.configure(True, "hybrid")
+    cases = XRAY_ACCESS_FIXTURE["cases"]
+
+    recorded = tracker.record_log(
+        "\n".join(
+            cases[name]
+            for name in (
+                "direct_public_ipv4",
+                "tcp_public_ipv4",
+                "direct_public_ipv6",
+                "tcp_public_ipv6",
+            )
+        ),
+        "node:7",
+    )
+
+    assert XRAY_ACCESS_FIXTURE["xray_version"] == "26.7.28"
+    assert recorded == 4
+    addresses, sources, per_slot = tracker.live_snapshot(42, 300, 1)
+    assert addresses == {
+        "8.8.8.8",
+        "1.1.1.1",
+        "2606:4700:4700::1111",
+        "2606:4700:4700::1001",
+    }
+    assert sources == {"node:7"}
+    assert per_slot == {
+        1: {"8.8.8.8", "2606:4700:4700::1111"},
+        2: {"1.1.1.1", "2606:4700:4700::1001"},
+    }
+
+
+def test_xray_source_parser_never_falls_through_to_destination_address():
+    tracker = DeviceLimitEngine()
+    tracker.configure(True, "hybrid")
+
+    assert tracker.record_log(
+        XRAY_ACCESS_FIXTURE["cases"]["malformed_source"]
+    ) == 0
+    assert tracker.live_snapshot(42, 300, 1)[0] == set()
+
+
+def test_xray_parser_diagnostics_are_bounded_and_reasoned(monkeypatch):
+    tracker = DeviceLimitEngine()
+    tracker.configure(True, "hybrid")
+    tracker._limited_user_ids = {42}
+    monkeypatch.setattr("app.device_limit.engine.time.time", lambda: 1_777_000_000.0)
+    cases = XRAY_ACCESS_FIXTURE["cases"]
+
+    recorded = tracker.record_log(
+        "\n".join(
+            cases[name]
+            for name in (
+                "not_accepted",
+                "source_unparseable",
+                "malformed_source",
+                "missing_email",
+                "unrelated_email",
+                "private_ipv4",
+                "user_not_limited",
+                "valid_slot",
+            )
+        )
+    )
+
+    diagnostics = tracker.diagnostics()
+    assert recorded == 1
+    assert diagnostics["received_lines"] == 8
+    assert diagnostics["accepted_lines"] == 7
+    assert diagnostics["rejected_not_accepted"] == 1
+    assert diagnostics["rejected_source_parse"] == 1
+    assert diagnostics["rejected_invalid_ip"] == 1
+    assert diagnostics["rejected_identity_parse"] == 2
+    assert diagnostics["rejected_private_or_loopback"] == 1
+    assert diagnostics["rejected_user_not_limited"] == 1
+    assert diagnostics["recorded_events"] == 1
+    assert diagnostics["dropped_buffer_events"] == 0
+    expected_timestamp = datetime.fromtimestamp(1_777_000_000, UTC).replace(tzinfo=None)
+    assert diagnostics["last_log_seen_at"] == expected_timestamp
+    assert diagnostics["last_valid_match_at"] == expected_timestamp
+
+    for _ in range(HIT_BUFFER_CAPACITY + 2):
+        tracker.record_log(cases["valid_slot"])
+    diagnostics = tracker.diagnostics()
+    assert diagnostics["recorded_events"] == HIT_BUFFER_CAPACITY + 3
+    assert diagnostics["dropped_buffer_events"] == 3
+    assert diagnostics["hit_buffer_capacity"] == HIT_BUFFER_CAPACITY
+
+
+def test_device_limit_diagnostics_endpoint_is_sudo_protected():
+    dependency = inspect.signature(get_diagnostics).parameters["_"].default.dependency
+    assert dependency.__func__ is AdminSchema.check_sudo_admin.__func__
+
+
+def test_same_ip_is_safe_but_two_fresh_ips_trigger_after_grace(
+    session,
+    monkeypatch,
+):
+    user = User(
+        username="grace-user",
+        status=UserStatus.active,
+        concurrent_user_limit=1,
+    )
+    settings = DeviceLimitSettings(
+        id=1,
+        enabled=True,
+        ip_detection_enabled=True,
+        check_interval_seconds=10,
+        active_window_seconds=300,
+        min_successful_connections=2,
+        handoff_grace_seconds=30,
+    )
+    session.add_all((user, settings))
+    session.commit()
+
+    clock = {"seconds": 1_000.0}
+    base = datetime(2026, 8, 21, 12, 0, 0)
+    monkeypatch.setattr("app.device_limit.engine.time.time", lambda: clock["seconds"])
+    monkeypatch.setattr(
+        "app.device_limit.engine.time.monotonic", lambda: clock["seconds"]
+    )
+    monkeypatch.setattr(
+        "app.device_limit.engine.utc_now",
+        lambda: base + timedelta(seconds=clock["seconds"] - 1_000),
+    )
+
+    @contextmanager
+    def current_db():
+        yield session
+
+    monkeypatch.setattr("app.device_limit.engine.GetDB", current_db)
+    tracker = DeviceLimitEngine()
+    tracker.configure(True, "hybrid")
+
+    def hits(address):
+        return "\n".join(
+            f"from tcp:{address}:{51_000 + index} accepted tcp:x:443 "
+            f"email: {user.id}.grace-user"
+            for index in range(2)
+        )
+
+    tracker.record_log(hits("8.8.8.8"))
+    tracker.evaluate()
+    assert session.get(DeviceLimitUserState, user.id) is None
+    assert session.query(DeviceLimitIncident).count() == 0
+
+    clock["seconds"] += 11
+    tracker.record_log(hits("8.8.8.8") + "\n" + hits("1.1.1.1"))
+    tracker.evaluate()
+    session.expire_all()
+    state = session.get(DeviceLimitUserState, user.id)
+    assert state.penalty_status == "pending_handoff"
+    assert state.violation_count == 0
+    assert session.query(DeviceLimitIncident).count() == 0
+
+    clock["seconds"] += 31
+    tracker.record_log(hits("8.8.8.8") + "\n" + hits("1.1.1.1"))
+    tracker.evaluate()
+    session.expire_all()
+    state = session.get(DeviceLimitUserState, user.id)
+    incident = session.query(DeviceLimitIncident).one()
+    assert state.penalty_status == "warning"
+    assert state.violation_count == 1
+    assert incident.action == "warn"
+    assert incident.observed_count == 2
 
 
 def test_user_agent_parser_and_patch_update_identity():

@@ -157,8 +157,12 @@ def modify_user(
 
     if user.status in [UserStatus.active, UserStatus.on_hold]:
         bg.add_task(xray.operations.update_user_by_id, user_id=dbuser.id)
+    elif user.status == UserStatus.disabled and old_status != UserStatus.disabled:
+        # HandlerService removes credentials for new connections only.
+        # Reloading the cores also terminates already-established streams.
+        bg.add_task(xray.operations.restart_all_cores)
     else:
-        bg.add_task(xray.operations.remove_user, dbuser=dbuser)
+        bg.add_task(xray.operations.remove_user_by_id, user_id=dbuser.id)
 
     bg.add_task(report.user_updated, user=user, user_admin=dbuser.admin, by=admin)
 
@@ -327,6 +331,14 @@ def get_users(
     dbadmin = crud.get_admin(db, admin.username)
     hierarchy_on = dbadmin is not None and admin_hierarchy.hierarchy_enabled(db)
     owner_role = dbadmin is not None and admin_hierarchy.is_owner(db, dbadmin)
+    if hierarchy_on or admin.is_sudo:
+        selected_admins = owner
+    else:
+        selected_admins = (
+            [admin.username]
+            if owner is None or admin.username in owner
+            else []
+        )
     users, count = crud.get_users(
         db=db,
         offset=offset,
@@ -335,7 +347,7 @@ def get_users(
         usernames=username,
         status=status,
         sort=sort,
-        admins=owner if (not hierarchy_on and admin.is_sudo) or owner_role else owner,
+        admins=selected_admins,
         scope_admin_id=(dbadmin.id if hierarchy_on and not owner_role else None),
         allowed_inbounds=marzhelp_policy.allowed_inbound_tags(
             db, crud.get_admin(db, admin.username) or admin
@@ -467,13 +479,17 @@ def bulk_user_action(
         db.rollback()
         raise
 
+    if payload.operation == BulkUserOperation.deactivate and updated:
+        # One reload handles the whole batch and disconnects active streams.
+        bg.add_task(xray.operations.restart_all_cores)
+
     for dbuser, old_status in updated_users:
         db.refresh(dbuser)
         user = UserResponse.model_validate(dbuser)
         if user.status in [UserStatus.active, UserStatus.on_hold]:
-            bg.add_task(xray.operations.update_user, dbuser=dbuser)
-        else:
-            bg.add_task(xray.operations.remove_user, dbuser=dbuser)
+            bg.add_task(xray.operations.update_user_by_id, user_id=dbuser.id)
+        elif payload.operation != BulkUserOperation.deactivate:
+            bg.add_task(xray.operations.remove_user_by_id, user_id=dbuser.id)
         bg.add_task(report.user_updated, user=user, user_admin=dbuser.admin, by=admin)
         if user.status != old_status:
             bg.add_task(
@@ -563,14 +579,14 @@ def active_next_plan(
     admin: Admin = Depends(Admin.get_current),
 ):
     """Reset user by next plan"""
-    previous_value = user_audit_state(dbuser)
-    dbuser = crud.reset_user_by_next(db=db, dbuser=dbuser)
-
-    if (dbuser is None or dbuser.next_plan is None):
+    if dbuser.next_plan is None:
         raise HTTPException(
             status_code=404,
-            detail=f"User doesn't have next plan",
+            detail="User doesn't have next plan",
         )
+
+    previous_value = user_audit_state(dbuser)
+    dbuser = crud.reset_user_by_next(db=db, dbuser=dbuser)
 
     if dbuser.status in [UserStatus.active, UserStatus.on_hold]:
         bg.add_task(xray.operations.add_user, dbuser=dbuser)
@@ -620,6 +636,12 @@ def get_users_usage(
         selected_admins = (
             sorted(set(owner).intersection(scoped_admins)) if owner else scoped_admins
         )
+    elif not hierarchy_on and not admin.is_sudo:
+        selected_admins = (
+            [admin.username]
+            if owner is None or admin.username in owner
+            else []
+        )
     else:
         selected_admins = owner
     usages = crud.get_all_users_usages(
@@ -651,25 +673,35 @@ def set_owner(
     previous_owner = (
         dbuser.admin.username if dbuser.admin is not None else None
     )
-    dbuser = crud.set_owner(db, dbuser, new_admin)
-    user = UserResponse.model_validate(dbuser)
-    AuditLogService.log(
-        db,
-        admin,
-        "user.owner_change",
-        "user",
-        (
-            f"Admin {admin.username} changed owner of user "
-            f"{user.username} to {new_admin.username}"
-        ),
-        target_id=dbuser.id,
-        target_name=user.username,
-        previous_value={"admin": previous_owner},
-        new_value={"admin": new_admin.username},
-        request=request,
-    )
+    try:
+        dbuser = crud.set_owner(db, dbuser, new_admin, commit=False)
+        user = UserResponse.model_validate(dbuser)
+        AuditLogService.log(
+            db,
+            admin,
+            "user.owner_change",
+            "user",
+            (
+                f"Admin {admin.username} changed owner of user "
+                f"{user.username} to {new_admin.username}"
+            ),
+            target_id=dbuser.id,
+            target_name=user.username,
+            previous_value={"admin": previous_owner},
+            new_value={"admin": new_admin.username},
+            request=request,
+            commit=False,
+        )
+        db.commit()
+        db.refresh(dbuser)
+    except Exception:
+        db.rollback()
+        raise
 
-    logger.info(f'{user.username}"owner successfully set to{admin.username}')
+    logger.info(
+        f'User "{user.username}" owner successfully set to '
+        f'"{new_admin.username}" by "{admin.username}"'
+    )
 
     return user
 

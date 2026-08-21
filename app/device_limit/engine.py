@@ -6,8 +6,8 @@ import logging
 import re
 import threading
 import time
-from collections import defaultdict, deque
-from datetime import datetime, timedelta
+from collections import Counter, defaultdict, deque
+from datetime import UTC, datetime, timedelta
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Iterable
@@ -32,12 +32,28 @@ from app.utils.audit import AuditLogService
 
 
 SOURCE_RE = re.compile(
-    r"(?:^|\s)(?:\[([0-9a-fA-F:]+)\]|(\d{1,3}(?:\.\d{1,3}){3})):\d+\s+accepted\b"
+    r"^\s*(?:(?:\S+\s+){2})?(?:from\s+)?(?:(?:tcp|udp):)?"
+    r"(?P<address>\[[^\]]+\]|[^\s:]+):\d+\s+accepted\b",
+    re.IGNORECASE,
 )
 EMAIL_RE = re.compile(
     r"email:\s*(\d+)\.([A-Za-z0-9_@+%\-.]+?)(?:\.slot(\d+))?(?:\s|$)"
 )
 MAX_IPS_PER_SLOT = 64
+HIT_BUFFER_CAPACITY = 128
+DIAGNOSTIC_COUNTERS = (
+    "received_lines",
+    "accepted_lines",
+    "rejected_runtime_disabled",
+    "rejected_not_accepted",
+    "rejected_source_parse",
+    "rejected_identity_parse",
+    "rejected_invalid_ip",
+    "rejected_private_or_loopback",
+    "rejected_user_not_limited",
+    "recorded_events",
+    "dropped_buffer_events",
+)
 
 
 def utc_now() -> datetime:
@@ -74,6 +90,11 @@ class DeviceLimitEngine:
         self._ip_detection_enabled = True
         self._limited_user_ids: set[int] | None = None
         self._last_user_cache_refresh = 0.0
+        self._diagnostic_counts = Counter(
+            {counter: 0 for counter in DIAGNOSTIC_COUNTERS}
+        )
+        self._last_log_seen_at: float | None = None
+        self._last_valid_match_at: float | None = None
 
     def start(self) -> None:
         if self._manager_thread and self._manager_thread.is_alive():
@@ -165,41 +186,114 @@ class DeviceLimitEngine:
             logger.debug("Device-limit collector %s stopped: %s", source_name, exc)
 
     def record_log(self, raw: str, source_name: str = "master") -> int:
-        if not self._runtime_enabled or not self._ip_detection_enabled:
+        lines = str(raw).splitlines()
+        if not lines:
             return 0
-        recorded = 0
         now = time.time()
-        for line in str(raw).splitlines():
-            if "accepted" not in line or "BLOCK]" in line:
+        counts = Counter(received_lines=len(lines))
+        with self._lock:
+            runtime_enabled = self._runtime_enabled and self._ip_detection_enabled
+            limited_user_ids = (
+                None
+                if self._limited_user_ids is None
+                else set(self._limited_user_ids)
+            )
+        if not runtime_enabled:
+            counts["rejected_runtime_disabled"] = len(lines)
+            with self._lock:
+                self._diagnostic_counts.update(counts)
+                self._last_log_seen_at = now
+            return 0
+
+        parsed_events: list[tuple[int, int, str]] = []
+        for line in lines:
+            if "accepted" not in line.lower() or "BLOCK]" in line:
+                counts["rejected_not_accepted"] += 1
                 continue
+            counts["accepted_lines"] += 1
             source_match = SOURCE_RE.search(line)
-            email_match = EMAIL_RE.search(line)
-            if not source_match or not email_match:
+            if source_match is None:
+                counts["rejected_source_parse"] += 1
                 continue
-            address = source_match.group(1) or source_match.group(2)
+            address = source_match.group("address").strip("[]")
             try:
                 parsed = ipaddress.ip_address(address)
             except ValueError:
+                counts["rejected_invalid_ip"] += 1
                 continue
             if parsed.is_private or parsed.is_loopback or parsed.is_unspecified:
+                counts["rejected_private_or_loopback"] += 1
+                continue
+            email_match = EMAIL_RE.search(line)
+            if email_match is None:
+                counts["rejected_identity_parse"] += 1
                 continue
             user_id = int(email_match.group(1))
             if (
-                self._limited_user_ids is not None
-                and user_id not in self._limited_user_ids
+                limited_user_ids is not None
+                and user_id not in limited_user_ids
             ):
+                counts["rejected_user_not_limited"] += 1
                 continue
             slot_index = int(email_match.group(3) or 1)
-            with self._lock:
+            parsed_events.append((user_id, slot_index, str(parsed)))
+
+        with self._lock:
+            for user_id, slot_index, address in parsed_events:
                 slot = self._activity[user_id][slot_index]
                 if address not in slot and len(slot) >= MAX_IPS_PER_SLOT:
                     oldest = min(slot, key=lambda key: slot[key][-1])
                     del slot[oldest]
-                hits = slot.setdefault(address, deque(maxlen=128))
+                hits = slot.setdefault(
+                    address,
+                    deque(maxlen=HIT_BUFFER_CAPACITY),
+                )
+                if len(hits) == HIT_BUFFER_CAPACITY:
+                    counts["dropped_buffer_events"] += 1
                 hits.append(now)
                 self._sources[user_id].add(source_name)
-            recorded += 1
-        return recorded
+            counts["recorded_events"] = len(parsed_events)
+            self._diagnostic_counts.update(counts)
+            self._last_log_seen_at = now
+            if parsed_events:
+                self._last_valid_match_at = now
+        return len(parsed_events)
+
+    def diagnostics(self) -> dict:
+        """Return bounded, process-local parser/collector health without raw IPs."""
+
+        with self._lock:
+            result = {
+                counter: int(self._diagnostic_counts[counter])
+                for counter in DIAGNOSTIC_COUNTERS
+            }
+            result.update(
+                {
+                    "runtime_enabled": self._runtime_enabled,
+                    "ip_detection_enabled": self._ip_detection_enabled,
+                    "active_collectors": sorted(
+                        key
+                        for key, thread in self._collector_threads.items()
+                        if thread.is_alive()
+                    ),
+                    "hit_buffer_capacity": HIT_BUFFER_CAPACITY,
+                    "last_log_seen_at": (
+                        datetime.fromtimestamp(self._last_log_seen_at, UTC).replace(
+                            tzinfo=None
+                        )
+                        if self._last_log_seen_at is not None
+                        else None
+                    ),
+                    "last_valid_match_at": (
+                        datetime.fromtimestamp(self._last_valid_match_at, UTC).replace(
+                            tzinfo=None
+                        )
+                        if self._last_valid_match_at is not None
+                        else None
+                    ),
+                }
+            )
+            return result
 
     def _snapshot_user(
         self,
@@ -668,11 +762,10 @@ class DeviceLimitEngine:
             )
             if not manually_changed and user.status == UserStatus.disabled:
                 previous = state.status_before_penalty or UserStatus.active.value
-                if previous not in (UserStatus.active.value, UserStatus.on_hold.value):
-                    previous = UserStatus.active.value
-                user.status = UserStatus(previous)
-                user.last_status_change = now
-                xray.operations.add_user(user)
+                if previous in (UserStatus.active.value, UserStatus.on_hold.value):
+                    user.status = UserStatus(previous)
+                    user.last_status_change = now
+                    xray.operations.add_user(user)
             state.penalty_status = PenaltyStatus.clear.value
             state.blocked_until = None
             db.query(DeviceLimitIncident).filter(

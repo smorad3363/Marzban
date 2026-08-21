@@ -11,7 +11,10 @@ from sqlalchemy.orm import Query, Session, joinedload
 from sqlalchemy.sql.functions import coalesce
 
 from app import xray
-from app.device_limit.constants import DEFAULT_ADMIN_SUBSCRIPTION_MODES
+from app.device_limit.constants import (
+    DEFAULT_ADMIN_SUBSCRIPTION_MODES,
+    PenaltyStatus,
+)
 from app.db.models import (
     JWT,
     TLS,
@@ -337,7 +340,7 @@ def get_users(db: Session,
     if admin:
         query = query.filter(User.admin == admin)
 
-    if admins:
+    if admins is not None:
         query = query.filter(User.admin.has(Admin.username.in_(admins)))
 
     if return_with_count:
@@ -572,6 +575,18 @@ def update_user(
 
     if modify.status is not None:
         dbuser.status = modify.status
+        dbuser.last_status_change = datetime.utcnow()
+        device_limit_state = dbuser.device_limit_state
+        if (
+            getattr(modify.status, "value", modify.status)
+            == UserStatus.disabled.value
+            and device_limit_state is not None
+            and device_limit_state.penalty_status
+            == PenaltyStatus.temporarily_disabled.value
+        ):
+            # An explicit disable during a temporary device penalty is an
+            # operator lock, not a state the penalty timer may undo.
+            device_limit_state.status_before_penalty = UserStatus.disabled.value
 
     if modify.data_limit is not None:
         dbuser.data_limit = (modify.data_limit or None)
@@ -670,7 +685,11 @@ def reset_user_data_usage(db: Session, dbuser: User) -> User:
 
     dbuser.used_traffic = 0
     dbuser.node_usages.clear()
-    if dbuser.status not in (UserStatus.expired or UserStatus.disabled):
+    if dbuser.status not in (
+        UserStatus.on_hold,
+        UserStatus.expired,
+        UserStatus.disabled,
+    ):
         dbuser.status = UserStatus.active.value
 
     if dbuser.next_plan:
@@ -964,7 +983,12 @@ def update_user_status(db: Session, dbuser: User, status: UserStatus) -> User:
     return dbuser
 
 
-def set_owner(db: Session, dbuser: User, admin: Admin) -> User:
+def set_owner(
+    db: Session,
+    dbuser: User,
+    admin: Admin,
+    commit: bool = True,
+) -> User:
     """
     Sets the owner (admin) of a user.
 
@@ -978,8 +1002,11 @@ def set_owner(db: Session, dbuser: User, admin: Admin) -> User:
     """
     marzhelp_policy.validate_transfer(db, dbuser, admin.id)
     dbuser.admin = admin
-    db.commit()
-    db.refresh(dbuser)
+    if commit:
+        db.commit()
+        db.refresh(dbuser)
+    else:
+        db.flush()
     return dbuser
 
 
