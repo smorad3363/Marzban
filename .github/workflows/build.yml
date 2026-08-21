@@ -77,7 +77,7 @@ jobs:
         run: |
           set -o pipefail
           pytest_log="$(mktemp)"
-          if ! python -m pytest -q \
+          if ! python -m pytest -q --tb=short --disable-warnings \
             --ignore=tests/test_mysql_device_limit_migration.py \
             --ignore=tests/test_mysql_admin_hierarchy_migration.py \
             2>&1 | tee "${pytest_log}"; then
