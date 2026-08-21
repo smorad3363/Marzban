@@ -73,10 +73,22 @@ jobs:
         run: python -m pip install -r requirements.txt pytest
 
       - name: Run backend regression suite
-        run: >-
-          python -m pytest -q
-          --ignore=tests/test_mysql_device_limit_migration.py
-          --ignore=tests/test_mysql_admin_hierarchy_migration.py
+        shell: bash
+        run: |
+          set -o pipefail
+          pytest_log="$(mktemp)"
+          if ! python -m pytest -q \
+            --ignore=tests/test_mysql_device_limit_migration.py \
+            --ignore=tests/test_mysql_admin_hierarchy_migration.py \
+            2>&1 | tee "${pytest_log}"; then
+            {
+              echo '### Backend regression failure'
+              echo '```text'
+              tail -n 200 "${pytest_log}"
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 1
+          fi
 
       - name: Verify MySQL migrations and partial-DDL recovery
         run: >-
@@ -189,7 +201,7 @@ jobs:
     needs:
       - test-mysql
       - test-mysql-upgrade
-    if: ${{ github.event_name != 'workflow_dispatch' || inputs.tests_only != true }}
+    if: ${{ (github.event_name != 'workflow_dispatch' || inputs.tests_only != true) && !contains(github.ref_name, '-ci.') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
