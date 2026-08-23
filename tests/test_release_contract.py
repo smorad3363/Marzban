@@ -9,9 +9,13 @@ def test_release_version_and_install_rollback_contract():
     workflow = Path(".github/workflows/build.yml").read_text(encoding="utf-8")
     release_docs = Path("RELEASES.md").read_text(encoding="utf-8")
 
-    app_version = re.search(r'^__version__ = "([0-9]+\.[0-9]+\.[0-9]+)"$', app_source, re.MULTILINE)
+    app_version = re.search(
+        r'^__version__ = "([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)"$',
+        app_source,
+        re.MULTILINE,
+    )
     assert app_version is not None
-    assert version == app_version.group(1) == "4.9.8"
+    assert version == app_version.group(1) == "5.0.0-rc.1"
 
     assert 'MARZBAN_GITHUB_BRANCH="${MARZBAN_GITHUB_BRANCH:-master}"' in installer
     assert 'MARZBAN_DOCKER_IMAGE="${MARZBAN_DOCKER_IMAGE:-ghcr.io/smorad3363/marzban}"' in installer
@@ -25,8 +29,12 @@ def test_release_version_and_install_rollback_contract():
     assert 'script_ref=$(marzban_script_ref "$requested_version")' in installer
     assert 'tags:' in workflow and '- "v*"' in workflow
     assert '${IMAGE_NAME}:${VERSION_TAG}' in workflow
+    assert 'if [[ "${VERSION_TAG}" != *-* ]]; then' in workflow
+    assert 'release_flags+=(--prerelease)' in workflow
     assert 'gh release create "${VERSION_TAG}"' in workflow
 
+    assert "marzban update --version v5.0.0-rc.1" in release_docs
+    assert "install --version v5.0.0-rc.1 --database mysql" in release_docs
     assert "install --version v4.9.8 --database mysql" in release_docs
     assert "install --version v4.9.6 --database mysql" in release_docs
     assert "marzban rollback v4.9.6" in release_docs

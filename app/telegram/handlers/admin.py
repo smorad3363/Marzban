@@ -16,6 +16,7 @@ from telebot.util import extract_arguments, user_link
 
 from app import xray
 from app.db import GetDB, crud
+from app.db.models import Admin as DBAdmin, SystemOwner
 from app.models.proxy import ProxyTypes
 from app.models.user import (
     UserCreate,
@@ -35,6 +36,7 @@ from app.telegram.utils.shared import (
     statuses,
     time_to_string
 )
+from app.utils import marzhelp_policy
 from app.utils.store import MemoryStorage
 from app.utils.system import cpu_usage, memory_usage, readable_size, realtime_bandwidth
 from config import TELEGRAM_DEFAULT_VLESS_FLOW, TELEGRAM_LOGGER_CHANNEL_ID
@@ -805,7 +807,7 @@ def template_charge_command(call: types.CallbackQuery):
                 reply_markup=BotKeyboard.charge_add_or_reset(
                     username=username, template_id=template_id))
         elif (not user.data_limit and not user.expire) or (user.used_traffic > user.data_limit) or (now > datetime.fromtimestamp(user.expire)):
-            crud.reset_user_data_usage(db, db_user)
+            crud.reset_user_data_usage(db, db_user, commit=False)
             expire_date = None
             if template.expire_duration:
                 expire_date = today + relativedelta(seconds=template.expire_duration)
@@ -814,7 +816,12 @@ def template_charge_command(call: types.CallbackQuery):
                 expire=int(expire_date.timestamp()) if expire_date else 0,
                 data_limit=template.data_limit,
             )
-            db_user = crud.update_user(db, db_user, modify)
+            db_user = crud.update_user(
+                db,
+                db_user,
+                modify,
+                operation=marzhelp_policy.UserUpdateOperation.renew,
+            )
             xray.operations.add_user(db_user)
             bot.answer_callback_query(call.id, "🔋 User Successfully Charged!")
             bot.edit_message_text(
@@ -1624,7 +1631,7 @@ def confirm_user_command(call: types.CallbackQuery):
                 elif protocol in db_user.inbounds and protocol not in inbounds:
                     del proxies[protocol]
 
-            crud.reset_user_data_usage(db, db_user)
+            crud.reset_user_data_usage(db, db_user, commit=False)
             if data == 'charge_reset':
                 expire_date = None
                 if template.expire_duration:
@@ -1644,7 +1651,12 @@ def confirm_user_command(call: types.CallbackQuery):
                     expire=int(expire_date.timestamp()) if expire_date else 0,
                     data_limit=(user.data_limit or 0) - user.used_traffic + template.data_limit,
                 )
-            db_user = crud.update_user(db, db_user, modify)
+            db_user = crud.update_user(
+                db,
+                db_user,
+                modify,
+                operation=marzhelp_policy.UserUpdateOperation.renew,
+            )
             xray.operations.add_user(db_user)
             bot.answer_callback_query(call.id, "🔋 User Successfully Charged!")
             bot.edit_message_text(
@@ -1854,7 +1866,24 @@ def confirm_user_command(call: types.CallbackQuery):
                     )
             try:
                 with GetDB() as db:
-                    db_user = crud.create_user(db, new_user)
+                    creator = (
+                        db.query(DBAdmin)
+                        .filter(DBAdmin.telegram_id == call.message.chat.id)
+                        .one_or_none()
+                    )
+                    if creator is None:
+                        creator = (
+                            db.query(DBAdmin)
+                            .join(SystemOwner, SystemOwner.admin_id == DBAdmin.id)
+                            .filter(SystemOwner.id == 1)
+                            .one_or_none()
+                        )
+                    if creator is None:
+                        raise marzhelp_policy.MarzhelpPolicyError(
+                            "creator_admin_missing",
+                            "Telegram customer creation requires a persisted Admin/Owner creator",
+                        )
+                    db_user = crud.create_user(db, new_user, admin=creator)
                     proxies = db_user.proxies
                     user = UserResponse.model_validate(db_user)
                     xray.operations.add_user(db_user)

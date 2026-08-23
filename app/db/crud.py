@@ -307,7 +307,8 @@ def get_users(db: Session,
     Returns:
         Union[List[User], Tuple[List[User], int]]: List of users or tuple of users and total count.
     """
-    query = get_user_queryset(db)
+    # Keep count query narrow; eager relationships belong only to page payload.
+    query = db.query(User)
     query = apply_inbound_access_filter(query, allowed_inbounds)
     if scope_admin_id is not None:
         query = query.filter(
@@ -344,16 +345,21 @@ def get_users(db: Session,
         query = query.filter(User.admin.has(Admin.username.in_(admins)))
 
     if return_with_count:
-        count = query.count()
+        count = query.order_by(None).with_entities(func.count(User.id)).scalar() or 0
 
     if sort:
         query = query.order_by(*(opt.value for opt in sort))
+        primary_descending = sort[0].name.startswith("-")
+        query = query.order_by(User.id.desc() if primary_descending else User.id.asc())
+    else:
+        query = query.order_by(User.created_at.desc(), User.id.desc())
 
     if offset:
         query = query.offset(offset)
     if limit:
         query = query.limit(limit)
 
+    query = query.options(joinedload(User.admin)).options(joinedload(User.next_plan))
     if return_with_count:
         return query.all(), count
 
@@ -441,6 +447,7 @@ def create_user(
     user: UserCreate,
     admin: Admin = None,
     commit: bool = True,
+    apply_namespace: bool = True,
 ) -> User:
     """
     Creates a new user with provided details.
@@ -469,8 +476,13 @@ def create_user(
         db, admin.id if admin is not None else None, user
     )
 
+    username = (
+        marzhelp_policy.customer_username(db, admin, user.username)
+        if admin is not None and apply_namespace
+        else user.username
+    )
     dbuser = User(
-        username=user.username,
+        username=username,
         proxies=proxies,
         status=user.status,
         data_limit=(user.data_limit or None),
@@ -536,7 +548,11 @@ def remove_users(db: Session, dbusers: List[User]):
 
 
 def update_user(
-    db: Session, dbuser: User, modify: UserModify, commit: bool = True
+    db: Session,
+    dbuser: User,
+    modify: UserModify,
+    commit: bool = True,
+    operation: marzhelp_policy.UserUpdateOperation = marzhelp_policy.UserUpdateOperation.edit,
 ) -> User:
     """
     Updates a user with new details.
@@ -549,7 +565,12 @@ def update_user(
     Returns:
         User: The updated user object.
     """
-    renewal, allowance_consumed = marzhelp_policy.validate_update(db, dbuser, modify)
+    renewal, allowance_consumed = marzhelp_policy.validate_update(
+        db,
+        dbuser,
+        modify,
+        operation=operation,
+    )
     added_proxies: Dict[ProxyTypes, Proxy] = {}
     if modify.proxies:
         for proxy_type, settings in modify.proxies.items():
@@ -665,13 +686,14 @@ def update_user(
     return dbuser
 
 
-def reset_user_data_usage(db: Session, dbuser: User) -> User:
+def reset_user_data_usage(db: Session, dbuser: User, commit: bool = True) -> User:
     """
     Resets the data usage of a user and logs the reset.
 
     Args:
         db (Session): Database session.
         dbuser (User): The user object whose data usage is to be reset.
+        commit (bool): Commit immediately, or flush into the caller's transaction.
 
     Returns:
         User: The updated user object.
@@ -697,8 +719,11 @@ def reset_user_data_usage(db: Session, dbuser: User) -> User:
         dbuser.next_plan = None
     db.add(dbuser)
 
-    db.commit()
-    db.refresh(dbuser)
+    if commit:
+        db.commit()
+        db.refresh(dbuser)
+    else:
+        db.flush()
     return dbuser
 
 
@@ -1100,10 +1125,12 @@ def create_admin(db: Session, admin: AdminCreate, commit: bool = True) -> Admin:
         hashed_password=admin.hashed_password,
         is_sudo=admin.is_sudo,
         telegram_id=admin.telegram_id if admin.telegram_id else None,
+        phone=admin.phone,
         discord_webhook=admin.discord_webhook if admin.discord_webhook else None
     )
     db.add(dbadmin)
     db.flush()
+    marzhelp_policy.ensure_admin_namespace_prefix(db, dbadmin)
     settings = MarzhelpAdminSettings(admin_id=dbadmin.id)
     settings.subscription_mode_permissions = [
         MarzhelpAdminSubscriptionModePermission(
@@ -1141,6 +1168,8 @@ def update_admin(
         dbadmin.hashed_password = modified_admin.hashed_password
         dbadmin.password_reset_at = datetime.utcnow()
     dbadmin.telegram_id = modified_admin.telegram_id
+    if "phone" in modified_admin.model_fields_set:
+        dbadmin.phone = modified_admin.phone
     dbadmin.discord_webhook = modified_admin.discord_webhook
 
     if commit:
@@ -1231,6 +1260,7 @@ def upsert_marzhelp_admin_policy(
 
     values = policy.model_dump(
         exclude={
+            "billing_mode",
             "allowed_inbounds",
             "allowed_user_limits",
             "allowed_subscription_modes",

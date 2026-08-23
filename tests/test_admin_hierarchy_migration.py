@@ -50,6 +50,54 @@ assert CATEGORY_MIGRATION_SPEC and CATEGORY_MIGRATION_SPEC.loader
 category_migration = importlib.util.module_from_spec(CATEGORY_MIGRATION_SPEC)
 CATEGORY_MIGRATION_SPEC.loader.exec_module(category_migration)
 
+LEDGER_MIGRATION_PATH = (
+    Path(__file__).parents[1]
+    / "app"
+    / "db"
+    / "migrations"
+    / "versions"
+    / "7d2c6a4e9b10_expand_admin_credit_ledger.py"
+)
+LEDGER_MIGRATION_SPEC = importlib.util.spec_from_file_location(
+    "admin_credit_ledger_migration",
+    LEDGER_MIGRATION_PATH,
+)
+assert LEDGER_MIGRATION_SPEC and LEDGER_MIGRATION_SPEC.loader
+ledger_migration = importlib.util.module_from_spec(LEDGER_MIGRATION_SPEC)
+LEDGER_MIGRATION_SPEC.loader.exec_module(ledger_migration)
+
+PLAN_HOST_MIGRATION_PATH = (
+    Path(__file__).parents[1]
+    / "app"
+    / "db"
+    / "migrations"
+    / "versions"
+    / "9f6a2c8d4e10_add_explicit_plan_host_scope.py"
+)
+PLAN_HOST_MIGRATION_SPEC = importlib.util.spec_from_file_location(
+    "explicit_plan_host_scope_migration",
+    PLAN_HOST_MIGRATION_PATH,
+)
+assert PLAN_HOST_MIGRATION_SPEC and PLAN_HOST_MIGRATION_SPEC.loader
+plan_host_migration = importlib.util.module_from_spec(PLAN_HOST_MIGRATION_SPEC)
+PLAN_HOST_MIGRATION_SPEC.loader.exec_module(plan_host_migration)
+
+NAMESPACE_MIGRATION_PATH = (
+    Path(__file__).parents[1]
+    / "app"
+    / "db"
+    / "migrations"
+    / "versions"
+    / "3a7e5c1b8d42_add_admin_user_namespace.py"
+)
+NAMESPACE_MIGRATION_SPEC = importlib.util.spec_from_file_location(
+    "admin_user_namespace_migration",
+    NAMESPACE_MIGRATION_PATH,
+)
+assert NAMESPACE_MIGRATION_SPEC and NAMESPACE_MIGRATION_SPEC.loader
+namespace_migration = importlib.util.module_from_spec(NAMESPACE_MIGRATION_SPEC)
+NAMESPACE_MIGRATION_SPEC.loader.exec_module(namespace_migration)
+
 
 def test_fixed_identifier_tables_do_not_compile_mysql_auto_increment():
     for model in (
@@ -91,6 +139,134 @@ def _upgrade_categories(connection: sa.Connection, monkeypatch) -> None:
     operations = Operations(MigrationContext.configure(connection))
     monkeypatch.setattr(category_migration, "op", operations)
     category_migration.upgrade()
+
+
+def _upgrade_ledger(connection: sa.Connection, monkeypatch) -> None:
+    operations = Operations(MigrationContext.configure(connection))
+    monkeypatch.setattr(ledger_migration, "op", operations)
+    ledger_migration.upgrade()
+
+
+def _upgrade_plan_hosts(connection: sa.Connection, monkeypatch) -> None:
+    operations = Operations(MigrationContext.configure(connection))
+    monkeypatch.setattr(plan_host_migration, "op", operations)
+    plan_host_migration.upgrade()
+
+
+def _upgrade_namespace(connection: sa.Connection, monkeypatch) -> None:
+    operations = Operations(MigrationContext.configure(connection))
+    monkeypatch.setattr(namespace_migration, "op", operations)
+    namespace_migration.upgrade()
+
+
+def test_namespace_upgrade_backfills_admins_without_renaming_users_and_reruns(monkeypatch):
+    engine = sa.create_engine("sqlite+pysqlite:///:memory:")
+    with engine.begin() as connection:
+        _legacy_schema(connection)
+        connection.execute(
+            sa.text(
+                "CREATE TABLE users (id INTEGER PRIMARY KEY, username VARCHAR(34) NOT NULL UNIQUE)"
+            )
+        )
+        connection.execute(
+            sa.text(
+                "INSERT INTO admins (id, username, is_sudo) VALUES "
+                "(10, 'owner-login', 1), (20, 'child-login', 0)"
+            )
+        )
+        connection.execute(
+            sa.text("INSERT INTO users (id, username) VALUES (1, 'legacy-customer')")
+        )
+
+        _upgrade_namespace(connection, monkeypatch)
+        first = connection.execute(
+            sa.text(
+                "SELECT id, username, user_namespace_prefix FROM admins ORDER BY id"
+            )
+        ).all()
+        _upgrade_namespace(connection, monkeypatch)
+
+        assert first == connection.execute(
+            sa.text(
+                "SELECT id, username, user_namespace_prefix FROM admins ORDER BY id"
+            )
+        ).all()
+        assert first[0][2] != first[1][2]
+        assert connection.scalar(sa.text("SELECT username FROM users WHERE id = 1")) == "legacy-customer"
+        indexes = sa.inspect(connection).get_indexes("admins")
+        assert any(
+            index.get("name") == "uq_admins_user_namespace_prefix"
+            and index.get("unique")
+            for index in indexes
+        )
+
+
+def test_explicit_plan_host_scope_upgrade_is_additive_and_rerunnable(monkeypatch):
+    engine = sa.create_engine("sqlite+pysqlite:///:memory:")
+    with engine.begin() as connection:
+        _legacy_schema(connection)
+        _upgrade(connection, monkeypatch)
+        _upgrade_plan_hosts(connection, monkeypatch)
+        _upgrade_plan_hosts(connection, monkeypatch)
+
+        inspector = sa.inspect(connection)
+        assert "admin_user_plan_hosts" in inspector.get_table_names()
+        assert inspector.get_pk_constraint("admin_user_plan_hosts")["constrained_columns"] == [
+            "version_id",
+            "inbound_tag",
+            "host_id",
+        ]
+        assert connection.scalar(
+            sa.text("SELECT COUNT(*) FROM admin_user_plan_hosts")
+        ) == 0
+
+
+def test_credit_ledger_upgrade_backfills_legacy_rows_and_is_rerunnable(monkeypatch):
+    engine = sa.create_engine("sqlite+pysqlite:///:memory:")
+    with engine.begin() as connection:
+        _legacy_schema(connection)
+        connection.execute(
+            sa.text(
+                "INSERT INTO admins (id, username, is_sudo) VALUES "
+                "(10, 'owner', 1), (20, 'child', 0)"
+            )
+        )
+        _upgrade(connection, monkeypatch)
+        connection.execute(
+            sa.text(
+                "INSERT INTO admin_credit_transfers "
+                "(id, from_admin_id, to_admin_id, actor_admin_id, amount, operation_type, "
+                "idempotency_key, created_at, note) VALUES "
+                "(1, 10, 20, 10, 300, 'grant', 'legacy-grant', CURRENT_TIMESTAMP, 'legacy')"
+            )
+        )
+
+        _upgrade_ledger(connection, monkeypatch)
+        _upgrade_ledger(connection, monkeypatch)
+
+        columns = {
+            column["name"]
+            for column in sa.inspect(connection).get_columns("admin_credit_transfers")
+        }
+        assert {
+            "adjusted_admin_id",
+            "resource",
+            "delta",
+            "balance_before",
+            "balance_after",
+            "source_delegated_before",
+            "source_delegated_after",
+        } <= columns
+        assert connection.execute(
+            sa.text(
+                "SELECT adjusted_admin_id, resource, delta, balance_before, balance_after "
+                "FROM admin_credit_transfers WHERE id = 1"
+            )
+        ).one() == (20, "traffic_credit", 300, None, None)
+        assert sum(
+            index.get("name") == "ix_admin_credit_adjusted_created"
+            for index in sa.inspect(connection).get_indexes("admin_credit_transfers")
+        ) == 1
 
 
 def test_upgrade_adds_disabled_hierarchy_without_guessing_legacy_parents(monkeypatch):

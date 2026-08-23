@@ -37,6 +37,10 @@ export const AdminCreditSummary: FC = () => {
   if (query.isError || !query.data) return <Alert status="error" borderRadius="12px" mb={5}><AlertIcon />خلاصه حساب دریافت نشد.</Alert>;
 
   const account = query.data;
+  const seatMode = account.billing_mode === "SEAT_CREDIT";
+  const creditValue = (value: number | null) => value === null
+    ? "نامحدود"
+    : seatMode ? `${value} seats` : String(formatBytes(value));
   const used = account.own_spend + account.delegated_traffic;
   const percent = account.total_traffic && account.total_traffic > 0
     ? Math.min(100, Math.round((used / account.total_traffic) * 100))
@@ -55,7 +59,7 @@ export const AdminCreditSummary: FC = () => {
         <Badge colorScheme={account.user_creation_mode === "PLAN_ONLY" ? "blue" : "gray"}>{account.user_creation_mode}</Badge>
       </HStack>
       <SimpleGrid columns={{ base: 1, md: 3 }} gap={4}>
-        <SummaryCard label="اعتبار قابل استفاده" value={account.available_traffic === null ? "نامحدود" : String(formatBytes(account.available_traffic))} detail={`مصرف مستقیم ${formatBytes(account.own_spend)} · واگذاری ${formatBytes(account.delegated_traffic)}`}>
+        <SummaryCard label="اعتبار قابل استفاده" value={creditValue(account.available_traffic)} detail={`مصرف مستقیم ${creditValue(account.own_spend)} · واگذاری ${creditValue(account.delegated_traffic)}`}>
           {percent !== null && <HStack mt={4}><Progress value={percent} colorScheme={percent >= 80 ? "orange" : "green"} size="sm" borderRadius="full" flex={1} aria-label="درصد مصرف اعتبار" /><Text color="gray.300" fontSize="xs">{percent}%</Text></HStack>}
         </SummaryCard>
         <SummaryCard label="کاربران" value={String(account.subtree_users)} detail={`${account.own_users} کاربر مستقیم · ${account.subtree_users} کاربر در کل زیرشاخه`} />

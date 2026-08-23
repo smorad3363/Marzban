@@ -22,14 +22,18 @@ from app.db.models import (
     AdminHierarchy,
     AdminHierarchySettings,
     AdminRole,
+    AdminReferralAttribution,
+    AdminReferralEvent,
+    AdminSuspensionAdmin,
     AdminSuspensionEvent,
+    AdminSuspensionReason,
     AdminSuspensionUser,
     MarzhelpAdminSettings,
     SystemOwner,
     User,
 )
 from app.models.user import UserStatus
-from app.utils import marzhelp_policy
+from app.utils import admin_billing, marzhelp_policy
 
 
 OWNER = "OWNER"
@@ -407,19 +411,32 @@ def attach_new_child(
 
 
 def own_credit_spend(db: Session, settings: MarzhelpAdminSettings) -> int:
+    mode = admin_billing.billing_mode(settings)
+    if mode == admin_billing.BillingMode.SEAT_CREDIT:
+        return int(settings.capacity_used or 0)
+    if mode == admin_billing.BillingMode.ALLOCATED_TRAFFIC:
+        return int(settings.used_traffic or 0)
+    if mode == admin_billing.BillingMode.USED_TRAFFIC:
+        return marzhelp_policy.used_traffic_spend(db, settings.admin_id)
     if (settings.calculate_volume or "used_traffic") == "created_traffic":
         return int(settings.used_traffic or 0)
     return marzhelp_policy.used_traffic_spend(db, settings.admin_id)
 
 
 def available_credit(db: Session, settings: MarzhelpAdminSettings) -> int | None:
-    if settings.total_traffic is None:
+    mode = admin_billing.billing_mode(settings)
+    configured_limit = (
+        settings.device_capacity_limit
+        if mode == admin_billing.BillingMode.SEAT_CREDIT
+        else settings.total_traffic
+    )
+    if configured_limit is None:
         return None
     admin = db.get(Admin, settings.admin_id)
     if admin is not None and is_owner(db, admin):
         return None
     return max(
-        int(settings.total_traffic or 0)
+        int(configured_limit or 0)
         - own_credit_spend(db, settings)
         - int(settings.delegated_traffic or 0),
         0,
@@ -434,7 +451,13 @@ def automatic_suspension_reason(
 ) -> int | None:
     if settings.expiry_date is not None and settings.expiry_date < (today or date.today()):
         return 3
-    if settings.total_traffic is not None and available_credit(db, settings) <= 0:
+    configured_limit = (
+        settings.device_capacity_limit
+        if admin_billing.billing_mode(settings) == admin_billing.BillingMode.SEAT_CREDIT
+        else settings.total_traffic
+    )
+    available = available_credit(db, settings) if configured_limit is not None else None
+    if available is not None and available <= 0:
         return 2
     return None
 
@@ -449,7 +472,9 @@ def transfer_credit(
     operation_type: str,
     idempotency_key: str,
     note: str | None = None,
-) -> AdminCreditTransfer:
+    commit: bool = True,
+    return_created: bool = False,
+) -> AdminCreditTransfer | tuple[AdminCreditTransfer, bool]:
     if amount <= 0:
         raise HierarchyError("invalid_amount", "Credit amount must be positive")
     if operation_type not in {"grant", "reclaim", "owner_adjustment", "migration"}:
@@ -463,25 +488,36 @@ def transfer_credit(
 
     ledger_from_id = target.id if operation_type == "reclaim" else source.id
     ledger_to_id = source.id if operation_type == "reclaim" else target.id
+    reason = (note or f"{operation_type} credit").strip()
+    if not reason:
+        raise HierarchyError("reason_required", "A reason is required for credit adjustment")
 
-    for attempt in range(3):
+    def checked_existing(existing: AdminCreditTransfer):
+        if (
+            existing.from_admin_id != ledger_from_id
+            or existing.to_admin_id != ledger_to_id
+            or existing.actor_admin_id != actor.id
+            or int(existing.amount) != amount
+            or existing.operation_type != operation_type
+            or existing.note != reason
+        ):
+            raise HierarchyError(
+                "idempotency_conflict",
+                "Idempotency key belongs to another credit operation",
+            )
+        return (existing, False) if return_created else existing
+
+    attempts = 3 if commit else 1
+    for attempt in range(attempts):
         try:
-            existing = db.query(AdminCreditTransfer).filter(
-                AdminCreditTransfer.idempotency_key == idempotency_key
-            ).one_or_none()
+            existing = (
+                db.query(AdminCreditTransfer)
+                .filter(AdminCreditTransfer.idempotency_key == idempotency_key)
+                .with_for_update()
+                .one_or_none()
+            )
             if existing is not None:
-                if (
-                    existing.from_admin_id != ledger_from_id
-                    or existing.to_admin_id != ledger_to_id
-                    or existing.actor_admin_id != actor.id
-                    or int(existing.amount) != amount
-                    or existing.operation_type != operation_type
-                ):
-                    raise HierarchyError(
-                        "idempotency_conflict",
-                        "Idempotency key belongs to another credit operation",
-                    )
-                return existing
+                return checked_existing(existing)
 
             ids = sorted({source.id, target.id})
             wallets = {
@@ -496,46 +532,116 @@ def transfer_credit(
                 raise HierarchyError("wallet_missing", "Both administrators need credit settings")
             source_wallet = wallets[source.id]
             target_wallet = wallets[target.id]
+            source_mode = admin_billing.billing_mode(source_wallet)
+            target_mode = admin_billing.billing_mode(target_wallet)
+            seat_resource = target_mode == admin_billing.BillingMode.SEAT_CREDIT
+            if (
+                not is_owner(db, source)
+                and (source_mode == admin_billing.BillingMode.SEAT_CREDIT) != seat_resource
+            ):
+                raise HierarchyError(
+                    "credit_resource_mismatch",
+                    "Parent and child billing modes use incompatible credit resources",
+                )
+            resource = "seat_credit" if seat_resource else "traffic_credit"
+            balance_column = (
+                MarzhelpAdminSettings.device_capacity_limit
+                if seat_resource
+                else MarzhelpAdminSettings.total_traffic
+            )
+            balance_before = getattr(target_wallet, balance_column.key)
+            source_delegated_before = int(source_wallet.delegated_traffic or 0)
 
             if operation_type == "reclaim":
                 reclaimable = available_credit(db, target_wallet)
-                if reclaimable is not None and amount > reclaimable:
+                if reclaimable is None:
+                    raise HierarchyError(
+                        "reclaim_unlimited_credit",
+                        "Unlimited child credit cannot be reclaimed as a finite amount",
+                    )
+                if amount > reclaimable:
                     raise HierarchyError("reclaim_exceeds_available", "Reclaim exceeds child available credit")
-                target_wallet.total_traffic = int(target_wallet.total_traffic or 0) - amount
-                source_wallet.delegated_traffic = max(int(source_wallet.delegated_traffic or 0) - amount, 0)
+                if amount > source_delegated_before:
+                    raise HierarchyError(
+                        "reclaim_exceeds_delegated",
+                        "Reclaim exceeds credit delegated by the parent",
+                    )
+                balance_after = int(balance_before) - amount
+                source_delegated_after = source_delegated_before - amount
             else:
                 available = available_credit(db, source_wallet)
                 if available is not None and amount > available:
                     raise HierarchyError("credit_exhausted", "Parent has insufficient delegatable credit")
-                source_wallet.delegated_traffic = int(source_wallet.delegated_traffic or 0) + amount
-                target_wallet.total_traffic = int(target_wallet.total_traffic or 0) + amount
+                source_delegated_after = source_delegated_before + amount
+                balance_after = int(balance_before or 0) + amount
+
+            updates = {
+                source.id: (
+                    MarzhelpAdminSettings.delegated_traffic,
+                    source_delegated_before,
+                    source_delegated_after,
+                ),
+                target.id: (
+                    balance_column,
+                    balance_before,
+                    balance_after,
+                ),
+            }
+            for admin_id in sorted(updates):
+                column, before, after = updates[admin_id]
+                changed = (
+                    db.query(MarzhelpAdminSettings)
+                    .filter(
+                        MarzhelpAdminSettings.admin_id == admin_id,
+                        column == before,
+                    )
+                    .update({column: after}, synchronize_session="fetch")
+                )
+                if changed != 1:
+                    db.rollback()
+                    raise HierarchyError(
+                        "credit_concurrent_conflict",
+                        "Credit balance changed concurrently; retry with the same idempotency key",
+                    )
 
             transfer = AdminCreditTransfer(
                 from_admin_id=ledger_from_id,
                 to_admin_id=ledger_to_id,
                 actor_admin_id=actor.id,
+                adjusted_admin_id=target.id,
+                resource=resource,
                 amount=amount,
+                delta=-amount if operation_type == "reclaim" else amount,
+                balance_before=balance_before,
+                balance_after=balance_after,
+                source_delegated_before=source_delegated_before,
+                source_delegated_after=source_delegated_after,
                 operation_type=operation_type,
                 idempotency_key=idempotency_key,
-                note=note,
+                note=reason,
             )
             db.add(transfer)
-            db.commit()
-            db.refresh(transfer)
-            return transfer
+            if commit:
+                db.commit()
+                db.refresh(transfer)
+            else:
+                db.flush()
+            return (transfer, True) if return_created else transfer
         except OperationalError as exc:
             db.rollback()
             mysql_code = getattr(getattr(exc, "orig", None), "args", [None])[0]
-            if mysql_code != 1213 or attempt == 2:
+            if mysql_code != 1213 or attempt == attempts - 1:
                 raise
             time.sleep(0.02 * (attempt + 1))
         except IntegrityError:
             db.rollback()
+            if not commit:
+                raise
             existing = db.query(AdminCreditTransfer).filter(
                 AdminCreditTransfer.idempotency_key == idempotency_key
             ).one_or_none()
             if existing is not None:
-                return existing
+                return checked_existing(existing)
             raise
     raise AssertionError("unreachable")
 
@@ -627,6 +733,425 @@ def _target_user_query(db: Session, target_admin_id: int, include_subtree: bool)
     else:
         query = query.filter(User.admin_id == target_admin_id)
     return query
+
+
+def _operation_fingerprint(*parts: object) -> str:
+    return hashlib.sha256("\x1f".join(str(part) for part in parts).encode()).hexdigest()
+
+
+def _set_referral_attribution_once(
+    db: Session,
+    *,
+    actor: Admin,
+    referred: Admin,
+    referrer: Admin | None,
+    rate_bps: int | None,
+    idempotency_key: str,
+    note: str | None = None,
+) -> tuple[AdminReferralEvent, bool]:
+    """Owner-only attribution mutation. Never touches credit/resource ledgers."""
+    if not is_owner(db, actor):
+        raise HierarchyError("owner_required", "Only Owner can modify referral attribution")
+    if referred.id == actor.id:
+        raise HierarchyError("invalid_referral_target", "Owner referral attribution is not supported")
+    if referrer is not None and referrer.id == referred.id:
+        raise HierarchyError("invalid_referrer", "An Admin cannot refer itself")
+    if not idempotency_key or len(idempotency_key) > 128:
+        raise HierarchyError("invalid_idempotency_key", "A bounded idempotency key is required")
+    if referrer is not None and (rate_bps is None or not 0 <= rate_bps <= 10_000):
+        raise HierarchyError("invalid_referral_rate", "Referral rate must be between 0 and 10000 bps")
+    normalized_note = (note or "").strip() or None
+    fingerprint = _operation_fingerprint(
+        actor.id,
+        referred.id,
+        referrer.id if referrer else None,
+        rate_bps if referrer else None,
+        normalized_note,
+    )
+
+    existing_event = (
+        db.query(AdminReferralEvent)
+        .filter(AdminReferralEvent.idempotency_key == idempotency_key)
+        .with_for_update()
+        .one_or_none()
+    )
+    if existing_event is not None:
+        if existing_event.payload_fingerprint != fingerprint:
+            raise HierarchyError("idempotency_conflict", "Idempotency key belongs to another referral operation")
+        return existing_event, False
+
+    admin_ids = sorted({referred.id, *(set() if referrer is None else {referrer.id})})
+    db.query(Admin).filter(Admin.id.in_(admin_ids)).order_by(Admin.id).with_for_update().all()
+    current = (
+        db.query(AdminReferralAttribution)
+        .filter(AdminReferralAttribution.referred_admin_id == referred.id)
+        .with_for_update()
+        .one_or_none()
+    )
+    existing_event = (
+        db.query(AdminReferralEvent)
+        .filter(AdminReferralEvent.idempotency_key == idempotency_key)
+        .with_for_update()
+        .one_or_none()
+    )
+    if existing_event is not None:
+        if existing_event.payload_fingerprint != fingerprint:
+            raise HierarchyError("idempotency_conflict", "Idempotency key belongs to another referral operation")
+        return existing_event, False
+
+    previous_referrer_id = current.referrer_admin_id if current else None
+    previous_rate = current.rate_bps if current else None
+    if referrer is None:
+        if current is not None:
+            db.delete(current)
+        operation_type = "remove"
+    elif current is None:
+        current = AdminReferralAttribution(
+            referred_admin_id=referred.id,
+            referrer_admin_id=referrer.id,
+            rate_bps=rate_bps,
+            created_by_admin_id=actor.id,
+            updated_by_admin_id=actor.id,
+        )
+        db.add(current)
+        operation_type = "set"
+    else:
+        current.referrer_admin_id = referrer.id
+        current.rate_bps = rate_bps
+        current.updated_by_admin_id = actor.id
+        current.updated_at = utc_now_naive()
+        operation_type = "update"
+
+    event = AdminReferralEvent(
+        actor_admin_id=actor.id,
+        referred_admin_id=referred.id,
+        previous_referrer_admin_id=previous_referrer_id,
+        new_referrer_admin_id=referrer.id if referrer else None,
+        previous_rate_bps=previous_rate,
+        new_rate_bps=rate_bps if referrer else None,
+        operation_type=operation_type,
+        idempotency_key=idempotency_key,
+        payload_fingerprint=fingerprint,
+        note=normalized_note,
+    )
+    db.add(event)
+    try:
+        db.commit()
+        db.refresh(event)
+        return event, True
+    except IntegrityError:
+        db.rollback()
+        replay = db.query(AdminReferralEvent).filter(
+            AdminReferralEvent.idempotency_key == idempotency_key
+        ).one_or_none()
+        if replay is not None and replay.payload_fingerprint == fingerprint:
+            return replay, False
+        raise
+
+
+def set_referral_attribution(
+    db: Session,
+    *,
+    actor: Admin,
+    referred: Admin,
+    referrer: Admin | None,
+    rate_bps: int | None,
+    idempotency_key: str,
+    note: str | None = None,
+) -> tuple[AdminReferralEvent, bool]:
+    """Retry MySQL deadlock victims without changing attribution semantics."""
+    actor_id = actor.id
+    referred_id = referred.id
+    referrer_id = referrer.id if referrer else None
+    for attempt in range(3):
+        try:
+            return _set_referral_attribution_once(
+                db,
+                actor=db.get(Admin, actor_id),
+                referred=db.get(Admin, referred_id),
+                referrer=db.get(Admin, referrer_id) if referrer_id else None,
+                rate_bps=rate_bps,
+                idempotency_key=idempotency_key,
+                note=note,
+            )
+        except OperationalError as exc:
+            db.rollback()
+            mysql_code = getattr(getattr(exc, "orig", None), "args", [None])[0]
+            if mysql_code != 1213 or attempt == 2:
+                raise
+            time.sleep(0.02 * (attempt + 1))
+    raise AssertionError("unreachable")
+
+
+def _freeze_admin_once(
+    db: Session,
+    *,
+    actor: Admin,
+    target: Admin,
+    reason_id: int,
+    idempotency_key: str,
+    note: str | None = None,
+    batch_size: int = 500,
+) -> tuple[AdminSuspensionEvent, bool]:
+    """Owner Freeze always snapshots and freezes the complete descendant subtree."""
+    if not is_owner(db, actor):
+        raise HierarchyError("owner_required", "Only Owner can freeze an Admin subtree")
+    if target.id == actor.id or role_code(target) == OWNER:
+        raise HierarchyError("invalid_freeze_target", "Owner cannot be frozen")
+    if not idempotency_key or len(idempotency_key) > 128:
+        raise HierarchyError("invalid_idempotency_key", "A bounded idempotency key is required")
+    if db.get(AdminSuspensionReason, reason_id) is None:
+        raise HierarchyError("invalid_suspension_reason", "Suspension reason does not exist")
+    normalized_note = (note or "").strip() or None
+    fingerprint = _operation_fingerprint(actor.id, target.id, reason_id, normalized_note, "full_subtree")
+    replay = db.query(AdminSuspensionEvent).filter(
+        AdminSuspensionEvent.idempotency_key == idempotency_key
+    ).with_for_update().one_or_none()
+    if replay is not None:
+        if replay.operation_type != "owner_freeze" or replay.payload_fingerprint != fingerprint:
+            raise HierarchyError("idempotency_conflict", "Idempotency key belongs to another freeze operation")
+        return replay, False
+
+    subtree_ids = [
+        row[0]
+        for row in db.query(AdminHierarchy.descendant_id)
+        .filter(AdminHierarchy.ancestor_id == target.id)
+        .order_by(AdminHierarchy.descendant_id)
+        .all()
+    ]
+    if target.id not in subtree_ids:
+        subtree_ids.append(target.id)
+        subtree_ids.sort()
+    settings_rows = (
+        db.query(MarzhelpAdminSettings)
+        .filter(MarzhelpAdminSettings.admin_id.in_(subtree_ids))
+        .order_by(MarzhelpAdminSettings.admin_id)
+        .with_for_update()
+        .all()
+    )
+    if {row.admin_id for row in settings_rows} != set(subtree_ids):
+        raise HierarchyError("settings_missing", "Every Admin in frozen subtree requires settings")
+    replay = db.query(AdminSuspensionEvent).filter(
+        AdminSuspensionEvent.idempotency_key == idempotency_key
+    ).with_for_update().one_or_none()
+    if replay is not None:
+        if replay.operation_type != "owner_freeze" or replay.payload_fingerprint != fingerprint:
+            raise HierarchyError("idempotency_conflict", "Idempotency key belongs to another freeze operation")
+        return replay, False
+    if any(
+        row.suspension_event_id
+        and db.query(AdminSuspensionEvent.id).filter(
+            AdminSuspensionEvent.id == row.suspension_event_id,
+            AdminSuspensionEvent.operation_type == "owner_freeze",
+            AdminSuspensionEvent.status == "complete",
+        ).first()
+        for row in settings_rows
+    ):
+        raise HierarchyError("already_frozen", "Admin subtree already has an active Owner Freeze")
+
+    event = AdminSuspensionEvent(
+        admin_id=target.id,
+        actor_admin_id=actor.id,
+        reason_id=reason_id,
+        operation_type="owner_freeze",
+        idempotency_key=idempotency_key,
+        payload_fingerprint=fingerprint,
+        limits_snapshot={"scope": "full_subtree", "note": normalized_note},
+        status="processing",
+    )
+    db.add(event)
+    db.flush()
+    frozen_at = utc_now_naive()
+    for settings in settings_rows:
+        db.add(
+            AdminSuspensionAdmin(
+                event_id=event.id,
+                admin_id=settings.admin_id,
+                previous_account_status_id=settings.account_status_id,
+                previous_suspended_reason_id=settings.suspended_reason_id,
+                previous_suspended_at=settings.suspended_at,
+                previous_suspended_by_admin_id=settings.suspended_by_admin_id,
+                previous_suspension_event_id=settings.suspension_event_id,
+                applied_account_status_id=ACCOUNT_STATUS_IDS[SUSPENDED],
+                restore_status="applied",
+            )
+        )
+        settings.account_status_id = ACCOUNT_STATUS_IDS[SUSPENDED]
+        settings.suspended_reason_id = reason_id
+        settings.suspended_at = frozen_at
+        settings.suspended_by_admin_id = actor.id
+        settings.suspension_event_id = event.id
+
+    last_id = 0
+    while True:
+        users = (
+            db.query(User)
+            .filter(
+                User.admin_id.in_(subtree_ids),
+                User.id > last_id,
+                User.status.in_((UserStatus.active, UserStatus.on_hold)),
+            )
+            .order_by(User.id)
+            .limit(max(1, min(batch_size, 2000)))
+            .with_for_update()
+            .all()
+        )
+        if not users:
+            break
+        for user in users:
+            db.add(AdminSuspensionUser(
+                event_id=event.id,
+                user_id=user.id,
+                previous_status=user.status.value,
+                applied_status=UserStatus.disabled.value,
+                sync_status="applied",
+            ))
+            user.status = UserStatus.disabled
+            last_id = user.id
+        db.flush()
+    event.status = "complete"
+    db.commit()
+    db.refresh(event)
+    return event, True
+
+
+def freeze_admin(
+    db: Session,
+    *,
+    actor: Admin,
+    target: Admin,
+    reason_id: int,
+    idempotency_key: str,
+    note: str | None = None,
+    batch_size: int = 500,
+) -> tuple[AdminSuspensionEvent, bool]:
+    """Retry MySQL deadlock victims with the same idempotency key."""
+    actor_id = actor.id
+    target_id = target.id
+    for attempt in range(3):
+        try:
+            return _freeze_admin_once(
+                db,
+                actor=db.get(Admin, actor_id),
+                target=db.get(Admin, target_id),
+                reason_id=reason_id,
+                idempotency_key=idempotency_key,
+                note=note,
+                batch_size=batch_size,
+            )
+        except OperationalError as exc:
+            db.rollback()
+            mysql_code = getattr(getattr(exc, "orig", None), "args", [None])[0]
+            if mysql_code != 1213 or attempt == 2:
+                raise
+            time.sleep(0.02 * (attempt + 1))
+        except IntegrityError:
+            db.rollback()
+            replay = db.query(AdminSuspensionEvent).filter(
+                AdminSuspensionEvent.idempotency_key == idempotency_key
+            ).one_or_none()
+            expected = _operation_fingerprint(
+                actor_id,
+                target_id,
+                reason_id,
+                (note or "").strip() or None,
+                "full_subtree",
+            )
+            if replay is not None and replay.operation_type == "owner_freeze" and replay.payload_fingerprint == expected:
+                return replay, False
+            raise
+    raise AssertionError("unreachable")
+
+
+def unfreeze_admin(
+    db: Session,
+    *,
+    actor: Admin,
+    target: Admin,
+    idempotency_key: str,
+) -> tuple[AdminSuspensionEvent, int, int, bool]:
+    """Restore only state still owned by the matching Owner Freeze event."""
+    if not is_owner(db, actor):
+        raise HierarchyError("owner_required", "Only Owner can unfreeze an Admin subtree")
+    if not idempotency_key or len(idempotency_key) > 128:
+        raise HierarchyError("invalid_idempotency_key", "A bounded idempotency key is required")
+    replay = db.query(AdminSuspensionEvent).filter(
+        AdminSuspensionEvent.resolved_idempotency_key == idempotency_key
+    ).one_or_none()
+    if replay is not None:
+        if replay.admin_id != target.id or replay.operation_type != "owner_freeze":
+            raise HierarchyError("idempotency_conflict", "Idempotency key belongs to another unfreeze operation")
+        summary = replay.limits_snapshot or {}
+        return (
+            replay,
+            int(summary.get("restored_admins", 0)),
+            int(summary.get("restored_users", 0)),
+            False,
+        )
+    target_settings = (
+        db.query(MarzhelpAdminSettings)
+        .filter(MarzhelpAdminSettings.admin_id == target.id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if target_settings is None or target_settings.suspension_event_id is None:
+        raise HierarchyError("no_active_freeze", "Admin has no active Owner Freeze")
+    event = (
+        db.query(AdminSuspensionEvent)
+        .filter(AdminSuspensionEvent.id == target_settings.suspension_event_id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if event is None or event.operation_type != "owner_freeze" or event.status != "complete":
+        raise HierarchyError("no_active_freeze", "Admin has no active Owner Freeze")
+    snapshots = (
+        db.query(AdminSuspensionAdmin, MarzhelpAdminSettings)
+        .join(MarzhelpAdminSettings, MarzhelpAdminSettings.admin_id == AdminSuspensionAdmin.admin_id)
+        .filter(AdminSuspensionAdmin.event_id == event.id)
+        .order_by(AdminSuspensionAdmin.admin_id)
+        .with_for_update()
+        .all()
+    )
+    restored_admins = 0
+    for snapshot, settings in snapshots:
+        if settings.suspension_event_id == event.id:
+            settings.account_status_id = snapshot.previous_account_status_id
+            settings.suspended_reason_id = snapshot.previous_suspended_reason_id
+            settings.suspended_at = snapshot.previous_suspended_at
+            settings.suspended_by_admin_id = snapshot.previous_suspended_by_admin_id
+            settings.suspension_event_id = snapshot.previous_suspension_event_id
+            snapshot.restore_status = "restored"
+            restored_admins += 1
+        else:
+            snapshot.restore_status = "skipped_changed"
+    user_rows = (
+        db.query(AdminSuspensionUser, User)
+        .join(User, User.id == AdminSuspensionUser.user_id)
+        .filter(AdminSuspensionUser.event_id == event.id, AdminSuspensionUser.sync_status == "applied")
+        .order_by(User.id)
+        .with_for_update()
+        .all()
+    )
+    restored_users = 0
+    for snapshot, user in user_rows:
+        if user.status == UserStatus.disabled:
+            user.status = UserStatus(snapshot.previous_status)
+            snapshot.sync_status = "restored"
+            restored_users += 1
+        else:
+            snapshot.sync_status = "skipped_changed"
+    event.status = "resolved"
+    event.resolved_at = utc_now_naive()
+    event.resolved_by_admin_id = actor.id
+    event.resolved_idempotency_key = idempotency_key
+    event.limits_snapshot = {
+        **(event.limits_snapshot or {}),
+        "restored_admins": restored_admins,
+        "restored_users": restored_users,
+    }
+    db.commit()
+    db.refresh(event)
+    return event, restored_admins, restored_users, True
 
 
 def suspend_admin(

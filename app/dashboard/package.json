@@ -5,6 +5,8 @@
   "scripts": {
     "dev": "vite --port 3000",
     "build": "tsc && vite build",
+    "test:plan-inbounds": "node scripts/test-plan-inbounds.cjs",
+    "test:admin-hierarchy": "node scripts/test-admin-hierarchy-authorization.cjs",
     "preview": "vite preview --port 3000",
     "gen:theme-typings": "chakra-cli tokens ./chakra.config.ts",
     "postinstall": "npm run gen:theme-typings"

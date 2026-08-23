@@ -10,13 +10,16 @@ from sqlalchemy.orm import sessionmaker
 from app.db.base import Base
 from app.db.models import (
     Admin,
+    AdminHierarchySettings,
     MarzhelpAccountingTransaction,
     MarzhelpAdminSettings,
     MarzhelpAdminInboundPermission,
     MarzhelpAdminUserLimitPermission,
     MarzhelpDeletedUser,
+    NextPlan,
     Proxy,
     ProxyInbound,
+    SystemOwner,
     User,
 )
 from app.db import crud
@@ -72,6 +75,23 @@ def plan(data_limit=10 * GB, expire=None, on_hold_expire_duration=None, next_pla
 )
 def test_delete_refund_formula(used, expected):
     assert policy.calculate_delete_refund(50 * GB, used) == expected
+
+
+def test_legacy_sudo_remains_credit_exempt_when_hierarchy_is_disabled(session):
+    sudo = Admin(username="legacy-sudo", hashed_password="x", is_sudo=True)
+    session.add(sudo)
+    session.flush()
+    settings = MarzhelpAdminSettings(
+        admin_id=sudo.id,
+        total_traffic=10 * GB,
+        calculate_volume="created_traffic",
+    )
+    session.add(settings)
+    session.commit()
+
+    assert policy.validate_create(session, sudo.id, plan(data_limit=10 * GB)) is None
+    session.refresh(settings)
+    assert settings.used_traffic == 0
 
 
 def test_existing_user_count_limit_blocks_create_and_delete_frees_slot(session):
@@ -154,8 +174,10 @@ def test_delete_is_idempotent_records_usage_and_never_refunds_credit(session):
     assert session.query(MarzhelpAccountingTransaction).count() == 1
 
 
-def test_create_renewal_and_time_change_share_one_allowance(session):
+def test_ordinary_volume_and_time_edits_never_consume_renewal_quota(session):
     admin, settings = add_admin(session, allowance=3)
+    settings.renewal_remaining = 0
+    settings.renewals_used = 4
     policy.validate_create(session, admin.id, plan())
     session.commit()
     assert settings.user_limit == 2
@@ -173,10 +195,12 @@ def test_create_renewal_and_time_change_share_one_allowance(session):
     session.commit()
 
     renewal, consumed = policy.validate_update(session, user, plan(data_limit=2 * GB))
-    assert renewal and consumed
+    assert not renewal and consumed
     user.data_limit = 2 * GB
     session.commit()
-    assert settings.user_limit == 1
+    assert settings.user_limit == 2
+    assert settings.renewal_remaining == 0
+    assert settings.renewals_used == 4
 
     renewal, consumed = policy.validate_update(
         session,
@@ -185,9 +209,82 @@ def test_create_renewal_and_time_change_share_one_allowance(session):
     )
     assert not renewal and consumed
     session.commit()
-    assert settings.user_limit == 0
-    with pytest.raises(policy.MarzhelpPolicyError, match="allowance"):
-        policy.validate_create(session, admin.id, plan())
+    assert settings.user_limit == 1
+    assert settings.renewal_remaining == 0
+    assert settings.renewals_used == 4
+
+
+def test_explicit_renewal_enforces_and_consumes_renewal_quota_once(session):
+    admin, settings = add_admin(
+        session,
+        allowance=2,
+        renewal_remaining=1,
+        renewals_used=0,
+    )
+    user = User(
+        username="explicit-renewal",
+        admin_id=admin.id,
+        status=UserStatus.active,
+        data_limit=GB,
+        used_traffic=0,
+    )
+    session.add(user)
+    session.commit()
+
+    renewal, consumed = policy.validate_update(
+        session,
+        user,
+        plan(data_limit=2 * GB),
+        operation=policy.UserUpdateOperation.renew,
+    )
+
+    assert renewal and consumed
+    assert settings.renewal_remaining == 0
+    assert settings.renewals_used == 1
+    assert settings.user_limit == 1
+
+    session.rollback()
+    settings.renewal_remaining = 0
+    session.commit()
+    with pytest.raises(policy.MarzhelpPolicyError) as raised:
+        policy.validate_update(
+            session,
+            user,
+            plan(data_limit=3 * GB),
+            operation=policy.UserUpdateOperation.renew,
+        )
+    assert raised.value.code == "renewal_quota_exhausted"
+
+
+def test_next_plan_activation_is_an_explicit_renewal(session):
+    admin, settings = add_admin(
+        session,
+        allowance=2,
+        renewal_remaining=0,
+        renewals_used=3,
+    )
+    user = User(
+        username="next-plan-renewal",
+        admin_id=admin.id,
+        status=UserStatus.active,
+        data_limit=GB,
+        used_traffic=0,
+    )
+    user.next_plan = NextPlan(data_limit=2 * GB, expire=None)
+    session.add(user)
+    session.commit()
+
+    with pytest.raises(policy.MarzhelpPolicyError) as raised:
+        policy.validate_next_plan_activation(session, user)
+    assert raised.value.code == "renewal_quota_exhausted"
+    session.rollback()
+
+    settings.renewal_remaining = 1
+    session.commit()
+    assert policy.validate_next_plan_activation(session, user)
+    assert settings.renewal_remaining == 0
+    assert settings.renewals_used == 4
+    assert settings.user_limit == 1
 
 
 def test_failed_operation_rollback_does_not_consume_allowance(session):
@@ -244,8 +341,13 @@ def test_unlimited_traffic_rejected_on_create_edit_and_next_plan(session):
         )
 
 
-def test_conversion_to_unlimited_counts_as_renewal(session):
-    admin, _ = add_admin(session, allowance=1)
+def test_conversion_to_unlimited_is_an_ordinary_edit_not_renewal(session):
+    admin, settings = add_admin(
+        session,
+        allowance=1,
+        renewal_remaining=0,
+        renewals_used=2,
+    )
     user = User(
         username="upgrade-to-unlimited",
         admin_id=admin.id,
@@ -258,9 +360,39 @@ def test_conversion_to_unlimited_counts_as_renewal(session):
 
     renewal, consumed = policy.validate_update(session, user, plan(data_limit=0))
 
-    assert renewal and consumed
-    settings = session.get(MarzhelpAdminSettings, admin.id)
-    assert settings.user_limit == 0
+    assert not renewal and consumed
+    assert settings.user_limit == 1
+    assert settings.renewal_remaining == 0
+    assert settings.renewals_used == 2
+
+
+def test_only_real_owner_is_policy_exempt_when_hierarchy_is_enabled(session):
+    owner = Admin(username="policy-owner", hashed_password="x", is_sudo=True)
+    delegated_sudo = Admin(username="policy-super", hashed_password="x", is_sudo=True)
+    session.add_all((owner, delegated_sudo))
+    session.flush()
+    session.add_all(
+        (
+            AdminHierarchySettings(id=1, enabled=True, max_depth=64),
+            SystemOwner(id=1, admin_id=owner.id),
+            MarzhelpAdminSettings(
+                admin_id=owner.id,
+                total_traffic=0,
+                calculate_volume="created_traffic",
+            ),
+            MarzhelpAdminSettings(
+                admin_id=delegated_sudo.id,
+                total_traffic=0,
+                calculate_volume="created_traffic",
+            ),
+        )
+    )
+    session.commit()
+
+    assert policy.validate_create(session, owner.id, plan(data_limit=GB)) is None
+    with pytest.raises(policy.MarzhelpPolicyError) as raised:
+        policy.validate_create(session, delegated_sudo.id, plan(data_limit=GB))
+    assert raised.value.code == "traffic_exhausted"
 
 
 def test_allocated_credit_uses_persistent_non_refundable_counter(session):

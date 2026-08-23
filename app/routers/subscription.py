@@ -10,6 +10,7 @@ from app.models.proxy import ProxySettings, ProxyTypes
 from app.models.user import SubscriptionUserResponse, UserResponse
 from app.subscription.share import encode_title, generate_subscription, generate_v2ray_links
 from app.templates import render_template
+from app.utils import admin_plans
 from config import (
     SUB_PROFILE_TITLE,
     SUB_SUPPORT_URL,
@@ -36,20 +37,24 @@ client_config = {
 router = APIRouter(tags=['Subscription'], prefix=f'/{XRAY_SUBSCRIPTION_PATH}')
 
 
-def _subscription_user(dbuser) -> UserResponse:
-    user = UserResponse.model_validate(dbuser)
+def _subscription_user(
+    dbuser,
+    host_scope: dict[str, set[int]] | None,
+) -> UserResponse:
+    user = UserResponse.model_validate(dbuser, context={"host_scope": host_scope})
     credentials = getattr(dbuser, "_device_slot_credentials", None)
     if credentials:
         user.proxies = {
             ProxyTypes(protocol): ProxySettings.from_dict(ProxyTypes(protocol), settings)
             for protocol, settings in credentials.items()
         }
-        user.links = generate_v2ray_links(
-            user.proxies,
-            user.inbounds,
-            extra_data=user.model_dump(),
-            reverse=False,
-        )
+    user.links = generate_v2ray_links(
+        user.proxies,
+        user.inbounds,
+        extra_data=user.model_dump(),
+        reverse=False,
+        host_scope=host_scope,
+    )
     return user
 
 
@@ -72,7 +77,8 @@ def user_subscription(
     user_agent: str = Header(default="")
 ):
     """Provides a subscription link based on the user agent (Clash, V2Ray, etc.)."""
-    user = _subscription_user(dbuser)
+    host_scope = admin_plans.subscription_host_scope(db, dbuser)
+    user = _subscription_user(dbuser, host_scope)
 
     accept_header = request.headers.get("Accept", "")
     if "text/html" in accept_header:
@@ -97,72 +103,74 @@ def user_subscription(
     }
 
     if re.match(r'^([Cc]lash-verge|[Cc]lash[-\.]?[Mm]eta|[Ff][Ll][Cc]lash|[Mm]ihomo)', user_agent):
-        conf = generate_subscription(user=user, config_format="clash-meta", as_base64=False, reverse=False)
+        conf = generate_subscription(user=user, config_format="clash-meta", as_base64=False, reverse=False, host_scope=host_scope)
         return Response(content=conf, media_type="text/yaml", headers=response_headers)
 
     elif re.match(r'^([Cc]lash|[Ss]tash)', user_agent):
-        conf = generate_subscription(user=user, config_format="clash", as_base64=False, reverse=False)
+        conf = generate_subscription(user=user, config_format="clash", as_base64=False, reverse=False, host_scope=host_scope)
         return Response(content=conf, media_type="text/yaml", headers=response_headers)
 
     elif re.match(r'^(SFA|SFI|SFM|SFT|[Kk]aring|[Hh]iddify[Nn]ext)', user_agent):
-        conf = generate_subscription(user=user, config_format="sing-box", as_base64=False, reverse=False)
+        conf = generate_subscription(user=user, config_format="sing-box", as_base64=False, reverse=False, host_scope=host_scope)
         return Response(content=conf, media_type="application/json", headers=response_headers)
 
     elif re.match(r'^(SS|SSR|SSD|SSS|Outline|Shadowsocks|SSconf)', user_agent):
-        conf = generate_subscription(user=user, config_format="outline", as_base64=False, reverse=False)
+        conf = generate_subscription(user=user, config_format="outline", as_base64=False, reverse=False, host_scope=host_scope)
         return Response(content=conf, media_type="application/json", headers=response_headers)
 
     elif (USE_CUSTOM_JSON_DEFAULT or USE_CUSTOM_JSON_FOR_V2RAYN) and re.match(r'^v2rayN/(\d+\.\d+)', user_agent):
         version_str = re.match(r'^v2rayN/(\d+\.\d+)', user_agent).group(1)
         if LooseVersion(version_str) >= LooseVersion("6.40"):
-            conf = generate_subscription(user=user, config_format="v2ray-json", as_base64=False, reverse=False)
+            conf = generate_subscription(user=user, config_format="v2ray-json", as_base64=False, reverse=False, host_scope=host_scope)
             return Response(content=conf, media_type="application/json", headers=response_headers)
         else:
-            conf = generate_subscription(user=user, config_format="v2ray", as_base64=True, reverse=False)
+            conf = generate_subscription(user=user, config_format="v2ray", as_base64=True, reverse=False, host_scope=host_scope)
             return Response(content=conf, media_type="text/plain", headers=response_headers)
 
     elif (USE_CUSTOM_JSON_DEFAULT or USE_CUSTOM_JSON_FOR_V2RAYNG) and re.match(r'^v2rayNG/(\d+\.\d+\.\d+)', user_agent):
         version_str = re.match(r'^v2rayNG/(\d+\.\d+\.\d+)', user_agent).group(1)
         if LooseVersion(version_str) >= LooseVersion("1.8.29"):
-            conf = generate_subscription(user=user, config_format="v2ray-json", as_base64=False, reverse=False)
+            conf = generate_subscription(user=user, config_format="v2ray-json", as_base64=False, reverse=False, host_scope=host_scope)
             return Response(content=conf, media_type="application/json", headers=response_headers)
         elif LooseVersion(version_str) >= LooseVersion("1.8.18"):
-            conf = generate_subscription(user=user, config_format="v2ray-json", as_base64=False, reverse=True)
+            conf = generate_subscription(user=user, config_format="v2ray-json", as_base64=False, reverse=True, host_scope=host_scope)
             return Response(content=conf, media_type="application/json", headers=response_headers)
         else:
-            conf = generate_subscription(user=user, config_format="v2ray", as_base64=True, reverse=False)
+            conf = generate_subscription(user=user, config_format="v2ray", as_base64=True, reverse=False, host_scope=host_scope)
             return Response(content=conf, media_type="text/plain", headers=response_headers)
 
     elif re.match(r'^[Ss]treisand', user_agent):
         if USE_CUSTOM_JSON_DEFAULT or USE_CUSTOM_JSON_FOR_STREISAND:
-            conf = generate_subscription(user=user, config_format="v2ray-json", as_base64=False, reverse=False)
+            conf = generate_subscription(user=user, config_format="v2ray-json", as_base64=False, reverse=False, host_scope=host_scope)
             return Response(content=conf, media_type="application/json", headers=response_headers)
         else:
-            conf = generate_subscription(user=user, config_format="v2ray", as_base64=True, reverse=False)
+            conf = generate_subscription(user=user, config_format="v2ray", as_base64=True, reverse=False, host_scope=host_scope)
             return Response(content=conf, media_type="text/plain", headers=response_headers)
 
     elif (USE_CUSTOM_JSON_DEFAULT or USE_CUSTOM_JSON_FOR_HAPP) and re.match(r'^Happ/(\d+\.\d+\.\d+)', user_agent):
         version_str = re.match(r'^Happ/(\d+\.\d+\.\d+)', user_agent).group(1)
         if LooseVersion(version_str) >= LooseVersion("1.63.1"):
-            conf = generate_subscription(user=user, config_format="v2ray-json", as_base64=False, reverse=False)
+            conf = generate_subscription(user=user, config_format="v2ray-json", as_base64=False, reverse=False, host_scope=host_scope)
             return Response(content=conf, media_type="application/json", headers=response_headers)
         else:
-            conf = generate_subscription(user=user, config_format="v2ray", as_base64=True, reverse=False)
+            conf = generate_subscription(user=user, config_format="v2ray", as_base64=True, reverse=False, host_scope=host_scope)
             return Response(content=conf, media_type="text/plain", headers=response_headers)
 
 
 
     else:
-        conf = generate_subscription(user=user, config_format="v2ray", as_base64=True, reverse=False)
+        conf = generate_subscription(user=user, config_format="v2ray", as_base64=True, reverse=False, host_scope=host_scope)
         return Response(content=conf, media_type="text/plain", headers=response_headers)
 
 
 @router.get("/{token}/info", response_model=SubscriptionUserResponse)
 def user_subscription_info(
     dbuser: UserResponse = Depends(get_validated_sub),
+    db: Session = Depends(get_db),
 ):
     """Retrieves detailed information about the user's subscription."""
-    return SubscriptionUserResponse.model_validate(_subscription_user(dbuser))
+    host_scope = admin_plans.subscription_host_scope(db, dbuser)
+    return SubscriptionUserResponse.model_validate(_subscription_user(dbuser, host_scope))
 
 
 @router.get("/{token}/usage")
@@ -189,7 +197,8 @@ def user_subscription_with_client_type(
     user_agent: str = Header(default="")
 ):
     """Provides a subscription link based on the specified client type (e.g., Clash, V2Ray)."""
-    user = _subscription_user(dbuser)
+    host_scope = admin_plans.subscription_host_scope(db, dbuser)
+    user = _subscription_user(dbuser, host_scope)
     crud.update_user_sub(db, dbuser, user_agent)
 
     response_headers = {
@@ -208,6 +217,7 @@ def user_subscription_with_client_type(
     conf = generate_subscription(user=user,
                                  config_format=config["config_format"],
                                  as_base64=config["as_base64"],
-                                 reverse=config["reverse"])
+                                 reverse=config["reverse"],
+                                 host_scope=host_scope)
 
     return Response(content=conf, media_type=config["media_type"], headers=response_headers)

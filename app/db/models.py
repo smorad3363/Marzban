@@ -60,12 +60,18 @@ class Admin(Base):
 
     id = Column(Integer, primary_key=True)
     username = Column(String(34), unique=True, index=True)
+    # Stable namespace for customer usernames. Nullable during the expand/rollback
+    # window so the previous application can still create Admin rows.
+    user_namespace_prefix = Column(String(16), nullable=True, unique=True)
     hashed_password = Column(String(128))
     users = relationship("User", back_populates="admin")
     created_at = Column(DateTime, default=datetime.utcnow)
     is_sudo = Column(Boolean, default=False)
     password_reset_at = Column(DateTime, nullable=True)
     telegram_id = Column(BigInteger, nullable=True, default=None)
+    # Nullable for current-schema upgrade and old bootstrap compatibility. New
+    # dashboard/API-created Admins require a non-empty value at validation time.
+    phone = Column(String(32), nullable=True, default=None)
     discord_webhook = Column(String(1024), nullable=True, default=None)
     users_usage = Column(BigInteger, nullable=False, default=0)
     usage_logs = relationship("AdminUsageLogs", back_populates="admin")
@@ -181,6 +187,7 @@ class AdminCreditTransfer(Base):
         Index("ix_admin_credit_from_created", "from_admin_id", "created_at", "id"),
         Index("ix_admin_credit_to_created", "to_admin_id", "created_at", "id"),
         Index("ix_admin_credit_actor_created", "actor_admin_id", "created_at", "id"),
+        Index("ix_admin_credit_adjusted_created", "adjusted_admin_id", "created_at", "id"),
         CheckConstraint("amount > 0", name="ck_admin_credit_transfer_amount_positive"),
     )
 
@@ -188,11 +195,104 @@ class AdminCreditTransfer(Base):
     from_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=True)
     to_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=True)
     actor_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
+    adjusted_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=True)
+    resource = Column(String(32), nullable=True)
     amount = Column(BigInteger, nullable=False)
+    delta = Column(BigInteger, nullable=True)
+    balance_before = Column(BigInteger, nullable=True)
+    balance_after = Column(BigInteger, nullable=True)
+    source_delegated_before = Column(BigInteger, nullable=True)
+    source_delegated_after = Column(BigInteger, nullable=True)
     operation_type = Column(String(32), nullable=False)
     idempotency_key = Column(String(128), nullable=False, unique=True)
     created_at = Column(DateTime, nullable=False, default=utc_now_naive)
     note = Column(String(512), nullable=True)
+
+
+class AllocatedTrafficRefundRequest(Base):
+    __tablename__ = "allocated_traffic_refund_requests"
+    __table_args__ = (
+        Index(
+            "ix_alloc_refund_reviewer_status_requested",
+            "reviewer_admin_id",
+            "status",
+            "requested_at",
+            "id",
+        ),
+        Index(
+            "ix_alloc_refund_requester_requested",
+            "requester_admin_id",
+            "requested_at",
+            "id",
+        ),
+        CheckConstraint(
+            "status IN ('PENDING','APPROVED','REJECTED','CANCELLED')",
+            name="ck_alloc_refund_status",
+        ),
+        CheckConstraint(
+            "requested_refund_amount > 0",
+            name="ck_alloc_refund_amount_positive",
+        ),
+    )
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    requester_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
+    account_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
+    reviewer_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
+    target_user_id = Column(Integer, nullable=False)
+    target_username = Column(String(34), nullable=False)
+    snapshot_billing_mode = Column(String(32), nullable=False)
+    snapshot_plan_id = Column(BigInteger, nullable=True)
+    snapshot_plan_version_id = Column(BigInteger, nullable=True)
+    snapshot_plan_name = Column(String(128), nullable=True)
+    snapshot_allocated_quota = Column(BigInteger, nullable=False)
+    snapshot_current_quota = Column(BigInteger, nullable=False)
+    snapshot_used_traffic = Column(BigInteger, nullable=False)
+    snapshot_remaining_traffic = Column(BigInteger, nullable=False)
+    snapshot_user_created_at = Column(DateTime, nullable=True)
+    snapshot_user_expire_at = Column(DateTime, nullable=True)
+    snapshot_pre_delete_status = Column(String(32), nullable=False)
+    requested_refund_amount = Column(BigInteger, nullable=False)
+    request_reason = Column(String(512), nullable=False)
+    request_note = Column(String(1024), nullable=True)
+    correlation_id = Column(String(128), nullable=False, index=True)
+    idempotency_key = Column(String(128), nullable=False, unique=True)
+    status = Column(String(16), nullable=False, default="PENDING")
+    requested_at = Column(DateTime, nullable=False, default=utc_now_naive)
+    decided_at = Column(DateTime, nullable=True)
+    decided_by_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=True)
+    decision_explanation = Column(String(1024), nullable=True)
+    ledger_transfer_id = Column(
+        BigInteger,
+        ForeignKey("admin_credit_transfers.id", ondelete="RESTRICT"),
+        nullable=True,
+        unique=True,
+    )
+
+
+class AllocatedTrafficRefundEvent(Base):
+    __tablename__ = "allocated_traffic_refund_events"
+    __table_args__ = (
+        Index("ix_alloc_refund_event_request_created", "request_id", "created_at", "id"),
+        CheckConstraint(
+            "to_status IN ('PENDING','APPROVED','REJECTED','CANCELLED')",
+            name="ck_alloc_refund_event_status",
+        ),
+    )
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    request_id = Column(
+        BigInteger,
+        ForeignKey("allocated_traffic_refund_requests.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    actor_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
+    from_status = Column(String(16), nullable=True)
+    to_status = Column(String(16), nullable=False)
+    explanation = Column(String(1024), nullable=True)
+    operation_key = Column(String(128), nullable=False, unique=True)
+    correlation_id = Column(String(128), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=utc_now_naive)
 
 
 class AdminApiToken(Base):
@@ -223,10 +323,19 @@ class AdminSuspensionEvent(Base):
     admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
     actor_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
     reason_id = Column(SmallInteger, ForeignKey("admin_suspension_reasons.id"), nullable=False)
+    operation_type = Column(String(32), nullable=False, default="suspension")
+    idempotency_key = Column(String(128), nullable=True, unique=True)
+    payload_fingerprint = Column(String(64), nullable=True)
     limits_snapshot = Column(JSON, nullable=True)
     status = Column(String(24), nullable=False, default="processing")
     started_at = Column(DateTime, nullable=False, default=utc_now_naive)
     resolved_at = Column(DateTime, nullable=True)
+    resolved_by_admin_id = Column(
+        Integer,
+        ForeignKey("admins.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    resolved_idempotency_key = Column(String(128), nullable=True, unique=True)
 
 
 class AdminSuspensionUser(Base):
@@ -246,6 +355,75 @@ class AdminSuspensionUser(Base):
     sync_status = Column(String(24), nullable=False, default="pending")
 
 
+class AdminSuspensionAdmin(Base):
+    """Exact pre-freeze admin state, scoped to one immutable freeze event."""
+
+    __tablename__ = "admin_suspension_admins"
+    __table_args__ = (
+        Index("ix_admin_suspension_admin_cursor", "event_id", "restore_status", "admin_id"),
+    )
+
+    event_id = Column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        ForeignKey("admin_suspension_events.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), primary_key=True)
+    previous_account_status_id = Column(SmallInteger, nullable=False)
+    previous_suspended_reason_id = Column(SmallInteger, nullable=True)
+    previous_suspended_at = Column(DateTime, nullable=True)
+    previous_suspended_by_admin_id = Column(Integer, nullable=True)
+    previous_suspension_event_id = Column(BigInteger, nullable=True)
+    applied_account_status_id = Column(SmallInteger, nullable=False)
+    restore_status = Column(String(24), nullable=False, default="applied")
+
+
+class AdminReferralAttribution(Base):
+    """Current referral attribution only; this table never grants resources."""
+
+    __tablename__ = "admin_referral_attributions"
+    __table_args__ = (
+        CheckConstraint("referrer_admin_id <> referred_admin_id", name="ck_admin_referral_no_self"),
+        CheckConstraint("rate_bps >= 0 AND rate_bps <= 10000", name="ck_admin_referral_rate"),
+        Index("ix_admin_referral_referrer_referred", "referrer_admin_id", "referred_admin_id"),
+    )
+
+    referred_admin_id = Column(
+        Integer,
+        ForeignKey("admins.id", ondelete="RESTRICT"),
+        primary_key=True,
+    )
+    referrer_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
+    rate_bps = Column(Integer, nullable=False, default=0)
+    created_by_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
+    updated_by_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=utc_now_naive)
+    updated_at = Column(DateTime, nullable=False, default=utc_now_naive, onupdate=utc_now_naive)
+
+
+class AdminReferralEvent(Base):
+    """Immutable referral audit history with idempotent mutation keys."""
+
+    __tablename__ = "admin_referral_events"
+    __table_args__ = (
+        Index("ix_admin_referral_event_referred_created", "referred_admin_id", "created_at", "id"),
+        Index("ix_admin_referral_event_referrer_created", "new_referrer_admin_id", "created_at", "id"),
+    )
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    actor_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
+    referred_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
+    previous_referrer_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=True)
+    new_referrer_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=True)
+    previous_rate_bps = Column(Integer, nullable=True)
+    new_rate_bps = Column(Integer, nullable=True)
+    operation_type = Column(String(16), nullable=False)
+    idempotency_key = Column(String(128), nullable=False, unique=True)
+    payload_fingerprint = Column(String(64), nullable=False)
+    note = Column(String(512), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utc_now_naive)
+
+
 class AdminBulkJob(Base):
     __tablename__ = "admin_bulk_jobs"
     __table_args__ = (
@@ -256,16 +434,70 @@ class AdminBulkJob(Base):
     id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
     actor_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
     target_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
+    # Stage 8 expands the original hierarchy-disable cursor into a durable
+    # multi-target job while retaining the legacy columns for rollback safety.
+    job_kind = Column(String(24), nullable=False, default="LEGACY_DISABLE")
+    target_scope = Column(String(40), nullable=True)
+    selected_admin_ids = Column(JSON, nullable=True)
+    payload_fingerprint = Column(String(64), nullable=True)
     operation = Column(String(32), nullable=False)
+    amount = Column(BigInteger, nullable=True)
+    days_amount = Column(Integer, nullable=True)
+    note = Column(String(512), nullable=True)
     include_subtree = Column(Boolean, nullable=False, default=False)
     status = Column(String(24), nullable=False, default="pending")
     total_count = Column(BigInteger, nullable=False, default=0)
     processed_count = Column(BigInteger, nullable=False, default=0)
+    success_count = Column(BigInteger, nullable=False, default=0)
+    failed_count = Column(BigInteger, nullable=False, default=0)
+    skipped_count = Column(BigInteger, nullable=False, default=0)
     last_user_id = Column(Integer, nullable=True)
     idempotency_key = Column(String(128), nullable=False, unique=True)
     error = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False, default=utc_now_naive)
     updated_at = Column(DateTime, nullable=False, default=utc_now_naive, onupdate=utc_now_naive)
+    completed_at = Column(DateTime, nullable=True)
+
+
+class AdminBulkJobTarget(Base):
+    """Immutable target snapshot plus per-target execution/audit result."""
+
+    __tablename__ = "admin_bulk_job_targets"
+    __table_args__ = (
+        Index(
+            "ix_admin_bulk_job_targets_pending",
+            "job_id",
+            "target_type",
+            "status",
+            "retryable",
+            "sequence",
+        ),
+        Index("ix_admin_bulk_job_targets_report", "job_id", "sequence"),
+        Index("ix_admin_bulk_job_targets_target", "target_type", "target_id", "job_id"),
+        UniqueConstraint("idempotency_key", name="uq_admin_bulk_job_target_idempotency"),
+    )
+
+    job_id = Column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        ForeignKey("admin_bulk_jobs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    target_type = Column(String(16), primary_key=True)
+    target_id = Column(Integer, primary_key=True)
+    sequence = Column(Integer, nullable=False)
+    target_username = Column(String(34), nullable=False)
+    owner_admin_id = Column(Integer, nullable=True)
+    idempotency_key = Column(String(128), nullable=False)
+    payload_fingerprint = Column(String(64), nullable=False)
+    status = Column(String(16), nullable=False, default="PENDING")
+    attempts = Column(Integer, nullable=False, default=0)
+    retryable = Column(Boolean, nullable=False, default=True)
+    error_code = Column(String(64), nullable=True)
+    error_message = Column(String(512), nullable=True)
+    result_details = Column(JSON, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utc_now_naive)
+    updated_at = Column(DateTime, nullable=False, default=utc_now_naive, onupdate=utc_now_naive)
+    completed_at = Column(DateTime, nullable=True)
 
 
 class AdminPlanCategory(Base):
@@ -317,6 +549,8 @@ class AdminUserPlan(Base):
     )
     name = Column(String(128), nullable=False)
     description = Column(String(512), nullable=True)
+    # Trial is authoritative metadata. Names and notes must never classify users.
+    is_trial = Column(Boolean, nullable=False, default=False)
     current_version_id = Column(BigInteger().with_variant(Integer, "sqlite"), nullable=True)
     archived_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, nullable=False, default=utc_now_naive)
@@ -359,6 +593,20 @@ class AdminUserPlanInbound(Base):
     inbound_tag = Column(String(256), primary_key=True)
 
 
+class AdminUserPlanHost(Base):
+    __tablename__ = "admin_user_plan_hosts"
+
+    version_id = Column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        ForeignKey("admin_user_plan_versions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    inbound_tag = Column(String(256), primary_key=True)
+    # No FK to mutable hosts: retain exact selection evidence after deletion and
+    # let runtime validation fail closed instead of broadening scope.
+    host_id = Column(Integer, primary_key=True)
+
+
 class AdminUserPlanAccess(Base):
     __tablename__ = "admin_user_plan_access"
     __table_args__ = (
@@ -378,6 +626,12 @@ class UserPlanAssignment(Base):
     __tablename__ = "user_plan_assignments"
     __table_args__ = (
         Index("ix_user_plan_assignments_user_created", "user_id", "created_at", "id"),
+        Index(
+            "ix_user_plan_assignments_trial_operation_user",
+            "is_trial",
+            "operation_type",
+            "user_id",
+        ),
     )
 
     id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
@@ -386,7 +640,25 @@ class UserPlanAssignment(Base):
     version_id = Column(BigInteger().with_variant(Integer, "sqlite"), ForeignKey("admin_user_plan_versions.id"), nullable=False)
     actor_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
     operation_type = Column(String(24), nullable=False)
+    # Immutable snapshot of the Plan kind at operation time.
+    is_trial = Column(Boolean, nullable=False, default=False)
     idempotency_key = Column(String(128), nullable=False, unique=True)
+    created_at = Column(DateTime, nullable=False, default=utc_now_naive)
+
+
+class TrialCleanupOperation(Base):
+    __tablename__ = "trial_cleanup_operations"
+    __table_args__ = (
+        Index("ix_trial_cleanup_actor_created", "actor_admin_id", "created_at", "id"),
+    )
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    actor_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
+    expired_before = Column(DateTime, nullable=False)
+    payload_fingerprint = Column(String(64), nullable=False)
+    idempotency_key = Column(String(128), nullable=False, unique=True)
+    deleted_count = Column(Integer, nullable=False)
+    deleted_usernames = Column(JSON, nullable=False)
     created_at = Column(DateTime, nullable=False, default=utc_now_naive)
 
 
@@ -460,6 +732,9 @@ class MarzhelpAdminSettings(Base):
     __tablename__ = "marzhelp_admin_settings"
 
     admin_id = Column(Integer, ForeignKey("admins.id"), primary_key=True)
+    # Existing rows are deliberately kept in compatibility mode. Only Owner may
+    # assign one of the explicit commercial modes through the billing service.
+    billing_mode = Column(String(32), nullable=True, default="LEGACY_COMPAT")
     total_traffic = Column(BigInteger, nullable=True)
     delegated_traffic = Column(BigInteger, nullable=False, default=0)
     used_traffic = Column(BigInteger, nullable=False, default=0)
@@ -479,6 +754,10 @@ class MarzhelpAdminSettings(Base):
     renewals_used = Column(BigInteger, nullable=False, default=0)
     renewal_enabled = Column(Boolean, nullable=False, default=True)
     renewal_remaining = Column(BigInteger, nullable=True)
+    # Remaining independently granted Trial creations. Existing accounts start
+    # fail-closed at zero; Owner adjustments are recorded in the resource ledger.
+    trial_quota = Column(BigInteger, nullable=False, default=0)
+    trials_used = Column(BigInteger, nullable=False, default=0)
     user_creation_mode_id = Column(
         SmallInteger,
         ForeignKey("admin_user_creation_modes.id"),
@@ -855,6 +1134,12 @@ class MarzhelpAccountingTransaction(Base):
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        Index("ix_users_created_at_id", "created_at", "id"),
+        Index("ix_users_admin_status", "admin_id", "status"),
+        Index("ix_users_status_created_id", "status", "created_at", "id"),
+        Index("ix_users_admin_created_id", "admin_id", "created_at", "id"),
+    )
 
     id = Column(Integer, primary_key=True)
     username = Column(String(34, collation='NOCASE'), unique=True, index=True)
@@ -1182,3 +1467,43 @@ class NotificationReminder(Base):
     threshold = Column(Integer, nullable=True)
     expires_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class TelegramOutbox(Base):
+    __tablename__ = "telegram_outbox"
+    __table_args__ = (
+        UniqueConstraint("idempotency_key", name="uq_telegram_outbox_idempotency"),
+        Index("ix_telegram_outbox_dispatch", "status", "next_attempt_at", "id"),
+        Index("ix_telegram_outbox_retention", "status", "completed_at", "id"),
+    )
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    idempotency_key = Column(String(191), nullable=False)
+    event_type = Column(String(64), nullable=False)
+    payload = Column(JSON, nullable=False)
+    status = Column(String(16), nullable=False, default="PENDING", server_default="PENDING")
+    attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    next_attempt_at = Column(DateTime, nullable=False, default=utc_now_naive)
+    last_error_code = Column(String(64), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utc_now_naive)
+    completed_at = Column(DateTime, nullable=True)
+
+
+class BackupArtifact(Base):
+    __tablename__ = "backup_artifacts"
+    __table_args__ = (
+        UniqueConstraint("period_key", name="uq_backup_artifacts_period"),
+        Index("ix_backup_artifacts_delivery", "delivery_status", "created_at", "id"),
+    )
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    period_key = Column(String(32), nullable=False)
+    database_name = Column(String(128), nullable=False)
+    encrypted_path = Column(String(1024), nullable=True)
+    size_bytes = Column(BigInteger, nullable=True)
+    sha256 = Column(String(64), nullable=True)
+    generation_status = Column(String(16), nullable=False, default="PENDING")
+    delivery_status = Column(String(16), nullable=False, default="PENDING")
+    error_code = Column(String(64), nullable=True)
+    created_at = Column(DateTime, nullable=False, default=utc_now_naive)
+    delivered_at = Column(DateTime, nullable=True)

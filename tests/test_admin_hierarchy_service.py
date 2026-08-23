@@ -2,8 +2,10 @@ from datetime import datetime, timedelta
 
 import pytest
 import sqlalchemy as sa
+from fastapi import BackgroundTasks
 from sqlalchemy import event
 from sqlalchemy.orm import sessionmaker
+from starlette.requests import Request
 
 from app.db.base import Base
 from app.db.models import (
@@ -11,18 +13,35 @@ from app.db.models import (
     AdminAccountStatus,
     AdminBulkJob,
     AdminHierarchySettings,
+    AdminAuditLog,
     AdminPlanCategoryAccess,
     AdminRole,
+    AdminCreditTransfer,
+    AdminReferralAttribution,
+    AdminReferralEvent,
+    AdminSuspensionAdmin,
     AdminSuspensionReason,
     AdminUserCreationMode,
     MarzhelpAdminSettings,
+    ProxyHost,
+    ProxyInbound,
     User,
     UserPlanAssignment,
 )
-from app.models.admin_hierarchy import PlanCategoryCreate, PlanCreate, PlanVersionInput
+from app.models.admin_hierarchy import (
+    OwnerFreezeRequest,
+    OwnerUnfreezeRequest,
+    PlanCategoryCreate,
+    PlanCreate,
+    PlanVersionInput,
+)
 from app.models.admin import Admin as APIAdmin
 from app.models.user import UserStatus
-from app.routers.admin_hierarchy import get_admin_tree
+from app.routers.admin_hierarchy import (
+    freeze_admin as freeze_admin_route,
+    get_admin_tree,
+    unfreeze_admin as unfreeze_admin_route,
+)
 from app.utils import admin_hierarchy, admin_plans, marzhelp_policy
 
 
@@ -77,6 +96,18 @@ def _legacy_tree(db):
     return owner, sibling, leaf, unowned, report
 
 
+def _explicit_network(db, tag="VLESS TCP"):
+    inbound = db.query(ProxyInbound).filter(ProxyInbound.tag == tag).one_or_none()
+    if inbound is None:
+        inbound = ProxyInbound(tag=tag)
+        db.add(inbound)
+        db.flush()
+    host = ProxyHost(remark="stage4 {USERNAME}", address="127.0.0.1", inbound=inbound)
+    db.add(host)
+    db.flush()
+    return {tag: [host.id]}
+
+
 def test_set_owner_backfills_without_deleting_ids_or_users(db):
     owner, sibling, leaf, unowned, report = _legacy_tree(db)
 
@@ -104,6 +135,7 @@ def test_owner_credit_is_unlimited_for_plan_validation(db, monkeypatch):
 
     assert wallet.total_traffic is None
     assert admin_hierarchy.available_credit(db, wallet) is None
+    hosts = _explicit_network(db)
     plan = admin_plans.create_plan(
         db,
         owner,
@@ -113,6 +145,7 @@ def test_owner_credit_is_unlimited_for_plan_validation(db, monkeypatch):
                 data_limit=10**15,
                 duration_days=30,
                 inbounds=["VLESS TCP"],
+                hosts=hosts,
             ),
         ),
     )
@@ -139,6 +172,7 @@ def test_plan_category_assignment_controls_admin_access(db, monkeypatch):
         category_ids=[category.id],
     )
     db.commit()
+    hosts = _explicit_network(db)
     plan = admin_plans.create_plan(
         db,
         owner,
@@ -149,6 +183,7 @@ def test_plan_category_assignment_controls_admin_access(db, monkeypatch):
                 data_limit=100,
                 duration_days=30,
                 inbounds=["VLESS TCP"],
+                hosts=hosts,
             ),
         ),
     )
@@ -380,6 +415,186 @@ def test_suspend_resume_restores_only_users_changed_by_event(db):
     assert disabled.status == UserStatus.disabled
 
 
+def test_stage7_referral_is_owner_only_idempotent_and_attribution_only(db):
+    owner, referrer, referred, _, _ = _legacy_tree(db)
+    ledger_before = db.query(AdminCreditTransfer).count()
+
+    with pytest.raises(admin_hierarchy.HierarchyError) as forbidden:
+        admin_hierarchy.set_referral_attribution(
+            db,
+            actor=referrer,
+            referred=referred,
+            referrer=owner,
+            rate_bps=250,
+            idempotency_key="referral-forbidden-0001",
+        )
+    assert forbidden.value.code == "owner_required"
+
+    event, created = admin_hierarchy.set_referral_attribution(
+        db,
+        actor=owner,
+        referred=referred,
+        referrer=referrer,
+        rate_bps=250,
+        idempotency_key="referral-stage7-0001",
+        note="attribution only",
+    )
+    replay, replay_created = admin_hierarchy.set_referral_attribution(
+        db,
+        actor=owner,
+        referred=referred,
+        referrer=referrer,
+        rate_bps=250,
+        idempotency_key="referral-stage7-0001",
+        note="attribution only",
+    )
+    attribution = db.get(AdminReferralAttribution, referred.id)
+    assert created is True and replay_created is False and replay.id == event.id
+    assert attribution.referrer_admin_id == referrer.id
+    assert attribution.rate_bps == 250
+    assert db.query(AdminReferralEvent).count() == 1
+    assert db.query(AdminCreditTransfer).count() == ledger_before
+
+
+def test_stage7_owner_freeze_cascades_and_restores_only_freeze_owned_state(db):
+    owner, target, sibling, _, _ = _legacy_tree(db)
+    grandchild = Admin(username="grandchild", hashed_password="x", is_sudo=False)
+    db.add(grandchild)
+    db.flush()
+    db.add(MarzhelpAdminSettings(admin_id=grandchild.id, calculate_volume="created_traffic"))
+    admin_hierarchy.attach_new_child(
+        db,
+        actor=owner,
+        parent=target,
+        child=grandchild,
+        child_role=admin_hierarchy.ADMIN,
+    )
+    target_settings = db.get(MarzhelpAdminSettings, target.id)
+    grandchild_settings = db.get(MarzhelpAdminSettings, grandchild.id)
+    grandchild_settings.account_status_id = admin_hierarchy.ACCOUNT_STATUS_IDS[admin_hierarchy.DISABLED]
+    active = User(username="freeze-active", admin_id=target.id, status=UserStatus.active)
+    on_hold = User(username="freeze-on-hold", admin_id=grandchild.id, status=UserStatus.on_hold)
+    pre_disabled = User(username="freeze-disabled", admin_id=grandchild.id, status=UserStatus.disabled)
+    outside = User(username="freeze-outside", admin_id=sibling.id, status=UserStatus.active)
+    db.add_all([active, on_hold, pre_disabled, outside])
+    db.commit()
+
+    with pytest.raises(admin_hierarchy.HierarchyError) as forbidden:
+        admin_hierarchy.freeze_admin(
+            db,
+            actor=target,
+            target=grandchild,
+            reason_id=1,
+            idempotency_key="freeze-forbidden-0001",
+        )
+    assert forbidden.value.code == "owner_required"
+
+    event, created = admin_hierarchy.freeze_admin(
+        db,
+        actor=owner,
+        target=target,
+        reason_id=1,
+        idempotency_key="freeze-stage7-0001",
+        note="support review",
+        batch_size=1,
+    )
+    replay, replay_created = admin_hierarchy.freeze_admin(
+        db,
+        actor=owner,
+        target=target,
+        reason_id=1,
+        idempotency_key="freeze-stage7-0001",
+        note="support review",
+        batch_size=1,
+    )
+    assert created is True and replay_created is False and replay.id == event.id
+    assert db.query(AdminSuspensionAdmin).filter(AdminSuspensionAdmin.event_id == event.id).count() == 2
+    for item in (active, on_hold, pre_disabled):
+        db.refresh(item)
+        assert item.status == UserStatus.disabled
+    db.refresh(outside)
+    assert outside.status == UserStatus.active
+    db.refresh(target_settings)
+    db.refresh(grandchild_settings)
+    assert target_settings.account_status_id == admin_hierarchy.ACCOUNT_STATUS_IDS[admin_hierarchy.SUSPENDED]
+    assert grandchild_settings.account_status_id == admin_hierarchy.ACCOUNT_STATUS_IDS[admin_hierarchy.SUSPENDED]
+    with pytest.raises(admin_hierarchy.HierarchyError) as blocked:
+        admin_hierarchy.require_active_account(db, target)
+    assert blocked.value.code == "account_read_only"
+
+    # Simulate an independent state change after freeze. Unfreeze must not overwrite it.
+    on_hold.status = UserStatus.on_hold
+    db.commit()
+    resolved, restored_admins, restored_users, unfreeze_created = admin_hierarchy.unfreeze_admin(
+        db,
+        actor=owner,
+        target=target,
+        idempotency_key="unfreeze-stage7-0001",
+    )
+    resolved_replay, replay_admins, replay_users, second_created = admin_hierarchy.unfreeze_admin(
+        db,
+        actor=owner,
+        target=target,
+        idempotency_key="unfreeze-stage7-0001",
+    )
+    assert unfreeze_created is True and second_created is False
+    assert resolved_replay.id == resolved.id
+    assert replay_admins == restored_admins and replay_users == restored_users
+    assert restored_admins == 2 and restored_users == 1
+    db.refresh(active)
+    db.refresh(on_hold)
+    db.refresh(pre_disabled)
+    db.refresh(target_settings)
+    db.refresh(grandchild_settings)
+    assert active.status == UserStatus.active
+    assert on_hold.status == UserStatus.on_hold
+    assert pre_disabled.status == UserStatus.disabled
+    assert target_settings.account_status_id == admin_hierarchy.ACCOUNT_STATUS_IDS[admin_hierarchy.ACTIVE]
+    assert grandchild_settings.account_status_id == admin_hierarchy.ACCOUNT_STATUS_IDS[admin_hierarchy.DISABLED]
+
+
+def test_stage7_freeze_and_unfreeze_routes_write_audit_rows(db):
+    owner, target, _, _, _ = _legacy_tree(db)
+    actor = APIAdmin(id=owner.id, username=owner.username, is_sudo=True)
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": f"/api/admin-management/{target.username}/freeze",
+            "headers": [],
+            "client": ("127.0.0.1", 12345),
+        }
+    )
+    frozen = freeze_admin_route(
+        target.username,
+        OwnerFreezeRequest(
+            reason_id=1,
+            idempotency_key="freeze-route-audit-0001",
+            note="support audit",
+        ),
+        request,
+        BackgroundTasks(),
+        db,
+        actor,
+    )
+    unfrozen = unfreeze_admin_route(
+        target.username,
+        OwnerUnfreezeRequest(idempotency_key="unfreeze-route-audit-0001"),
+        request,
+        BackgroundTasks(),
+        db,
+        actor,
+    )
+    assert frozen["replayed"] is False and unfrozen["replayed"] is False
+    events = {
+        row.action
+        for row in db.query(AdminAuditLog)
+        .filter(AdminAuditLog.target_id == str(target.id))
+        .all()
+    }
+    assert {"admin.owner_freeze", "admin.owner_unfreeze"} <= events
+
+
 def test_plan_updates_append_immutable_version(db, monkeypatch):
     owner, child, _, _, _ = _legacy_tree(db)
     monkeypatch.setattr(
@@ -387,6 +602,7 @@ def test_plan_updates_append_immutable_version(db, monkeypatch):
         "inbounds_by_tag",
         {"VLESS TCP": {"tag": "VLESS TCP", "protocol": "vless"}},
     )
+    hosts = _explicit_network(db)
     values = PlanCreate(
         name="standard",
         version=PlanVersionInput(
@@ -394,6 +610,7 @@ def test_plan_updates_append_immutable_version(db, monkeypatch):
             duration_days=30,
             concurrent_user_limit=1,
             inbounds=["VLESS TCP"],
+            hosts=hosts,
         ),
         allowed_admin_ids=[child.id],
     )

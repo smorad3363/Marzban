@@ -132,6 +132,7 @@ def admin_audit_state(admin: Any, policy: Any = None) -> dict[str, Any]:
             "username": getattr(admin, "username", None),
             "is_sudo": getattr(admin, "is_sudo", None),
             "telegram_id": getattr(admin, "telegram_id", None),
+            "phone": getattr(admin, "phone", None),
             "users_usage": getattr(admin, "users_usage", None),
             "password_changed": bool(
                 getattr(admin, "password_reset_at", None)
@@ -259,6 +260,21 @@ class AuditLogService:
             created_at=datetime.now(timezone.utc).replace(tzinfo=None),
         )
         db.add(entry)
+        db.flush()
+        from app.utils.stage11_operations import enqueue_outbox
+        enqueue_outbox(
+            db,
+            idempotency_key=f"audit:{entry.id}",
+            event_type="operation.audit",
+            payload={
+                "action": action,
+                "actor": username,
+                "target_type": target_type,
+                "target_id": str(target_id) if target_id is not None else None,
+                "target_name": target_name,
+                "status": entry.status,
+            },
+        )
         if commit:
             db.commit()
             db.refresh(entry)

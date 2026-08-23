@@ -44,14 +44,23 @@ STATUS_TEXTS = {
 }
 
 
-def generate_v2ray_links(proxies: dict, inbounds: dict, extra_data: dict, reverse: bool) -> list:
+def generate_v2ray_links(
+    proxies: dict,
+    inbounds: dict,
+    extra_data: dict,
+    reverse: bool,
+    host_scope: dict[str, set[int]] | None = None,
+) -> list:
     format_variables = setup_format_variables(extra_data)
     conf = V2rayShareLink()
-    return process_inbounds_and_tags(inbounds, proxies, format_variables, conf=conf, reverse=reverse)
+    return process_inbounds_and_tags(
+        inbounds, proxies, format_variables, conf=conf, reverse=reverse, host_scope=host_scope
+    )
 
 
 def generate_clash_subscription(
-        proxies: dict, inbounds: dict, extra_data: dict, reverse: bool, is_meta: bool = False
+        proxies: dict, inbounds: dict, extra_data: dict, reverse: bool,
+        is_meta: bool = False, host_scope: dict[str, set[int]] | None = None,
 ) -> str:
     if is_meta is True:
         conf = ClashMetaConfiguration()
@@ -60,40 +69,43 @@ def generate_clash_subscription(
 
     format_variables = setup_format_variables(extra_data)
     return process_inbounds_and_tags(
-        inbounds, proxies, format_variables, conf=conf, reverse=reverse
+        inbounds, proxies, format_variables, conf=conf, reverse=reverse, host_scope=host_scope
     )
 
 
 def generate_singbox_subscription(
-        proxies: dict, inbounds: dict, extra_data: dict, reverse: bool
+        proxies: dict, inbounds: dict, extra_data: dict, reverse: bool,
+        host_scope: dict[str, set[int]] | None = None,
 ) -> str:
     conf = SingBoxConfiguration()
 
     format_variables = setup_format_variables(extra_data)
     return process_inbounds_and_tags(
-        inbounds, proxies, format_variables, conf=conf, reverse=reverse
+        inbounds, proxies, format_variables, conf=conf, reverse=reverse, host_scope=host_scope
     )
 
 
 def generate_outline_subscription(
         proxies: dict, inbounds: dict, extra_data: dict, reverse: bool,
+        host_scope: dict[str, set[int]] | None = None,
 ) -> str:
     conf = OutlineConfiguration()
 
     format_variables = setup_format_variables(extra_data)
     return process_inbounds_and_tags(
-        inbounds, proxies, format_variables, conf=conf, reverse=reverse
+        inbounds, proxies, format_variables, conf=conf, reverse=reverse, host_scope=host_scope
     )
 
 
 def generate_v2ray_json_subscription(
         proxies: dict, inbounds: dict, extra_data: dict, reverse: bool,
+        host_scope: dict[str, set[int]] | None = None,
 ) -> str:
     conf = V2rayJsonConfig()
 
     format_variables = setup_format_variables(extra_data)
     return process_inbounds_and_tags(
-        inbounds, proxies, format_variables, conf=conf, reverse=reverse
+        inbounds, proxies, format_variables, conf=conf, reverse=reverse, host_scope=host_scope
     )
 
 
@@ -102,12 +114,14 @@ def generate_subscription(
         config_format: Literal["v2ray", "clash-meta", "clash", "sing-box", "outline", "v2ray-json"],
         as_base64: bool,
         reverse: bool,
+        host_scope: dict[str, set[int]] | None = None,
 ) -> str:
     kwargs = {
         "proxies": user.proxies,
         "inbounds": user.inbounds,
         "extra_data": user.__dict__,
         "reverse": reverse,
+        "host_scope": host_scope,
     }
 
     if config_format == "v2ray":
@@ -242,6 +256,7 @@ def process_inbounds_and_tags(
             OutlineConfiguration
         ],
         reverse=False,
+        host_scope: dict[str, set[int]] | None = None,
 ) -> Union[List, str]:
     _inbounds = []
     for protocol, tags in inbounds.items():
@@ -259,6 +274,8 @@ def process_inbounds_and_tags(
 
         format_variables.update({"PROTOCOL": protocol.name})
         for tag in tags:
+            if host_scope is not None and tag not in host_scope:
+                continue
             inbound = xray.config.inbounds_by_tag.get(tag)
             if not inbound:
                 continue
@@ -266,6 +283,8 @@ def process_inbounds_and_tags(
             format_variables.update({"TRANSPORT": inbound["network"]})
             host_inbound = inbound.copy()
             for host in xray.hosts.get(tag, []):
+                if host_scope is not None and host.get("_id") not in host_scope[tag]:
+                    continue
                 sni = ""
                 sni_list = host["sni"] or inbound["sni"]
                 if sni_list:

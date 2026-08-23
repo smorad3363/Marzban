@@ -5,6 +5,7 @@ export type SubscriptionMode =
   | "unlimited_traffic_unlimited_devices";
 
 export type AdminPolicy = {
+  billing_mode: "LEGACY_COMPAT" | "SEAT_CREDIT" | "USED_TRAFFIC" | "ALLOCATED_TRAFFIC";
   total_traffic: number | null;
   expiry_date: string | null;
   user_limit: number | null;
@@ -35,6 +36,7 @@ export type ManagedAdmin = {
   parent_admin_id: number | null;
   external_api_enabled: boolean;
   telegram_id: number | null;
+  phone: string | null;
   discord_webhook: string | null;
   users_usage: number | null;
   user_count: number;
@@ -86,11 +88,19 @@ export type HierarchyAdminNode = {
   delegated_traffic: number;
   own_spend: number;
   available_traffic: number | null;
+  renewal_enabled: boolean;
+  renewal_remaining: number | null;
+  trial_quota: number;
+  trials_used: number;
+  referral_referrer_admin_id: number | null;
+  referral_rate_bps: number | null;
+  active_owner_freeze_event_id: number | null;
   children: HierarchyAdminNode[];
 };
 
 export type AccountSummary = {
   username: string;
+  user_namespace_prefix: string;
   role: "OWNER" | "SUPER_ADMIN" | "ADMIN";
   account_status: "ACTIVE" | "SUSPENDED" | "DISABLED";
   suspended_reason: string | null;
@@ -103,8 +113,11 @@ export type AccountSummary = {
   available_traffic: number | null;
   renewal_enabled: boolean;
   renewal_remaining: number | null;
+  billing_mode: "LEGACY_COMPAT" | "SEAT_CREDIT" | "USED_TRAFFIC" | "ALLOCATED_TRAFFIC";
   user_creation_mode: "FREE_FORM" | "PLAN_ONLY";
   can_manage_plans: boolean;
+  trial_quota: number;
+  trials_used: number;
 };
 
 export type UserPlanVersion = {
@@ -115,6 +128,21 @@ export type UserPlanVersion = {
   renewal_volume_strategy: "replace";
   renewal_time_strategy: "extend_max";
   inbounds: string[];
+  hosts: Record<string, number[]>;
+};
+
+export type PlanNetworkHostOption = {
+  id: number;
+  remark: string;
+};
+
+export type PlanNetworkOption = {
+  tag: string;
+  protocol: string;
+  network: string;
+  tls: string;
+  port?: number;
+  hosts: PlanNetworkHostOption[];
 };
 
 export type UserPlan = {
@@ -130,6 +158,7 @@ export type UserPlan = {
   version: UserPlanVersion;
   allowed_admin_ids: number[];
   include_subtree: boolean;
+  is_trial: boolean;
 };
 
 export type PlanCategory = {

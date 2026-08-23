@@ -39,6 +39,9 @@ type DashboardStateType = {
   users: {
     users: User[];
     total: number;
+    page: number;
+    page_size: number;
+    pages: number;
   };
   inbounds: Inbounds;
   loading: boolean;
@@ -60,7 +63,7 @@ type DashboardStateType = {
   resetAllUsage: () => Promise<void>;
   onFilterChange: (filters: Partial<FilterType>) => void;
   deleteUser: (user: User) => Promise<void>;
-  createUser: (user: UserCreate) => Promise<void>;
+  createUser: (user: UserCreate) => Promise<User>;
   editUser: (user: UserCreate) => Promise<void>;
   fetchUserUsage: (user: User, query: FilterUsageType) => Promise<void>;
   setQRCode: (links: string[] | null) => void;
@@ -72,21 +75,25 @@ type DashboardStateType = {
   revokeSubscription: (user: User) => Promise<void>;
 };
 
-const fetchUsers = (query: FilterType): Promise<User[]> => {
+type UsersPage = DashboardStateType["users"];
+let latestUsersRequest = 0;
+
+const fetchUsers = (query: FilterType): Promise<UsersPage> => {
   const authToken = getAuthToken();
+  const requestId = ++latestUsersRequest;
   for (const key in query) {
     if (!query[key as keyof FilterType]) delete query[key as keyof FilterType];
   }
   useDashboard.setState({ loading: true });
   return fetch("/users", { query })
     .then((users) => {
-      if (getAuthToken() === authToken) {
+      if (getAuthToken() === authToken && requestId === latestUsersRequest) {
         useDashboard.setState({ users });
       }
       return users;
     })
     .finally(() => {
-      if (getAuthToken() === authToken) {
+      if (getAuthToken() === authToken && requestId === latestUsersRequest) {
         useDashboard.setState({ loading: false });
       }
     });
@@ -120,6 +127,9 @@ export const useDashboard = create(
     users: {
       users: [],
       total: 0,
+      page: 1,
+      page_size: getUsersPerPageLimitSize(),
+      pages: 0,
     },
     loading: true,
     isResetingAllUsage: false,
@@ -173,10 +183,11 @@ export const useDashboard = create(
       });
     },
     createUser: (body: UserCreate) => {
-      return fetch(`/user`, { method: "POST", body }).then(() => {
+      return fetch<User>(`/user`, { method: "POST", body }).then((createdUser) => {
         set({ editingUser: null });
         get().refetchUsers();
         queryClient.invalidateQueries(StatisticsQueryKey);
+        return createdUser;
       });
     },
     editUser: (body: UserCreate) => {
@@ -233,7 +244,7 @@ export const resetDashboardState = () => {
     isCreatingNewUser: false,
     QRcodeLinks: null,
     subscribeUrl: null,
-    users: { users: [], total: 0 },
+    users: { users: [], total: 0, page: 1, page_size: getUsersPerPageLimitSize(), pages: 0 },
     loading: true,
     isResetingAllUsage: false,
     isEditingHosts: false,

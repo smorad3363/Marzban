@@ -63,6 +63,7 @@ import { fetch } from "service/http";
 import { AccountSummary, UserPlan } from "types/Admin";
 import { User } from "types/User";
 import { formatBytes } from "utils/formatByte";
+import { localizedApiError } from "utils/apiError";
 import { BulkUserActions } from "./BulkUserActions";
 import { OnlineBadge } from "./OnlineBadge";
 import { Pagination } from "./Pagination";
@@ -862,10 +863,9 @@ export const UsersTable: FC<UsersTableProps> = (props) => {
         toast({ title: "کاربر با پلن تمدید شد", status: "success", duration: 3000 });
       },
       onError: (error: any) => {
-        const detail = error?.data?.detail || error?.response?._data?.detail || error?.message;
         toast({
           title: "تمدید انجام نشد",
-          description: typeof detail === "object" ? detail.message || detail.code : detail,
+          description: localizedApiError(error),
           status: "error",
           duration: 5000,
         });

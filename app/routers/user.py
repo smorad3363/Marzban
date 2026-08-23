@@ -28,7 +28,7 @@ from app.models.user import (
     UsersUsagesResponse,
     UserUsagesResponse,
 )
-from app.utils import admin_hierarchy, marzhelp_policy, report, responses
+from app.utils import admin_billing, admin_hierarchy, marzhelp_policy, report, responses
 from app.utils.audit import (
     AuditLogService,
     changed_fields,
@@ -69,11 +69,21 @@ def add_user(
     dbadmin = crud.get_admin(db, admin.username)
     if dbadmin is not None and admin_hierarchy.hierarchy_enabled(db):
         settings = db.get(MarzhelpAdminSettings, dbadmin.id)
-        if settings is not None and settings.user_creation_mode_id == admin_hierarchy.USER_CREATION_MODE_IDS[admin_hierarchy.PLAN_ONLY]:
+        billing_mode = admin_billing.billing_mode(settings) if settings is not None else None
+        if (
+            billing_mode == admin_billing.BillingMode.SEAT_CREDIT
+            or (
+                settings is not None
+                and settings.user_creation_mode_id
+                == admin_hierarchy.USER_CREATION_MODE_IDS[admin_hierarchy.PLAN_ONLY]
+            )
+        ):
             raise HTTPException(
                 status_code=403,
                 detail={"code": "plan_only", "message": "Use /api/users/from-plan for this administrator"},
             )
+        if settings is not None:
+            new_user = marzhelp_policy.restricted_create_payload(settings, new_user)
 
     for proxy_type in new_user.proxies:
         if not xray.config.inbounds_by_protocol.get(proxy_type):
@@ -306,8 +316,8 @@ def revoke_user_subscription(
 
 @router.get("/users", response_model=UsersResponse, responses={400: responses._400, 403: responses._403, 404: responses._404})
 def get_users(
-    offset: int = None,
-    limit: int = None,
+    offset: int = 0,
+    limit: int = 10,
     username: List[str] = Query(None),
     search: Union[str, None] = None,
     owner: Union[List[str], None] = Query(None, alias="admin"),
@@ -317,6 +327,22 @@ def get_users(
     admin: Admin = Depends(Admin.get_current),
 ):
     """Get all users"""
+    if limit not in {10, 25, 50}:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "pagination_size_invalid",
+                "message": "Page size must be one of 10, 25, or 50",
+            },
+        )
+    if offset < 0 or offset % limit != 0:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "pagination_offset_invalid",
+                "message": "Offset must be non-negative and aligned to page size",
+            },
+        )
     if sort is not None:
         opts = sort.strip(",").split(",")
         sort = []
@@ -325,7 +351,11 @@ def get_users(
                 sort.append(crud.UsersSortingOptions[opt])
             except KeyError:
                 raise HTTPException(
-                    status_code=400, detail=f'"{opt}" is not a valid sort option'
+                    status_code=400,
+                    detail={
+                        "code": "sort_option_invalid",
+                        "message": f'"{opt}" is not a valid sort option',
+                    },
                 )
 
     dbadmin = crud.get_admin(db, admin.username)
@@ -355,7 +385,14 @@ def get_users(
         return_with_count=True,
     )
 
-    return {"users": users, "total": count}
+    page = offset // limit + 1
+    return {
+        "users": users,
+        "total": count,
+        "page": page,
+        "page_size": limit,
+        "pages": (count + limit - 1) // limit,
+    }
 
 
 @router.post(
@@ -391,6 +428,17 @@ def bulk_user_action(
     ]
     if forbidden:
         raise HTTPException(status_code=403, detail={"forbidden_users": forbidden})
+
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "bulk_scope_required",
+            "message": (
+                "Legacy username-list bulk execution is disabled; create a scoped "
+                "persistent job through /api/users/bulk/jobs"
+            ),
+        },
+    )
 
     ordered_users = [users_by_username[username] for username in usernames]
 

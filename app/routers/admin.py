@@ -12,9 +12,13 @@ from app.db.models import (
     Admin as DBAdmin,
     AdminBulkJob,
     AdminCreditTransfer,
+    AdminReferralAttribution,
+    AdminReferralEvent,
+    AdminSuspensionAdmin,
     AdminSuspensionEvent,
     AdminUserPlan,
     AdminUserPlanVersion,
+    MarzhelpAccountingTransaction,
     MarzhelpAdminSettings,
     User,
     UserPlanAssignment,
@@ -36,6 +40,7 @@ from app.models.admin import (
 from app.models.user import UserStatus
 from app.device_limit.constants import SubscriptionMode
 from app.utils import admin_hierarchy, admin_plans, marzhelp_policy, report, responses
+from app.utils.admin_billing import BillingMode
 from app.utils.audit import (
     AuditLogService,
     AuditStatus,
@@ -71,6 +76,7 @@ def managed_admin_response(
         parent_admin_id=dbadmin.parent_admin_id,
         external_api_enabled=bool(dbadmin.external_api_enabled),
         telegram_id=dbadmin.telegram_id,
+        phone=dbadmin.phone,
         discord_webhook=dbadmin.discord_webhook,
         users_usage=dbadmin.users_usage,
         user_count=user_count,
@@ -169,6 +175,11 @@ def create_admin(
     admin: Admin = Depends(Admin.check_sudo_admin),
 ):
     """Create a new admin if the current admin has sudo privileges."""
+    if not new_admin.phone:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "admin_phone_required", "message": "Phone is required for new Admins"},
+        )
     if new_admin.is_sudo:
         raise HTTPException(
             status_code=403,
@@ -277,6 +288,20 @@ def remove_admin(
             db.query(AdminSuspensionEvent).filter(
                 (AdminSuspensionEvent.admin_id == dbadmin.id)
                 | (AdminSuspensionEvent.actor_admin_id == dbadmin.id)
+                | (AdminSuspensionEvent.resolved_by_admin_id == dbadmin.id)
+            ),
+            db.query(AdminSuspensionAdmin).filter(AdminSuspensionAdmin.admin_id == dbadmin.id),
+            db.query(AdminReferralAttribution).filter(
+                (AdminReferralAttribution.referred_admin_id == dbadmin.id)
+                | (AdminReferralAttribution.referrer_admin_id == dbadmin.id)
+                | (AdminReferralAttribution.created_by_admin_id == dbadmin.id)
+                | (AdminReferralAttribution.updated_by_admin_id == dbadmin.id)
+            ),
+            db.query(AdminReferralEvent).filter(
+                (AdminReferralEvent.actor_admin_id == dbadmin.id)
+                | (AdminReferralEvent.referred_admin_id == dbadmin.id)
+                | (AdminReferralEvent.previous_referrer_admin_id == dbadmin.id)
+                | (AdminReferralEvent.new_referrer_admin_id == dbadmin.id)
             ),
             db.query(AdminBulkJob).filter(
                 (AdminBulkJob.actor_admin_id == dbadmin.id)
@@ -513,18 +538,37 @@ def create_managed_admin(
             status_code=403,
             detail="Owner can only be selected with marzban set-owner <username>",
         )
+    actor = crud.get_admin(db, admin.username)
+    requested_mode = new_admin.policy.billing_mode
+    if (
+        actor is not None
+        and admin_hierarchy.hierarchy_enabled(db)
+        and requested_mode != BillingMode.LEGACY_COMPAT
+        and not admin_hierarchy.is_owner(db, actor)
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "owner_required", "message": "Only Owner can assign billing modes"},
+        )
     try:
         dbadmin = crud.create_admin(db, new_admin, commit=False)
-        actor = crud.get_admin(db, admin.username)
         hierarchy_on = actor is not None and admin_hierarchy.hierarchy_enabled(db)
         policy = new_admin.policy
+        initial_credit = (
+            policy.device_capacity_limit
+            if requested_mode == BillingMode.SEAT_CREDIT
+            else policy.total_traffic
+        ) if hierarchy_on else None
+        initial_transfer = None
         if hierarchy_on:
-            policy = policy.model_copy(
-                update={"total_traffic": 0}
-            )
+            policy = policy.model_copy(update={
+                "total_traffic": 0 if requested_mode != BillingMode.SEAT_CREDIT else policy.total_traffic,
+                "device_capacity_limit": 0 if requested_mode == BillingMode.SEAT_CREDIT else policy.device_capacity_limit,
+            })
         settings = crud.upsert_marzhelp_admin_policy(
             db, dbadmin.id, policy, commit=False
         )
+        settings.billing_mode = requested_mode.value
         if hierarchy_on:
             admin_hierarchy.attach_new_child(
                 db,
@@ -540,9 +584,80 @@ def create_managed_admin(
                 target=dbadmin,
                 category_ids=new_admin.plan_category_ids,
             )
-            db.commit()
-        else:
-            db.commit()
+            if initial_credit:
+                initial_transfer, _ = admin_hierarchy.transfer_credit(
+                    db,
+                    actor=actor,
+                    source=actor,
+                    target=dbadmin,
+                    amount=int(initial_credit),
+                    operation_type="grant",
+                    idempotency_key=f"admin-create-{dbadmin.id}-traffic-credit",
+                    note="Initial admin traffic credit",
+                    commit=False,
+                    return_created=True,
+                )
+                AuditLogService.log(
+                    db,
+                    actor,
+                    "credit.grant",
+                    "admin_credit",
+                    f"Admin {actor.username} granted initial traffic credit to {dbadmin.username}",
+                    target_id=dbadmin.id,
+                    target_name=dbadmin.username,
+                    previous_value={
+                        "traffic_credit": initial_transfer.balance_before,
+                        "source_delegated": initial_transfer.source_delegated_before,
+                    },
+                    new_value={
+                        "traffic_credit": initial_transfer.balance_after,
+                        "source_delegated": initial_transfer.source_delegated_after,
+                    },
+                    details={
+                        "resource": initial_transfer.resource,
+                        "transfer_id": initial_transfer.id,
+                        "delta": initial_transfer.delta,
+                        "actor_admin_id": actor.id,
+                        "adjusted_admin_id": dbadmin.id,
+                        "reason": initial_transfer.note,
+                        "idempotency_key": initial_transfer.idempotency_key,
+                    },
+                    request=request,
+                    commit=False,
+                )
+            db.add(
+                MarzhelpAccountingTransaction(
+                    operation_key=f"admin-create-billing-mode:{dbadmin.id}",
+                    operation_type="billing_mode",
+                    admin_id=dbadmin.id,
+                    result="consumed",
+                    details={
+                        "previous_mode": None,
+                        "mode": requested_mode.value,
+                        "reason": "Initial Admin billing mode",
+                        "actor_admin_id": actor.id,
+                    },
+                )
+            )
+        AuditLogService.log(
+            db,
+            admin,
+            "admin.create",
+            "admin",
+            f"Admin {admin.username} created managed admin {dbadmin.username}",
+            target_id=dbadmin.id,
+            target_name=dbadmin.username,
+            new_value=admin_audit_state(
+                dbadmin,
+                MarzhelpAdminPolicy.model_validate(settings),
+            ),
+            details={
+                "initial_credit_transfer_id": initial_transfer.id if initial_transfer else None,
+            },
+            request=request,
+            commit=False,
+        )
+        db.commit()
         db.refresh(dbadmin)
         db.refresh(settings)
     except IntegrityError:
@@ -551,18 +666,10 @@ def create_managed_admin(
     except admin_hierarchy.HierarchyError as exc:
         db.rollback()
         raise HTTPException(status_code=400, detail={"code": exc.code, "message": str(exc)})
+    except Exception:
+        db.rollback()
+        raise
     response = managed_admin_response(db, dbadmin, settings, 0, 0)
-    AuditLogService.log(
-        db,
-        admin,
-        "admin.create",
-        "admin",
-        f"Admin {admin.username} created managed admin {dbadmin.username}",
-        target_id=dbadmin.id,
-        target_name=dbadmin.username,
-        new_value=admin_audit_state(dbadmin, response.policy),
-        request=request,
-    )
     return response
 
 

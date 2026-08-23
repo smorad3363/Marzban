@@ -1,6 +1,7 @@
 import os
 
 import pytest
+from OpenSSL import crypto
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
@@ -11,8 +12,17 @@ MYSQL_URL = os.getenv("TEST_MYSQL_DATABASE_URL")
 
 
 @pytest.mark.skipif(not MYSQL_URL, reason="TEST_MYSQL_DATABASE_URL is not configured")
-def test_device_limit_migration_recovers_from_mysql_partial_ddl():
+def test_device_limit_migration_recovers_from_mysql_partial_ddl(monkeypatch):
     assert make_url(MYSQL_URL).get_backend_name() == "mysql"
+    original_not_after = crypto.X509.gmtime_adj_notAfter
+    monkeypatch.setattr(
+        crypto.X509,
+        "gmtime_adj_notAfter",
+        lambda certificate, seconds: original_not_after(
+            certificate,
+            min(seconds, 2_000_000_000),
+        ),
+    )
     alembic = Config("alembic.ini")
     alembic.set_main_option("sqlalchemy.url", MYSQL_URL)
 

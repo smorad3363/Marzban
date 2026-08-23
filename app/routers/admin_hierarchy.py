@@ -16,9 +16,14 @@ from app.db.models import (
     AdminHierarchy,
     AdminPlanCategory,
     AdminRole,
+    AdminReferralAttribution,
+    AdminReferralEvent,
+    AdminSuspensionEvent,
     AdminSuspensionReason,
     AdminUserCreationMode,
     AdminUserPlan,
+    AllocatedTrafficRefundEvent,
+    AllocatedTrafficRefundRequest,
     MarzhelpAdminSettings,
     User,
 )
@@ -28,6 +33,11 @@ from app.models.admin_hierarchy import (
     ApiTokenCreate,
     ApiTokenCreated,
     ApiTokenSummary,
+    AllocatedTrafficRefundCreate,
+    AllocatedTrafficRefundDecision,
+    AllocatedTrafficRefundEventResponse,
+    AllocatedTrafficRefundResponse,
+    BillingModeUpdate,
     BulkDisableRequest,
     CreditTransferRequest,
     CreditTransferResponse,
@@ -35,6 +45,7 @@ from app.models.admin_hierarchy import (
     HierarchyAdminNode,
     HierarchyChildCreate,
     PlanCreate,
+    PlanNetworkOption,
     PlanCategoryCreate,
     PlanCategoryResponse,
     PlanCategoryUpdate,
@@ -42,13 +53,29 @@ from app.models.admin_hierarchy import (
     PlanResponse,
     PlanUpdate,
     PlanUserCreate,
+    OwnerFreezeRequest,
+    OwnerUnfreezeRequest,
+    ReferralAttributionRemove,
+    ReferralAttributionResponse,
+    ReferralAttributionUpdate,
     RenewalPolicyUpdate,
     ReparentRequest,
     SuspendRequest,
+    TrialCleanupRequest,
+    TrialCleanupResponse,
+    TrialQuotaAdjustmentRequest,
     UserCreationModeUpdate,
 )
 from app.models.user import UserResponse
-from app.utils import admin_hierarchy, admin_plans, responses
+from app.utils import (
+    admin_billing,
+    admin_hierarchy,
+    admin_plans,
+    billing_service,
+    marzhelp_policy,
+    responses,
+    trials,
+)
 from app.utils.audit import AuditLogService, get_client_ip
 
 
@@ -80,13 +107,183 @@ def _raise_domain(exc: Exception):
             "cycle_detected",
             "credit_exhausted",
             "reclaim_exceeds_available",
+            "reclaim_exceeds_delegated",
+            "reclaim_unlimited_credit",
+            "credit_concurrent_conflict",
             "renewal_quota_exhausted",
             "renewal_disabled",
             "plan_archived",
+            "seat_plan_requires_finite_devices",
+            "seat_plan_renewal_required",
+            "billing_mode_transition_requires_settlement",
+            "refund_exceeds_remaining",
+            "refund_exceeds_allocated_spend",
         }:
             code = 400
         raise HTTPException(status_code=code, detail={"code": exc.code, "message": str(exc)})
     raise exc
+
+
+@router.put("/admin-management/{username}/billing-mode")
+def update_billing_mode(
+    username: str,
+    values: BillingModeUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
+    actor = _db_actor(db, admin)
+    target = _target(db, username)
+    try:
+        settings, created = billing_service.assign_billing_mode(
+            db,
+            actor=actor,
+            target=target,
+            mode=values.mode,
+            idempotency_key=values.idempotency_key,
+            reason=values.reason,
+        )
+    except Exception as exc:
+        db.rollback()
+        _raise_domain(exc)
+    AuditLogService.log(
+        db,
+        actor,
+        "admin.billing_mode_assign",
+        "admin_billing",
+        f"Billing mode {settings.billing_mode} assigned to {target.username}",
+        target_id=target.id,
+        target_name=target.username,
+        details={"mode": settings.billing_mode, "created": created, "reason": values.reason},
+        request=request,
+    )
+    return {"admin_id": target.id, "billing_mode": settings.billing_mode, "created": created}
+
+
+@router.post(
+    "/users/{username}/allocated-traffic-refunds",
+    response_model=AllocatedTrafficRefundResponse,
+)
+def request_allocated_traffic_refund(
+    username: str,
+    values: AllocatedTrafficRefundCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
+    actor = _db_actor(db, admin)
+    user = crud.get_user(db, username)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    try:
+        row, created = billing_service.create_refund_request(
+            db,
+            actor=actor,
+            user=user,
+            requested_refund_amount=values.requested_refund_amount,
+            request_reason=values.request_reason,
+            request_note=values.request_note,
+            correlation_id=values.correlation_id,
+            idempotency_key=values.idempotency_key,
+        )
+    except Exception as exc:
+        db.rollback()
+        _raise_domain(exc)
+    AuditLogService.log(
+        db,
+        actor,
+        "refund.request_create",
+        "allocated_traffic_refund",
+        f"Allocated-traffic refund requested for {user.username}",
+        target_id=row.id,
+        target_name=user.username,
+        details={"created": created, "amount": row.requested_refund_amount, "correlation_id": row.correlation_id},
+        request=request,
+    )
+    return row
+
+
+@router.get(
+    "/admin-management/allocated-traffic-refunds",
+    response_model=list[AllocatedTrafficRefundResponse],
+)
+def list_allocated_traffic_refunds(
+    status: str | None = Query(default=None),
+    before_id: int | None = Query(default=None, ge=1),
+    limit: int = Query(default=25, ge=1, le=50),
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
+    actor = _db_actor(db, admin)
+    query = billing_service.refund_requests_query(db, actor)
+    if status is not None:
+        query = query.filter(AllocatedTrafficRefundRequest.status == status.upper())
+    if before_id is not None:
+        query = query.filter(AllocatedTrafficRefundRequest.id < before_id)
+    return query.order_by(AllocatedTrafficRefundRequest.id.desc()).limit(limit).all()
+
+
+def _refund_decision_endpoint(
+    request_id: int,
+    decision: str,
+    values: AllocatedTrafficRefundDecision,
+    request: Request,
+    db: Session,
+    admin: Admin,
+):
+    actor = _db_actor(db, admin)
+    try:
+        row, created = billing_service.decide_refund_request(
+            db,
+            actor=actor,
+            request_id=request_id,
+            decision=decision,
+            idempotency_key=values.idempotency_key,
+            explanation=values.explanation,
+        )
+    except Exception as exc:
+        db.rollback()
+        _raise_domain(exc)
+    AuditLogService.log(
+        db,
+        actor,
+        f"refund.{decision.lower()}",
+        "allocated_traffic_refund",
+        f"Refund request {request_id} changed to {decision}",
+        target_id=request_id,
+        target_name=row.target_username,
+        details={"created": created, "correlation_id": row.correlation_id},
+        request=request,
+    )
+    return row
+
+
+@router.post("/admin-management/allocated-traffic-refunds/{request_id}/approve", response_model=AllocatedTrafficRefundResponse)
+def approve_allocated_traffic_refund(request_id: int, values: AllocatedTrafficRefundDecision, request: Request, db: Session = Depends(get_db), admin: Admin = Depends(Admin.get_current)):
+    return _refund_decision_endpoint(request_id, "APPROVED", values, request, db, admin)
+
+
+@router.post("/admin-management/allocated-traffic-refunds/{request_id}/reject", response_model=AllocatedTrafficRefundResponse)
+def reject_allocated_traffic_refund(request_id: int, values: AllocatedTrafficRefundDecision, request: Request, db: Session = Depends(get_db), admin: Admin = Depends(Admin.get_current)):
+    return _refund_decision_endpoint(request_id, "REJECTED", values, request, db, admin)
+
+
+@router.post("/admin-management/allocated-traffic-refunds/{request_id}/cancel", response_model=AllocatedTrafficRefundResponse)
+def cancel_allocated_traffic_refund(request_id: int, values: AllocatedTrafficRefundDecision, request: Request, db: Session = Depends(get_db), admin: Admin = Depends(Admin.get_current)):
+    return _refund_decision_endpoint(request_id, "CANCELLED", values, request, db, admin)
+
+
+@router.get("/admin-management/allocated-traffic-refunds/{request_id}/events", response_model=list[AllocatedTrafficRefundEventResponse])
+def allocated_traffic_refund_events(request_id: int, db: Session = Depends(get_db), admin: Admin = Depends(Admin.get_current)):
+    actor = _db_actor(db, admin)
+    visible = billing_service.refund_requests_query(db, actor).filter(
+        AllocatedTrafficRefundRequest.id == request_id
+    ).first()
+    if visible is None:
+        raise HTTPException(status_code=404, detail="Refund request not found")
+    return db.query(AllocatedTrafficRefundEvent).filter(
+        AllocatedTrafficRefundEvent.request_id == request_id
+    ).order_by(AllocatedTrafficRefundEvent.id).all()
 
 
 def _restart_runtime() -> None:
@@ -106,6 +303,8 @@ def _node_response(
     status: str | None = None,
     role: str | None = None,
     preloaded: bool = False,
+    referral: AdminReferralAttribution | None = None,
+    active_owner_freeze_event_id: int | None = None,
 ) -> HierarchyAdminNode:
     if settings is None and not preloaded:
         settings = db.get(MarzhelpAdminSettings, row.id)
@@ -126,6 +325,13 @@ def _node_response(
         delegated_traffic=int(settings.delegated_traffic or 0) if settings else 0,
         own_spend=spend,
         available_traffic=admin_hierarchy.available_credit(db, settings) if settings else None,
+        renewal_enabled=bool(settings.renewal_enabled) if settings else True,
+        renewal_remaining=settings.renewal_remaining if settings else None,
+        trial_quota=int(settings.trial_quota or 0) if settings else 0,
+        trials_used=int(settings.trials_used or 0) if settings else 0,
+        referral_referrer_admin_id=referral.referrer_admin_id if referral else None,
+        referral_rate_bps=referral.rate_bps if referral else None,
+        active_owner_freeze_event_id=active_owner_freeze_event_id,
     )
 
 
@@ -145,6 +351,8 @@ def get_admin_tree(
                 MarzhelpAdminSettings,
                 AdminAccountStatus.code,
                 AdminRole.code,
+                AdminReferralAttribution,
+                AdminSuspensionEvent.id,
             )
             .join(AdminHierarchy, AdminHierarchy.descendant_id == DBAdmin.id)
             .outerjoin(MarzhelpAdminSettings, MarzhelpAdminSettings.admin_id == DBAdmin.id)
@@ -153,6 +361,16 @@ def get_admin_tree(
                 AdminAccountStatus.id == MarzhelpAdminSettings.account_status_id,
             )
             .outerjoin(AdminRole, AdminRole.id == DBAdmin.role_id)
+            .outerjoin(
+                AdminReferralAttribution,
+                AdminReferralAttribution.referred_admin_id == DBAdmin.id,
+            )
+            .outerjoin(
+                AdminSuspensionEvent,
+                (AdminSuspensionEvent.id == MarzhelpAdminSettings.suspension_event_id)
+                & (AdminSuspensionEvent.operation_type == "owner_freeze")
+                & (AdminSuspensionEvent.status == "complete"),
+            )
             .options(
                 noload(MarzhelpAdminSettings.inbound_permissions),
                 noload(MarzhelpAdminSettings.user_limit_permissions),
@@ -162,9 +380,20 @@ def get_admin_tree(
             .order_by(AdminHierarchy.depth, DBAdmin.username)
             .all()
         )
+        owner_view = bool(actor.is_sudo)
         nodes = [
-            _node_response(db, row, depth, settings, status, role, preloaded=True)
-            for row, depth, settings, status, role in rows
+            _node_response(
+                db,
+                row,
+                depth,
+                settings,
+                status,
+                role,
+                preloaded=True,
+                referral=referral if owner_view else None,
+                active_owner_freeze_event_id=freeze_event_id if owner_view else None,
+            )
+            for row, depth, settings, status, role, referral, freeze_event_id in rows
         ]
     by_id = {node.id: node for node in nodes}
     roots: list[HierarchyAdminNode] = []
@@ -189,7 +418,12 @@ def create_child(
     try:
         child = crud.create_admin(
             db,
-            AdminCreate(username=values.username, password=values.password, is_sudo=False),
+            AdminCreate(
+                username=values.username,
+                password=values.password,
+                phone=values.phone,
+                is_sudo=False,
+            ),
             commit=False,
         )
         admin_hierarchy.attach_new_child(
@@ -264,7 +498,7 @@ def _credit_move(
     if parent is None:
         raise HTTPException(status_code=400, detail="Target has no parent credit account")
     try:
-        row = admin_hierarchy.transfer_credit(
+        row, created = admin_hierarchy.transfer_credit(
             db,
             actor=actor,
             source=parent,
@@ -273,20 +507,43 @@ def _credit_move(
             operation_type=operation,
             idempotency_key=values.idempotency_key,
             note=values.note,
+            commit=False,
+            return_created=True,
         )
+        if created:
+            AuditLogService.log(
+                db,
+                actor,
+                f"credit.{operation}",
+                "admin_credit",
+                f"Admin {actor.username} {operation} {values.amount} bytes for {child.username}",
+                target_id=child.id,
+                target_name=child.username,
+                previous_value={
+                    "traffic_credit": row.balance_before,
+                    "source_delegated": row.source_delegated_before,
+                },
+                new_value={
+                    "traffic_credit": row.balance_after,
+                    "source_delegated": row.source_delegated_after,
+                },
+                details={
+                    "resource": row.resource,
+                    "transfer_id": row.id,
+                    "delta": row.delta,
+                    "actor_admin_id": actor.id,
+                    "adjusted_admin_id": child.id,
+                    "reason": row.note,
+                    "idempotency_key": row.idempotency_key,
+                },
+                request=request,
+                commit=False,
+            )
+        db.commit()
+        db.refresh(row)
     except Exception as exc:
+        db.rollback()
         _raise_domain(exc)
-    AuditLogService.log(
-        db,
-        actor,
-        f"credit.{operation}",
-        "admin_credit",
-        f"Admin {actor.username} {operation} {values.amount} bytes for {child.username}",
-        target_id=child.id,
-        target_name=child.username,
-        details={"transfer_id": row.id, "idempotency_key": values.idempotency_key},
-        request=request,
-    )
     return row
 
 
@@ -310,6 +567,82 @@ def reclaim_credit(
     admin: Admin = Depends(Admin.get_current),
 ):
     return _credit_move(username, values, "reclaim", request, db, admin)
+
+
+def _trial_quota_adjustment(
+    username: str,
+    values: TrialQuotaAdjustmentRequest,
+    operation: str,
+    request: Request,
+    db: Session,
+    admin: Admin,
+):
+    actor = _db_actor(db, admin)
+    target = _target(db, username)
+    try:
+        row, created = trials.adjust_quota(
+            db,
+            actor=actor,
+            target=target,
+            amount=values.amount,
+            operation=operation,
+            idempotency_key=values.idempotency_key,
+            note=values.note,
+        )
+        if created:
+            AuditLogService.log(
+                db,
+                actor,
+                f"trial_quota.{operation}",
+                "admin_trial_quota",
+                f"Owner {actor.username} adjusted Trial quota for {target.username}",
+                target_id=target.id,
+                target_name=target.username,
+                previous_value={"trial_quota": row.balance_before},
+                new_value={"trial_quota": row.balance_after},
+                details={
+                    "resource": "trial_quota",
+                    "transfer_id": row.id,
+                    "idempotency_key": row.idempotency_key,
+                    "reason": row.note,
+                },
+                request=request,
+                commit=False,
+            )
+        db.commit()
+        db.refresh(row)
+        return row
+    except Exception as exc:
+        db.rollback()
+        _raise_domain(exc)
+
+
+@router.post(
+    "/admin-management/{username}/trial-quota/grant",
+    response_model=CreditTransferResponse,
+)
+def grant_trial_quota(
+    username: str,
+    values: TrialQuotaAdjustmentRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
+    return _trial_quota_adjustment(username, values, "grant", request, db, admin)
+
+
+@router.post(
+    "/admin-management/{username}/trial-quota/reclaim",
+    response_model=CreditTransferResponse,
+)
+def reclaim_trial_quota(
+    username: str,
+    values: TrialQuotaAdjustmentRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
+    return _trial_quota_adjustment(username, values, "reclaim", request, db, admin)
 
 
 @router.get("/admin-management/{username}/credit/ledger", response_model=list[CreditTransferResponse])
@@ -476,28 +809,47 @@ def update_renewal_policy(
     target = _target(db, username)
     if not _parent_or_owner(db, actor, target):
         raise HTTPException(status_code=403, detail="Only parent or Owner can set renewal policy")
-    settings = db.get(MarzhelpAdminSettings, target.id)
+    settings = (
+        db.query(MarzhelpAdminSettings)
+        .filter(MarzhelpAdminSettings.admin_id == target.id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if settings is None:
+        raise HTTPException(status_code=409, detail="Target credit settings are missing")
     previous = {
         "enabled": settings.renewal_enabled,
         "remaining": settings.renewal_remaining,
+        "limit": settings.renewal_limit,
+        "used": settings.renewals_used,
     }
     settings.renewal_enabled = values.enabled
     settings.renewal_remaining = values.remaining
     settings.renewal_limit = values.remaining
     settings.renewals_used = 0
-    db.commit()
-    AuditLogService.log(
-        db,
-        actor,
-        "admin.renewal_policy_update",
-        "admin",
-        f"Admin {actor.username} updated renewal policy for {target.username}",
-        target_id=target.id,
-        target_name=target.username,
-        previous_value=previous,
-        new_value={"enabled": values.enabled, "remaining": values.remaining},
-        request=request,
-    )
+    try:
+        AuditLogService.log(
+            db,
+            actor,
+            "admin.renewal_policy_update",
+            "admin",
+            f"Admin {actor.username} updated renewal policy for {target.username}",
+            target_id=target.id,
+            target_name=target.username,
+            previous_value=previous,
+            new_value={
+                "enabled": values.enabled,
+                "remaining": values.remaining,
+                "limit": values.remaining,
+                "used": 0,
+            },
+            request=request,
+            commit=False,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     return {"enabled": values.enabled, "remaining": values.remaining}
 
 
@@ -570,6 +922,218 @@ def suspend_admin(
     )
     bg.add_task(_restart_runtime)
     return {"event_id": event.id, "status": event.status}
+
+
+def _referral_response(
+    db: Session,
+    target: DBAdmin,
+    *,
+    event: AdminReferralEvent | None = None,
+    replayed: bool = False,
+) -> ReferralAttributionResponse:
+    attribution = db.get(AdminReferralAttribution, target.id)
+    referrer = db.get(DBAdmin, attribution.referrer_admin_id) if attribution else None
+    return ReferralAttributionResponse(
+        referred_admin_id=target.id,
+        referred_username=target.username,
+        referrer_admin_id=referrer.id if referrer else None,
+        referrer_username=referrer.username if referrer else None,
+        rate_bps=attribution.rate_bps if attribution else None,
+        last_event_id=event.id if event else None,
+        replayed=replayed,
+    )
+
+
+@router.get(
+    "/admin-management/{username}/referral",
+    response_model=ReferralAttributionResponse,
+)
+def get_referral_attribution(
+    username: str,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
+    actor = _db_actor(db, admin)
+    if not admin_hierarchy.is_owner(db, actor):
+        raise HTTPException(status_code=403, detail="Only Owner can view referral configuration")
+    return _referral_response(db, _target(db, username))
+
+
+@router.put(
+    "/admin-management/{username}/referral",
+    response_model=ReferralAttributionResponse,
+)
+def update_referral_attribution(
+    username: str,
+    values: ReferralAttributionUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
+    actor = _db_actor(db, admin)
+    target = _target(db, username)
+    referrer = _target(db, values.referrer_username)
+    try:
+        event, created = admin_hierarchy.set_referral_attribution(
+            db,
+            actor=actor,
+            referred=target,
+            referrer=referrer,
+            rate_bps=values.rate_bps,
+            idempotency_key=values.idempotency_key,
+            note=values.note,
+        )
+    except Exception as exc:
+        _raise_domain(exc)
+    if created:
+        AuditLogService.log(
+            db,
+            actor,
+            "admin.referral_attribution_update",
+            "admin_referral_attribution",
+            f"Owner {actor.username} updated referral attribution for {target.username}",
+            target_id=target.id,
+            target_name=target.username,
+            previous_value={
+                "referrer_admin_id": event.previous_referrer_admin_id,
+                "rate_bps": event.previous_rate_bps,
+            },
+            new_value={"referrer_admin_id": referrer.id, "rate_bps": values.rate_bps},
+            details={"event_id": event.id, "idempotency_key": values.idempotency_key},
+            request=request,
+        )
+    return _referral_response(db, target, event=event, replayed=not created)
+
+
+@router.delete(
+    "/admin-management/{username}/referral",
+    response_model=ReferralAttributionResponse,
+)
+def remove_referral_attribution(
+    username: str,
+    values: ReferralAttributionRemove,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
+    actor = _db_actor(db, admin)
+    target = _target(db, username)
+    try:
+        event, created = admin_hierarchy.set_referral_attribution(
+            db,
+            actor=actor,
+            referred=target,
+            referrer=None,
+            rate_bps=None,
+            idempotency_key=values.idempotency_key,
+            note=values.note,
+        )
+    except Exception as exc:
+        _raise_domain(exc)
+    if created:
+        AuditLogService.log(
+            db,
+            actor,
+            "admin.referral_attribution_remove",
+            "admin_referral_attribution",
+            f"Owner {actor.username} removed referral attribution for {target.username}",
+            target_id=target.id,
+            target_name=target.username,
+            previous_value={
+                "referrer_admin_id": event.previous_referrer_admin_id,
+                "rate_bps": event.previous_rate_bps,
+            },
+            new_value=None,
+            details={"event_id": event.id, "idempotency_key": values.idempotency_key},
+            request=request,
+        )
+    return _referral_response(db, target, event=event, replayed=not created)
+
+
+@router.post("/admin-management/{username}/freeze")
+def freeze_admin(
+    username: str,
+    values: OwnerFreezeRequest,
+    request: Request,
+    bg: BackgroundTasks,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
+    actor = _db_actor(db, admin)
+    target = _target(db, username)
+    try:
+        event, created = admin_hierarchy.freeze_admin(
+            db,
+            actor=actor,
+            target=target,
+            reason_id=values.reason_id,
+            idempotency_key=values.idempotency_key,
+            note=values.note,
+        )
+    except Exception as exc:
+        _raise_domain(exc)
+    if created:
+        AuditLogService.log(
+            db,
+            actor,
+            "admin.owner_freeze",
+            "admin_suspension_event",
+            f"Owner {actor.username} froze subtree {target.username}",
+            target_id=target.id,
+            target_name=target.username,
+            new_value={"account_status": "SUSPENDED", "scope": "full_subtree"},
+            details={"event_id": event.id, "idempotency_key": values.idempotency_key},
+            request=request,
+        )
+        bg.add_task(_restart_runtime)
+    return {"event_id": event.id, "status": event.status, "replayed": not created}
+
+
+@router.post("/admin-management/{username}/unfreeze")
+def unfreeze_admin(
+    username: str,
+    values: OwnerUnfreezeRequest,
+    request: Request,
+    bg: BackgroundTasks,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
+    actor = _db_actor(db, admin)
+    target = _target(db, username)
+    try:
+        event, restored_admins, restored_users, created = admin_hierarchy.unfreeze_admin(
+            db,
+            actor=actor,
+            target=target,
+            idempotency_key=values.idempotency_key,
+        )
+    except Exception as exc:
+        _raise_domain(exc)
+    if created:
+        AuditLogService.log(
+            db,
+            actor,
+            "admin.owner_unfreeze",
+            "admin_suspension_event",
+            f"Owner {actor.username} unfroze subtree {target.username}",
+            target_id=target.id,
+            target_name=target.username,
+            details={
+                "event_id": event.id,
+                "restored_admins": restored_admins,
+                "restored_users": restored_users,
+                "idempotency_key": values.idempotency_key,
+            },
+            request=request,
+        )
+        bg.add_task(_restart_runtime)
+    return {
+        "event_id": event.id,
+        "status": event.status,
+        "restored_admins": restored_admins,
+        "restored_users": restored_users,
+        "replayed": not created,
+    }
 
 
 @router.post("/admin-management/{username}/resume")
@@ -682,8 +1246,13 @@ def account_summary(
         if settings
         else admin_hierarchy.FREE_FORM
     )
+    namespace_prefix = actor.user_namespace_prefix
+    if not namespace_prefix:
+        namespace_prefix = marzhelp_policy.ensure_admin_namespace_prefix(db, actor)
+        db.commit()
     return AccountSummary(
         username=actor.username,
+        user_namespace_prefix=namespace_prefix,
         role=admin_hierarchy.role_code(actor),
         account_status=account_status,
         suspended_reason=reason,
@@ -696,8 +1265,11 @@ def account_summary(
         available_traffic=admin_hierarchy.available_credit(db, settings) if settings else None,
         renewal_enabled=bool(settings.renewal_enabled) if settings else True,
         renewal_remaining=settings.renewal_remaining if settings else None,
+        billing_mode=admin_billing.billing_mode(settings),
         user_creation_mode=mode or admin_hierarchy.FREE_FORM,
         can_manage_plans=bool(settings.can_manage_plans) if settings else False,
+        trial_quota=int(settings.trial_quota or 0) if settings else 0,
+        trials_used=int(settings.trials_used or 0) if settings else 0,
     )
 
 
@@ -748,7 +1320,19 @@ def get_user_plans(
     if before_id is not None:
         query = query.filter(AdminUserPlan.id < before_id)
     plans = query.order_by(AdminUserPlan.id.desc()).limit(limit).all()
-    return [admin_plans.plan_response(db, plan) for plan in plans]
+    return admin_plans.plan_responses(db, plans)
+
+
+@router.get("/plan-network-options", response_model=list[PlanNetworkOption])
+def get_plan_network_options(
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
+    actor = _db_actor(db, admin)
+    try:
+        return admin_plans.network_options(db, actor)
+    except Exception as exc:
+        _raise_domain(exc)
 
 
 @router.get("/plan-categories", response_model=list[PlanCategoryResponse])
@@ -1024,3 +1608,59 @@ def renew_user_from_plan(
         )
         bg.add_task(xray.operations.update_user_by_id, user_id=user.id)
     return UserResponse.model_validate(user)
+
+
+@router.get("/trials/cleanup/preview", response_model=TrialCleanupResponse)
+def preview_trial_cleanup(
+    expired_before: datetime,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
+    actor = _db_actor(db, admin)
+    count, usernames = trials.cleanup_preview(db, actor, expired_before)
+    return TrialCleanupResponse(count=count, usernames=usernames)
+
+
+@router.post("/trials/cleanup", response_model=TrialCleanupResponse)
+def execute_trial_cleanup(
+    values: TrialCleanupRequest,
+    request: Request,
+    bg: BackgroundTasks,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
+    actor = _db_actor(db, admin)
+    try:
+        operation, created = trials.cleanup(
+            db,
+            actor=actor,
+            expired_before=values.expired_before,
+            idempotency_key=values.idempotency_key,
+        )
+        if created:
+            AuditLogService.log(
+                db,
+                actor,
+                "trial.cleanup",
+                "trial_cleanup_operation",
+                f"Admin {actor.username} deleted {operation.deleted_count} expired Trial users",
+                target_id=operation.id,
+                details={
+                    "expired_before": operation.expired_before,
+                    "deleted_count": operation.deleted_count,
+                    "idempotency_key": operation.idempotency_key,
+                },
+                request=request,
+                commit=False,
+            )
+        db.commit()
+        if created and operation.deleted_count:
+            bg.add_task(_restart_runtime)
+        return TrialCleanupResponse(
+            count=operation.deleted_count,
+            usernames=list(operation.deleted_usernames or []),
+            replayed=not created,
+        )
+    except Exception as exc:
+        db.rollback()
+        _raise_domain(exc)

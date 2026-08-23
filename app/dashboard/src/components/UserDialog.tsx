@@ -50,7 +50,7 @@ import { Controller, FormProvider, useForm, useWatch } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { useQuery, useQueryClient } from "react-query";
 import { fetch } from "service/http";
-import { AdminCapabilities, ManagedAdmin, ManagedAdminList, SubscriptionMode } from "types/Admin";
+import { AccountSummary, AdminCapabilities, ManagedAdmin, ManagedAdminList, SubscriptionMode } from "types/Admin";
 import {
   ProxyKeys,
   ProxyType,
@@ -342,6 +342,15 @@ export const UserDialog: FC<UserDialogProps> = () => {
     () => fetch("/admin/capabilities"),
     { enabled: isOpen, staleTime: 30000 }
   );
+  const accountQuery = useQuery<AccountSummary, Error>(
+    ["account-summary"],
+    () => fetch("/account/summary"),
+    { enabled: isOpen, staleTime: 30000 }
+  );
+  const restrictedCreate = !isEditing && (
+    accountQuery.data?.billing_mode === "USED_TRAFFIC" ||
+    accountQuery.data?.billing_mode === "ALLOCATED_TRAFFIC"
+  );
 
   useEffect(
     () =>
@@ -354,9 +363,9 @@ export const UserDialog: FC<UserDialogProps> = () => {
     []
   );
 
-  const [dataLimit, userStatus, ownerAdmin, concurrentUserLimit] = useWatch({
+  const [dataLimit, userStatus, ownerAdmin, concurrentUserLimit, requestedUsername] = useWatch({
     control: form.control,
-    name: ["data_limit", "status", "owner_admin", "concurrent_user_limit"],
+    name: ["data_limit", "status", "owner_admin", "concurrent_user_limit", "username"],
   });
   const selectedOwner = adminsQuery.data?.find(
     (admin) => admin.username === ownerAdmin
@@ -476,22 +485,29 @@ export const UserDialog: FC<UserDialogProps> = () => {
       ...rest
     } = values;
 
-    const body: UserCreate & { concurrent_user_limit: number | null } = {
-      ...rest,
-      concurrent_user_limit,
-      data_limit: values.data_limit,
-      proxies: mergeProxies(selected_proxies, values.proxies),
-      data_limit_reset_strategy:
-        values.data_limit && values.data_limit > 0
-          ? values.data_limit_reset_strategy
-          : "no_reset",
-      status:
-        values.status === "active" ||
-          values.status === "disabled" ||
-          values.status === "on_hold"
-          ? values.status
-          : "active",
-    };
+    const body = (restrictedCreate
+      ? {
+        username: values.username,
+        data_limit: values.data_limit,
+        expire: values.expire,
+        note: values.note,
+      }
+      : {
+        ...rest,
+        concurrent_user_limit,
+        data_limit: values.data_limit,
+        proxies: mergeProxies(selected_proxies, values.proxies),
+        data_limit_reset_strategy:
+          values.data_limit && values.data_limit > 0
+            ? values.data_limit_reset_strategy
+            : "no_reset",
+        status:
+          values.status === "active" ||
+            values.status === "disabled" ||
+            values.status === "on_hold"
+            ? values.status
+            : "active",
+      }) as UserCreate;
 
     const requestedOwner = owner_admin || userData.username;
     const currentOwner = editingUser?.admin?.username || userData.username;
@@ -499,10 +515,12 @@ export const UserDialog: FC<UserDialogProps> = () => {
       requestedOwner &&
       requestedOwner !== currentOwner;
 
-    const request = methods[method](body).then(async () => {
+    let savedUsername = values.username;
+    const request = methods[method](body).then(async (savedUser) => {
+      if (savedUser) savedUsername = savedUser.username;
       if (shouldAssignOwner) {
         try {
-          await fetch(`/user/${encodeURIComponent(values.username)}/set-owner`, {
+          await fetch(`/user/${encodeURIComponent(savedUsername)}/set-owner`, {
             method: "PUT",
             query: { admin_username: requestedOwner },
           });
@@ -511,7 +529,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
           useDashboard.getState().refetchUsers();
         } catch (assignmentError) {
           if (!isEditing) {
-            await fetch(`/user/${encodeURIComponent(values.username)}`, {
+            await fetch(`/user/${encodeURIComponent(savedUsername)}`, {
               method: "DELETE",
             }).catch(() => undefined);
             useDashboard.getState().refetchUsers();
@@ -526,7 +544,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
         toast({
           title: t(
             isEditing ? "userDialog.userEdited" : "userDialog.userCreated",
-            { username: values.username }
+            { username: savedUsername }
           ),
           status: "success",
           isClosable: true,
@@ -705,7 +723,13 @@ export const UserDialog: FC<UserDialogProps> = () => {
                             disabled={disabled || isEditing}
                             {...form.register("username")}
                           />
+                          {!isEditing && accountQuery.data?.user_namespace_prefix && (
+                            <FormHelperText dir="ltr" textAlign="start">
+                              {accountQuery.data.user_namespace_prefix}_{requestedUsername || t("username")}
+                            </FormHelperText>
+                          )}
                         </FormControl>
+                        {!restrictedCreate && (
                         <FormControl flex={{ base: "1", md: "0 0 210px" }} w={{ base: "full", md: "auto" }}>
                           <FormLabel whiteSpace="normal" lineHeight="1.7">
                             {isEditing ? t("usersTable.status") : t("userDialog.onHold")}
@@ -751,6 +775,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                             }}
                           />
                         </FormControl>
+                        )}
                       </Stack>
                       {userData.is_sudo && (
                         <FormControl mb="10px">
@@ -810,6 +835,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                           }}
                         />
                       </FormControl>
+                      {!restrictedCreate && (
                         <FormControl mb="10px" isInvalid={!!form.formState.errors.concurrent_user_limit}>
                           <FormLabel>{t("userDialog.concurrentUserLimit")}</FormLabel>
                           <Controller
@@ -863,7 +889,8 @@ export const UserDialog: FC<UserDialogProps> = () => {
                             })}
                           </FormHelperText>
                         </FormControl>
-                      {!modeAllowed && (
+                      )}
+                      {!restrictedCreate && !modeAllowed && (
                         <Alert status="warning" borderRadius="10px" mb={3} alignItems="start">
                           <AlertIcon mt={0.5} />
                           <Box>
@@ -872,7 +899,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                           </Box>
                         </Alert>
                       )}
-                      <Collapse
+                      {!restrictedCreate && <Collapse
                         in={!!(dataLimit && dataLimit > 0)}
                         animateOpacity
                         style={{ width: "100%" }}
@@ -915,7 +942,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                             }}
                           />
                         </FormControl>
-                      </Collapse>
+                      </Collapse>}
 
                       <FormControl mb={"10px"}>
                         <FormLabel>
@@ -1057,7 +1084,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                     )}
                   </VStack>
                 </GridItem>
-                <GridItem minW={0} p={{ base: 4, md: 5 }} bg="#0d1812" borderWidth="1px" borderColor="#33483b" borderRadius="14px" boxShadow="0 10px 28px rgba(0,0,0,.16)">
+                {!restrictedCreate && <GridItem minW={0} p={{ base: 4, md: 5 }} bg="#0d1812" borderWidth="1px" borderColor="#33483b" borderRadius="14px" boxShadow="0 10px 28px rgba(0,0,0,.16)">
                   <Stack spacing={4} minW={0}>
                     <SectionHeader
                       title={t("userDialog.protocols")}
@@ -1108,7 +1135,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                       </FormErrorMessage>
                     </FormControl>
                   </Stack>
-                </GridItem>
+                </GridItem>}
                 {isEditing && usageVisible && (
                   <GridItem pt={2} colSpan={{ base: 1, xl: 2 }} minW={0}>
                     <VStack gap={4}>
@@ -1219,7 +1246,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                     px="8"
                     colorScheme="primary"
                     isLoading={loading}
-                    isDisabled={disabled || lacksCapacity || !modeAllowed}
+                    isDisabled={disabled || (!restrictedCreate && (lacksCapacity || !modeAllowed))}
                     w={{ base: "full", sm: "auto" }}
                   >
                     {isEditing ? t("userDialog.editUser") : t("createUser")}

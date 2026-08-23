@@ -11,6 +11,7 @@ from app.device_limit.constants import (
     DEFAULT_ADMIN_SUBSCRIPTION_MODES,
     SubscriptionMode,
 )
+from app.utils.admin_billing import BillingMode
 from app.utils.jwt import get_admin_payload
 from config import SUDOERS
 
@@ -33,6 +34,7 @@ class Admin(BaseModel):
     auth_method: Literal["session", "automation"] = Field(default="session", exclude=True)
     api_scopes: set[str] = Field(default_factory=set, exclude=True)
     telegram_id: Optional[int] = None
+    phone: Optional[str] = None
     discord_webhook: Optional[str] = None
     users_usage: Optional[int] = None
     model_config = ConfigDict(from_attributes=True)
@@ -123,7 +125,7 @@ class Admin(BaseModel):
         write = method.upper() not in {"GET", "HEAD", "OPTIONS"}
         if path.startswith("/api/account"):
             return "account:read"
-        if path.startswith("/api/user-plans"):
+        if path.startswith("/api/user-plans") or path.startswith("/api/plan-network-options"):
             return "plans:write" if write else "plans:read"
         if path.startswith("/api/user") or path.startswith("/api/users"):
             return "users:write" if write else "users:read"
@@ -170,6 +172,7 @@ class Admin(BaseModel):
 class AdminCreate(Admin):
     password: str
     telegram_id: Optional[int] = None
+    phone: Optional[str] = Field(default=None, max_length=32)
     discord_webhook: Optional[str] = None
 
     @property
@@ -183,11 +186,18 @@ class AdminCreate(Admin):
             raise ValueError("Discord webhook must start with 'https://discord.com'")
         return value
 
+    @field_validator("phone")
+    @classmethod
+    def normalize_phone(cls, value):
+        value = value.strip() if value else None
+        return value or None
+
 
 class AdminModify(BaseModel):
     password: Optional[str] = None
     is_sudo: Optional[bool] = None
     telegram_id: Optional[int] = None
+    phone: Optional[str] = Field(default=None, max_length=32)
     discord_webhook: Optional[str] = None
 
     @property
@@ -201,6 +211,12 @@ class AdminModify(BaseModel):
         if value and not value.startswith("https://discord.com"):
             raise ValueError("Discord webhook must start with 'https://discord.com'")
         return value
+
+    @field_validator("phone")
+    @classmethod
+    def normalize_phone(cls, value):
+        value = value.strip() if value else None
+        return value or None
 
 
 class AdminPartialModify(AdminModify):
@@ -223,6 +239,7 @@ class AdminValidationResult(BaseModel):
 class MarzhelpAdminPolicy(BaseModel):
     """Editable MarzHelp limits exposed to sudo admins in the dashboard."""
 
+    billing_mode: BillingMode = BillingMode.LEGACY_COMPAT
     total_traffic: Optional[int] = Field(default=None, ge=0)
     expiry_date: Optional[date] = None
     user_limit: Optional[int] = Field(default=None, ge=0)
@@ -286,6 +303,7 @@ class AdminQuotaSummary(BaseModel):
     credit_remaining: Optional[int] = None
     credit_usage_percent: Optional[float] = None
     credit_calculation_mode: Literal["used_traffic", "created_traffic"] = "used_traffic"
+    billing_mode: BillingMode = BillingMode.LEGACY_COMPAT
     operation_allowance_remaining: Optional[int] = None
     admin_warning_percent: int = 80
     sudo_warning_percent: int = 80
@@ -328,8 +346,17 @@ class ManagedAdminList(BaseModel):
 
 
 class ManagedAdminCreate(AdminCreate):
+    phone: str = Field(min_length=1, max_length=32)
     policy: MarzhelpAdminPolicy = Field(default_factory=MarzhelpAdminPolicy)
     plan_category_ids: list[int] = Field(default_factory=list)
+
+    @field_validator("phone")
+    @classmethod
+    def require_phone(cls, value):
+        value = value.strip() if value else ""
+        if not value:
+            raise ValueError("Phone is required for new Admins")
+        return value
 
 
 class ManagedAdminModify(AdminModify):

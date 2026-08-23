@@ -6,8 +6,29 @@ references:
 - `ghcr.io/smorad3363/marzban:vX.Y.Z`
 - `ghcr.io/smorad3363/marzban:sha-<12-character-commit-sha>`
 
-The `latest` tag is only a moving pointer to the newest tagged release. Older
-version and SHA tags remain available and are not replaced by a later release.
+The `latest` tag is only a moving pointer to the newest stable tagged release.
+Prereleases never move `latest`. Older version and SHA tags remain available and
+are not replaced by a later release.
+
+## v5.0.0-rc.1 staging candidate
+
+This prerelease is the staging candidate for the v5 feature set. It is not the
+final `v5.0.0` release and does not deploy to any server automatically.
+
+Update a staging server to this exact candidate:
+
+```bash
+marzban update --version v5.0.0-rc.1
+```
+
+Fresh-install this exact candidate from GitHub:
+
+```bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.0.0-rc.1/scripts/marzban.sh)" @ install --version v5.0.0-rc.1 --database mysql
+```
+
+Take and verify a backup before updating. Production database evidence for this
+project is MySQL 8.x with InnoDB.
 
 ## Release process
 
@@ -16,8 +37,9 @@ version and SHA tags remain available and are not replaced by a later release.
 3. Create and push an annotated `vX.Y.Z` tag.
 4. Wait for the GitHub `Release` workflow to finish.
 
-The workflow builds multi-architecture images, publishes the version, SHA and
-`latest` tags, then creates a GitHub Release with generated notes.
+The workflow builds multi-architecture images and publishes version and SHA tags.
+Stable releases also move `latest`; prereleases do not. It then creates the
+matching GitHub Release or prerelease with generated notes.
 
 ## Update
 

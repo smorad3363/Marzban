@@ -1,6 +1,7 @@
 import { Box, HStack, Text } from "@chakra-ui/react";
 import { AppShell } from "components/AppShell";
 import { AdminCreditSummary } from "components/AdminCreditSummary";
+import { DashboardOverview } from "components/DashboardOverview";
 import { CoreSettingsModal } from "components/CoreSettingsModal";
 import { DeleteUserModal } from "components/DeleteUserModal";
 import { Filters } from "components/Filters";
@@ -37,6 +38,7 @@ export const Dashboard: FC = () => {
         </Box>
       </HStack>
       <AdminCreditSummary />
+      <DashboardOverview />
       <Statistics />
       <Box
         mt={5}

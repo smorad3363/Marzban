@@ -1,6 +1,6 @@
 # نقشه راه Owner، Super Admin، Admin، سلسله‌مراتب و انتقال اعتبار
 
-آخرین به‌روزرسانی: `2026-08-19`
+آخرین به‌روزرسانی: `2026-08-23`
 
 وضعیت: `V4.9.3_RELEASE_CANDIDATE` — پشتیبانی نصب تازه با MySQL latest و ارتقای مرحله‌ای دیتای موجود `8.0 → 8.4 → 9.7 → latest` پیاده و در CI با حفظ یک volume واقعی تأیید شد. انتشار immutable `v4.9.3` در انتظار گیت نهایی است.
 
@@ -63,7 +63,45 @@
 6. اگر کار نیمه‌کاره ماند، فایل‌های دارای تغییر و فرمان دقیق ادامه ثبت شوند.
 7. پس از وصل مجدد برق، ابتدا این فایل، سپس `git status --short --branch` و آخرین ردیف لاگ خوانده شود. کار از «نقطه دقیق ادامه» ادامه پیدا کند؛ مراحل کامل دوباره اجرا نشوند.
 8. هیچ تغییر مرتبطی در `marzhelp` یا `V2IpLimit` انجام نشود. محل تغییر فقط پروژه `Marzban` است.
-9. هر گزارش پیشرفت دارای تغییر DB باید نتیجه بررسی سازگاری upgrade، backfill داده قدیمی و rollback application را به کاربر نشان دهد.
+9. هر گزارش پیشرفت دارای تغییر DB باید نتیجه upgrade از baselineهای فعلی، backfill
+   واقعاً لازم و rollback application را نشان دهد؛ برای Stageهای 7 تا 13، داده legacy
+   فرضی ساخته یا گزارش نشود.
+
+## بهینه‌سازی سراسری دامنه Stageهای 7 تا 13 — تصمیم Owner در `2026-08-23`
+
+> [!important] دامنه معتبر ادامه پروژه
+> این deployment هرگز در production استفاده نشده و هیچ User/Admin/account/settings
+> تاریخی production برای حفظ یا backfill وجود ندارد. این تصمیم فقط Stageهای 7 تا
+> 13 را بهینه می‌کند؛ Stageهای PASS شده 0 تا 6 و evidence تاریخی آن‌ها بازنویسی یا
+> دوباره‌اجرا نمی‌شوند مگر defect یا dependency conflict واقعی پیدا شود.
+
+- migration امن از schema نصب `v4.9.8` و زنجیره فعلی پروژه الزامی است. head محلی
+  هنگام ثبت این تصمیم `5b8d1f3a7c64` است؛ هر Stage head واقعی شروع خود را ثبت کند.
+- compatibility لازم working tree فعلی حفظ شود. `LEGACY_COMPAT` پیاده‌شده باقی
+  می‌ماند، اما بدون dependency واقعی توسعه داده نمی‌شود. کد legacy-related که در
+  Stageهای PASS وجود دارد صرفاً برای cleanup حذف، rename یا rewrite نشود.
+- ساخت backfill پیچیده، dataset مصنوعی و test matrix برای account/settings فرضی
+  production ممنوع است؛ مگر migration فعلی، dependency واقعی یا invariant امنیتی/
+  حسابداری آن را لازم کند.
+- DB production فقط MySQL 8.x / InnoDB است. evidence مربوط به migration، transaction،
+  locking، concurrency، index، query plan و performance فقط با MySQL واقعی معتبر
+  است. SQLite فقط unit harness سریع است و PASS آن evidence DB production نیست.
+- PostgreSQL و TimescaleDB در Stageهای باقی‌مانده پیاده‌سازی یا تست نشوند. مهاجرت
+  آینده به `TimescaleDB -> PostgreSQL -> SQLAlchemy -> Alembic -> FastAPI/Marzban`
+  پروژه‌ای مستقل است.
+- الگوهای portable در SQLAlchemy/Alembic ترجیح دارند، اما correctness، transaction
+  safety و performance فعلی MySQL قربانی portability نظری نشود. SQL/DDL/index/query
+  خاص MySQL فقط هنگام ضرورت، ایزوله و با علت مستند استفاده شود.
+- تست هر Stage: targeted + adjacent regression. ماتریس‌های قدیمی گران فقط وقتی
+  تکرار شوند که رفتار مرتبط تغییر کرده باشد. پوشش security، accounting، hierarchy،
+  authorization، idempotency، concurrency، ledger/refund، Plan/network scope،
+  backup/restore و Telegram reliability کاهش پیدا نکند.
+- تمرکز DB: Stage 7 رقابت delegation/freeze؛ Stage 8 bulk accounting و resume؛
+  Stage 9 aggregate/query plan؛ Stage 10 pagination/index؛ Stage 11 outbox/scheduler/
+  backup lock و restore؛ Stage 12 فقط در صورت اثر واقعی DB؛ Stage 13 migration و
+  regression نهایی از baselineهای فعلی روی MySQL.
+- ترتیب مرجع بدون تغییر است: `AGENTS.md`، سپس اسناد الزامی repository، سپس Runbook.
+- commit، push، tag، release، deploy و publish تا دستور صریح همچنان ممنوع است.
 
 ## هدف نهایی
 
@@ -669,20 +707,27 @@ indexهای پایه پیشنهادی:
 
 ## قرارداد اجباری سازگاری Update
 
-هر نسخه جدید باید با دستور update موجود Marzban از تمام وضعیت‌های DB پشتیبانی‌شده بالا بیاید؛ چه دیتابیس خالی باشد، چه داده قدیمی/ناقص داشته باشد. موفق‌بودن فقط روی DB توسعه قابل قبول نیست.
+برای Stageهای 7 تا 13، نسخه جدید باید با دستور update موجود Marzban از baseline
+نصب `v4.9.8` و schema فعلی پروژه روی MySQL 8.x / InnoDB بالا بیاید. موفق‌بودن فقط
+روی DB توسعه یا SQLite قابل قبول نیست. بندهای legacy زیر به‌عنوان قرارداد تاریخی
+و رفتار پیاده‌شده حفظ می‌شوند، اما ماتریس hypothetical production legacy توسعه
+نمی‌یابد مگر dependency واقعی current working tree آن را لازم کند.
 
 ### ماتریس الزامی آزمون Upgrade
 
-- نصب تازه با DB خالی تا Alembic head جدید.
-- DB آخرین tag قابل‌نصب تا head جدید.
-- DB تمام releaseهای پشتیبانی‌شده‌ای که schema را تغییر داده‌اند تا head جدید.
-- حداقل snapshot قدیمی canonical از `v4.0.0` تا نسخه هدف.
-- DB دارای Admin/User/credit/usage/template/node واقعی و مقدارهای `NULL` قدیمی.
-- DB با migration نیمه‌اجراشده MySQL و DDL جزئی.
-- اجرای دوباره migration پس از قطع سرویس یا برق.
-- اجرای image نسخه rollback روی schema جدید؛ چون rollback فعلی migration دیتابیس را downgrade نمی‌کند.
+- نصب تازه/خالی `v4.9.8` تا Alembic head جدید روی MySQL واقعی.
+- DB در head فعلی پروژه هنگام شروع Stage تا head جدید.
+- DB با DDL جزئی یا migration نیمه‌اجراشده، فقط برای migrationهای جدید Stageهای
+  باقی‌مانده که recovery آن‌ها واقعاً لازم است.
+- اجرای دوباره همان migration پس از قطع سرویس یا برق.
+- حفظ ID، ownership، credit، usage، ledger، refund و scope موجود در dataset نماینده
+  current schema؛ بدون ساخت population تاریخی فرضی.
+- اجرای image rollback روی schema جدید، هرجا سیاست rollout فعلی آن را لازم می‌کند؛
+  rollback فعلی migration دیتابیس را downgrade نمی‌کند.
+- PostgreSQL/TimescaleDB و validation متقاطع DB خارج از دامنه فعلی‌اند.
 
-release تا موفقیت همه حالت‌های مرتبط منتشر نشود. برای هر مسیر، تعداد ردیف، شناسه‌ها، ownership، جمع credit/usage و hash یا snapshot داده حساس بررسی شود.
+release تا موفقیت همه حالت‌های مرتبط بالا منتشر نشود. SQLite جایگزین هیچ evidence
+migration/concurrency/query-plan نیست.
 
 ### الگوی migration
 
@@ -730,7 +775,9 @@ reason codeهای حداقلی برای لاگ parent:
 
 ### گزارش اجباری به کاربر هنگام هر تغییر DB
 
-هر لاگ پیشرفت migration باید این اطلاعات را نشان دهد:
+هر لاگ پیشرفت migration باید اطلاعات زیر را در حد مرتبط با baseline فعلی نشان دهد.
+فیلدهای legacy/backfill که dependency واقعی ندارند برای Stageهای 7 تا 13 `N/A`
+ثبت می‌شوند و برای پرکردن آن‌ها dataset فرضی ساخته نمی‌شود:
 
 - source tag/commit و target tag/commit.
 - source Alembic head و target head.
@@ -753,7 +800,8 @@ reason codeهای حداقلی برای لاگ parent:
 - rollback برنامه با خاموش‌کردن feature flag ممکن باشد؛ داده hierarchy و ledger حذف نشود.
 - rollback نباید انتقال‌های مالی ثبت‌شده را معکوس یا پاک کند.
 - پس از rollout، شمار Adminها، Userهای بدون مالک، closure rowها، مجموع اعتبار و اختلاف ledger کنترل شود.
-- migration جدید قبل از release روی snapshot تمام schemaهای پشتیبانی‌شده و DB خالی اجرا شود.
+- migration جدید قبل از release روی baseline نصب `v4.9.8`، schema فعلی پروژه و DB
+  خالی MySQL اجرا شود؛ snapshot قدیمی‌تر فقط با dependency واقعی current لازم است.
 - recovery از MySQL partial DDL اجباری باشد؛ اتکا به rollback تراکنشی DDL ممنوع.
 - تا وقتی backfill Owner/Parent کامل نشده، compatibility mode و `is_sudo` قدیمی حفظ شود.
 - constraintهای سخت Parent و حذف ستون‌های قدیمی تا release بعد از پایان پنجره rollback به‌تعویق بیفتند.
@@ -781,6 +829,35 @@ reason codeهای حداقلی برای لاگ parent:
 - [x] تعیین دسترسی Plan: allowlist فرزند؛ انتشار subtree گزینه مستقل با پیش‌فرض خاموش
 
 ## نقطه دقیق ادامه
+
+در `2026-08-23` مجوز Owner برای external action محدود Stage 12 و مقصد
+`smorad3363/Marzban-scripts` دریافت شد، اما preflight تکرارشده هنوز `BLOCKED` است:
+`gh auth status` کاربر authenticated ندارد، `GH_TOKEN/GITHUB_TOKEN` موجود نیست و
+fork مقصد نیز هنوز وجود ندارد. upstream در HEAD
+`24a772d297c7518dae7650b8f106419e73813cda` قابل دسترسی است. نقطه ادامه: login امن
+GitHub به حساب `smorad3363` و تکرار preflight. طبق Gate صریح، Stage 13 شروع نشده است.
+main Marzban commit/push/tag/release/deploy/publish ممنوع باقی ماند.
+
+خلاصه Stage 9 حفظ‌شده: Admin
+جدید phone اجباری دارد، فرم Admin برحسب billing mode تنظیم می‌شود و Discord در UI
+موردنظر نمایش داده نمی‌شود. داشبورد جدید aggregateهای scope-aware، چهار billing mode،
+مرز هفته با timezone صریح و query count محدود دارد. migration
+`6d4f2a9c8e10` ستون nullable phone را برای سازگاری schema فعلی و دو index داشبورد
+اضافه می‌کند؛ rollback واقعی MySQL نیز تست شده است. نقطه ادامه Stage 10 است، اما شروع
+آن نیازمند دستور صریح جدید است. commit/push/tag/release/deploy/publish همچنان ممنوع است.
+
+بهینه‌سازی governance برای Stageهای 7 تا 13 ثبت شده است: deployment هرگز production
+نبوده، DB هدف فقط MySQL 8.x / InnoDB است، compatibility لازم `v4.9.8` و schema
+فعلی حفظ می‌شود، و `LEGACY_COMPAT` بدون dependency واقعی گسترش پیدا نمی‌کند.
+
+Stage 6 پس از اجرای migration واقعی MySQL، backend، UI، آزمون
+هم‌زمانی آخرین Trial Quota، idempotency و regression به `PASS` رسید. Trial با
+metadata صریح و immutable از کاربر تجاری جدا می‌شود؛ سهمیه مستقل Admin فقط یک‌بار
+مصرف می‌شود و cleanup فقط از metadata، در scope مجاز و پس از preview استفاده
+می‌کند. Trial نامحدود همچنان از حسابداری mode عبور می‌کند و برای
+`ALLOCATED_TRAFFIC` محدود fail-closed است. نقطه دقیق ادامه: توقف پس از Stage 6؛
+Stage 7 شروع نشده و فقط با دستور صریح جدید و بررسی prerequisiteهای خودش مجاز است.
+commit/push/tag/release/publish/deploy انجام نشده و همچنان ممنوع است.
 
 تعمیر Stage 3 روی branch `agent/admin-hierarchy-v4.9.0` آماده انتشار `v4.9.8` است. `MRZ-DL-004` اصلاح شد: parser فرمت‌های واقعی source در Xray `26.7.28` را بدون fallback به destination می‌خواند؛ diagnostics محدود و sudo-only اضافه شد؛ و رفتار threshold/handoff grace با آزمون قطعی پوشش داده شد. tag `v4.9.7` به‌علت contract قدیمی نسخه در CI منتشر نشد و طبق سیاست immutable جابه‌جا نشد. پروتکل resume: پس از Graphify update، diff review و انتشار، این Stage متوقف است؛ تا درخواست صریح Stage 4 هیچ مرحله دیگری شروع نشود. این release تغییر schema یا migration ندارد.
 
@@ -838,3 +915,34 @@ git log -3 --oneline --decorate
 | `2026-08-20` | Stage 1 repair | کد و آزمون محلی کامل؛ گیت خارجی باز | PRE-STAGE: root/worktree/remote/toolchain و Graphify بررسی شد؛ Graphify به `3258 nodes/7981 edges/383 communities` و freshness=`0` رسید. فایل‌های Stage 1: `app/db/crud.py`، `app/routers/user.py`، `cli/user.py`، `app/dashboard/src/{hooks/useGetUser.tsx,utils/authStorage.ts,contexts/DashboardContext.tsx,pages/Login.tsx,components/Header.tsx}`، `tests/test_user_access_scope.py` و این roadmap. تغییرات قبلی کاربر در Xray/status دست‌نخورده ماند | `e28312f` + working tree | pre-fix=`3 failed, 5 passed`؛ targeted=`32 passed`؛ full=`100 passed, 2 skipped, 464 warnings`؛ تست authorization افزوده‌شده=`1 passed`؛ TypeScript=`0`، Vite production build=`0`؛ MySQL/Xray/browser زنده اجرا نشد | Graphify update/diagnose و diff review؛ گزارش و توقف Stage 1؛ سپس انتظار برای دستور صریح Stage 2 |
 | `2026-08-21` | Stage 2 repair | کد و آزمون محلی کامل؛ گیت Xray/MySQL زنده باز | `MRZ-STATE-003`: جلوگیری از resurrect شدن User غیرفعال در reset تکی و release پنالتی Device Limit؛ حفظ `on_hold` در reset؛ اصلاح ترتیب بررسی `active-next`؛ افزودن ماتریس وضعیت و contract عملیات Xray | `e28312f` + working tree | pre-fix=`3 failed, 7 passed`؛ اثبات عبارت upstream برای disabled=`1 failed`؛ Stage 2=`11 passed`؛ targeted=`66 passed`؛ full=`112 passed, 2 skipped, 531 warnings` | Graphify update/diagnose و diff review؛ گزارش و توقف Stage 2؛ سپس انتظار برای دستور صریح Stage 3 |
 | `2026-08-21` | Stage 3 repair | کد و آزمون محلی کامل؛ آماده انتشار `v4.9.8` | `MRZ-DL-004`: پشتیبانی امن parser از sourceهای مستقیم، `tcp:IPv4`، IPv6 و `tcp:[IPv6]` در Xray `26.7.28`؛ جلوگیری از fallback به destination؛ diagnostics محدود و sudo-only؛ اثبات threshold و handoff grace | `e28312f` + working tree | pre-fix=`1 failed, 1 passed`؛ Stage 3=`21 passed`؛ targeted=`71 passed`؛ full=`117 passed, 2 skipped, 533 warnings`؛ TypeScript/Vite production build=`0`؛ `v4.9.7` CI فقط با contract قدیمی نسخه شکست خورد | Graphify update/diff review؛ commit/tag/release `v4.9.8`؛ توقف و انتظار برای دستور صریح Stage 4 |
+| `2026-08-22` | Runbook V3 Stage 1 | `PASS`؛ فقط `BUG-04/09/10` | intent داخلی `edit/renew`، quota صریح برای Telegram charge و Next Plan، transaction مشترک reset+renew، حفظ capture حذف Device Limit و تشخیص Owner واقعی | `b45e3af` + working tree | pre-fix=`3 failed, 1 passed`؛ Stage 1=`5 passed`؛ adjacent=`78 passed`؛ compileall/diff-check/Graphify=`PASS`؛ MySQL/Telegram زنده=`NOT EXECUTED` | توقف؛ انتظار برای دستور صریح Stage 2؛ بدون commit/push/tag/release |
+| `2026-08-22` | Runbook V3 Stage 2 | `PASS`؛ فقط `BUG-05/06` و `R-RES-01..03` | Ledger توسعه‌یافته با target/resource/delta/before-after؛ Grant/Reclaim و audit اتمیک؛ CAS همزمانی؛ initial credit والد-محور؛ Renewal API/UI مجاز؛ migration=`7d2c6a4e9b10` | `b45e3af` + working tree | pre-fix concurrency=`1 failed, 6 passed`؛ final targeted+adjacent=`90 passed` روی SQLite و MySQL/InnoDB `8.0.43`؛ UI auth/TypeScript/Vite/compileall/diff-check/Graphify=`PASS` | توقف؛ انتظار برای دستور صریح Stage 3 و حل `D-05/D-09`؛ بدون commit/push/tag/release |
+| `2026-08-22` | Runbook V3 Stage 3 | `BLOCKED` پیش از implementation | Stage 0 read-only و Graphify مسیر mode/ledger/usage/migration را بررسی کرد؛ مدل legacy برای قرارداد تجاری جدید evidence کافی نیست؛ `D-05` و `D-09` حل نشده‌اند | `b45e3af` + working tree | source/schema tests=`NOT EXECUTED`؛ Git/remote/GitHub/GHCR preflight=`PASS`؛ source/schema changes=`0` | دریافت تصمیم صریح Owner برای refund/reclaim، unlimited-device Seat cost و legacy migration/default؛ سپس تکرار Stage 0؛ بدون commit/push/tag/release |
+| `2026-08-22` | Runbook V3 Stage 4 | `BLOCKED` پیش از implementation | prerequisite برابر `Stage 3 PASS` برقرار نیست و `D-10` نیز حل نشده است؛ Graphify مسیرهای Plan/Inbound/Host/access/subscription را فقط read-only بررسی کرد | `b45e3af` + working tree | source/UI/schema tests=`NOT EXECUTED`؛ Git/remote/GitHub/GHCR preflight=`PASS`؛ source/UI/schema changes=`0` | ابتدا Stage 3 را پس از تصمیم‌های Owner به `PASS` برسان؛ سپس `D-10` را تعیین و Stage 4 را تکرار کن؛ بدون commit/push/tag/release |
+| `2026-08-22` | Runbook V3 تصمیم `D-05` | `RESOLVED`؛ implementation هنوز `NOT EXECUTED` | no auto-refund؛ Refund Request پایدار با snapshot immutable؛ وضعیت‌های `PENDING/APPROVED/REJECTED/CANCELLED`؛ approval-only ledger credit؛ authorization/idempotency/transaction/concurrency/audit الزامی | `b45e3af` + working tree | docs contract و `git diff --check`؛ source/schema tests=`NOT EXECUTED` | دریافت `D-09` و legacy migration/default؛ سپس اجرای واقعی Stage 3؛ بدون commit/push/tag/release |
+| `2026-08-22` | Runbook V3 Stage 3 resume | `IN PROGRESS`؛ فقط Stage 3 | `D-09` resolved: Seat cost برابر device/concurrency مثبت و محدود؛ fallback ممنوع. Legacy resolved: `LEGACY_COMPAT` تا assignment صریح Owner و بدون balance reinterpretation | `b45e3af` + working tree | Stage 0 Git/tag/GHCR/Graphify=`PASS`؛ GitHub REST=`403 Forbidden` با same-session verification؛ implementation tests هنوز `NOT EXECUTED` | migration/service/API/tests Stage 3؛ MySQL evidence؛ توقف بدون Stage 4/انتشار |
+| `2026-08-22` | Runbook V3 Stage 3 final | `PASS`؛ فقط Stage 3 | strategy صریح چهار mode؛ migration `8c4d7e9f2a31` با backfill صرفاً `LEGACY_COMPAT`؛ Seat بدون fallback و بدون auto-return؛ Used delta-derived؛ Allocated charge بدون auto-refund؛ Refund Request پایدار با snapshot/history/auth/idempotency/row-lock و approval-only ledger | `b45e3af` + working tree | targeted=`54 passed, 1 skipped`؛ MySQL/InnoDB `8.0.43` migration+concurrency=`2 passed`؛ full=`150 passed, 3 skipped`؛ compileall/diff-check/Graphify=`PASS` (`3869/9331/441`) | توقف؛ حل `D-10` و دستور صریح پیش از Stage 4؛ بدون commit/push/tag/release/publish |
+| `2026-08-22` | Runbook V3 Stage 4 start | `BLOCKED` پیش از implementation | Stage 3=`PASS`؛ Graphify و source نشان دادند empty Inbound مجاز، proxy خالی محتمل و `PlanHost` غایب است؛ D-10 تعیین نمی‌کند empty باید reject، snapshot-default یا dynamic-inherit باشد | `b45e3af` + working tree | Stage 0 root/HEAD/upstream/tag/GHCR/diff-check=`PASS`؛ GitHub Latest API=`403 Forbidden`؛ source/schema/UI tests=`NOT EXECUTED` | دریافت تصمیم صریح D-10؛ سپس تکرار Stage 0 و اجرای Stage 4؛ بدون commit/push/tag/release/publish |
+| `2026-08-22` | Runbook V3 Stage 5 start | `BLOCKED` پیش از implementation | prerequisite سخت برقرار نیست: Stage 4=`BLOCKED` روی `D-10` و Gate A=`NOT EXECUTED`؛ تصمیم‌های `D-01` و `D-03` نیز بازند؛ Graphify مسیرهای Plan create/renew، raw create، billing و namespace را read-only بررسی کرد | `b45e3af` + working tree | Stage 0 root/HEAD/upstream/tag/GitHub Latest/GHCR/diff-check=`PASS`؛ source/schema/UI/targeted tests=`NOT EXECUTED`؛ source diff fingerprint=`87553abc0fa609214c1b1b9c72cef4541d6d89db` | تعیین D-10، تکمیل Stage 4 و Gate A؛ سپس تعیین D-01/D-03 و شروع مجدد Stage 5؛ حفظ D-05؛ بدون commit/push/tag/release/publish |
+| `2026-08-22` | Runbook V3 D-10 / Stage 4 resume | `IN PROGRESS`؛ فقط Stage 4 | `D-10 = Option 1` تأیید شد: Plan بدون Inbound یا Host لازم رد؛ disabled/deleted/unavailable/out-of-scope fail-closed؛ validation/create/subscription همسان؛ بدون snapshot default/dynamic inheritance | `b45e3af` + working tree | Stage 0 remote tag/GitHub Latest/GHCR/diff-check=`PASS`؛ Graphify impact analysis در حال اجرا | schema/backend/UI سپس targeted/adjacent/MySQL و Gate A؛ توقف پیش از Stage 5؛ بدون commit/push/tag/release/publish |
+| `2026-08-22` | Runbook V3 Stage 4 final | `PASS`؛ فقط Stage 4 | scope صریح versioned برای Inbound/Host؛ empty/disabled/deleted/unavailable/mismatch/out-of-scope همگی fail-closed؛ validation و create/renew/subscription همسان؛ UI انتخاب nested؛ migration=`9f6a2c8d4e10`؛ legacy Plan بدون Host inferred نمی‌شود | `b45e3af` + working tree | targeted=`17 passed`؛ Gate A=`124 passed`؛ full=`160 passed`؛ MySQL/InnoDB `8.0.43` migration=`1 passed`؛ UI utility/TypeScript/Vite/compileall/diff-check/Graphify=`PASS` (`3916/9517/446`)؛ browser/live infrastructure=`NOT EXECUTED` | توقف کامل؛ Stage 5 شروع نشود؛ ابتدا تصمیم صریح `D-01/D-03` و دستور جدید؛ بدون commit/push/tag/release/publish/deploy |
+| `2026-08-22` | Runbook V3 D-01/D-03 / Stage 5 resume | `IN PROGRESS`؛ فقط Stage 5 | D-01: تمدید Seat مانند creation و به‌اندازه device count Plan شارژ اتمیک/idempotent؛ expiry بدون بازگشت. D-03: prefix پایدار و یکتای هر creator برای همه Userهای مشتری جدید از Owner تا Sub-admin؛ login ادمین و User موجود بدون rename | `b45e3af` + working tree | Stage 4=`PASS`؛ Gate A=`124 passed`؛ Stage 0 root/HEAD/upstream/diff-check/Graphify=`PASS`؛ source tests هنوز `NOT EXECUTED` | migration و backend/UI Stage 5؛ targeted/concurrency/MySQL/regression؛ Graphify/docs؛ توقف پیش از Stage 6 و بدون publication |
+| `2026-08-23` | Runbook V3 Stage 5 final | `PASS`؛ فقط Stage 5 | migration=`3a7e5c1b8d42`؛ prefix پایدار و unique برای همه creatorها؛ raw Seat fail-closed؛ Used/Allocated simple create با network/device server-derived؛ Seat Plan renewal اتمیک و idempotent بدون بازگشت اعتبار در expiry/delete | `b45e3af` + working tree | targeted=`18 passed`؛ adjacent=`101 passed, 1 skipped`؛ full=`167 passed, 3 skipped`؛ MySQL/InnoDB `8.0.43`=`1 passed`؛ TypeScript/Vite/UI utility/compileall/diff-check=`PASS`؛ Graphify export=`BLOCKED/UNCERTAINTY` با حفظ graph قبلی؛ browser/live=`NOT EXECUTED` | توقف کامل پیش از Stage 6؛ full Graphify rebuild بعداً؛ بدون commit/push/tag/release/publish/deploy |
+| `2026-08-23` | Runbook V3 Stage 6 start | `IN PROGRESS`؛ فقط Stage 6 | Stage 0 read-only تکرار شد؛ Stage 5=`PASS`؛ Trial نامحدود از همان حسابداری mode عبور می‌کند: Seat با device محدود، Used با مصرف واقعی و Allocated محدود به‌صورت fail-closed | `b45e3af` + working tree | root/HEAD/upstream/status/diff-check/Graphify query=`PASS`؛ remote tag refresh=`UNCERTAINTY` به‌علت TLS؛ source/schema/UI tests هنوز `NOT EXECUTED` | schema/backend/UI/migration و targeted/adjacent/MySQL؛ سپس Graphify/docs؛ توقف پیش از Stage 7 و بدون publication |
+| `2026-08-23` | Runbook V3 Stage 6 final | `PASS`؛ فقط Stage 6 | Trial Plan/assignment صریح و immutable؛ quota مستقل Admin با Owner grant/reclaim ledger؛ مصرف اتمیک/idempotent؛ cleanup مبتنی بر metadata با preview، scope، audit و حفظ deleted-user accounting؛ migration=`5b8d1f3a7c64` | `b45e3af` + working tree | targeted=`9 passed`؛ adjacent=`83 passed, 1 skipped`؛ full=`176 passed, 4 skipped`؛ MySQL/InnoDB `8.0.43` migration+last-quota race+same-key idempotency=`1 passed`؛ TypeScript/Vite/UI utility/compileall/diff-check=`PASS`؛ Graphify=`3988/9884/436`؛ browser/live=`NOT EXECUTED` | توقف کامل پیش از Stage 7؛ TLS remote و 11 zero-node Graphify file=`UNCERTAINTY` غیرمسدودکننده؛ بدون commit/push/tag/release/publish/deploy |
+| `2026-08-23` | بهینه‌سازی دامنه Stage 7–13 | `PASS`؛ فقط governance docs | حذف الزام future برای production legacy فرضی و cross-DB؛ baselineهای معتبر=`v4.9.8` و schema فعلی؛ DB production=`MySQL 8.x / InnoDB`؛ SQLite فقط unit harness؛ PostgreSQL/TimescaleDB پروژه آینده؛ `LEGACY_COMPAT` موجود بدون توسعه یا cleanup | `b45e3af` + working tree | فقط Runbook/Roadmap تغییر کرد؛ application/schema/migration/tests=`UNCHANGED`؛ scope/precedence و `git diff --check` بررسی شد | توقف؛ Stage 7 شروع نشده؛ در دستور بعد Stage 0 و تصمیم‌های `D-02/D-04`؛ بدون commit/push/tag/release/deploy/publish |
+| `2026-08-23` | Runbook V3 Stage 7 start | `BLOCKED` پیش از implementation | prerequisiteهای Stage 2/3/5=`PASS`؛ `D-02` واحد settlement ارجاع و `D-04` scope freeze هنوز unresolved؛ حدس ممنوع | `b45e3af` + working tree | Stage 0 root/HEAD/upstream/remote tag/diff-check/Graphify query=`PASS`؛ source/schema/migration/UI/tests/MySQL=`NOT EXECUTED` | دریافت تصمیم صریح `D-02` و `D-04`؛ تکرار Stage 0؛ ادامه فقط Stage 7؛ Stage 8 و publication ممنوع |
+| `2026-08-23` | Runbook V3 Stage 8 start | `BLOCKED` پیش از implementation | Stage 7=`BLOCKED` و prerequisite `Stage 7 PASS` برقرار نیست؛ `D-06` target semantics و `D-07` batch transaction/partial failure/retry نیز unresolved | `b45e3af` + working tree | root/HEAD/upstream/remote tag/diff-check/Graphify query=`PASS`؛ source/schema/query/UI/tests/MySQL=`NOT EXECUTED` | ابتدا حل `D-02/D-04` و تکمیل Stage 7؛ سپس تصمیم `D-06/D-07` و resume فقط Stage 8؛ Stage 9/publication ممنوع |
+| `2026-08-23` | Runbook V3 D-02/D-04 / Stage 7 resume | `IN PROGRESS`؛ فقط Stage 7 | D-02 attribution/audit-only بدون automatic reward؛ D-04 Owner Freeze روی target+تمام descendant Admin/User با restoration provenance-safe، audit و idempotency | `b45e3af` + working tree | Stage 0 root/HEAD/upstream/remote tag/diff-check/Graphify query=`PASS`؛ prerequisites Stage 2/3/5=`PASS` | schema/backend/UI Stage 7؛ targeted/adjacent/MySQL؛ Graphify/docs؛ توقف پیش از Stage 8 و بدون publication |
+| `2026-08-23` | Runbook V3 Stage 7 final | `PASS`؛ فقط Stage 7 | referral attribution جدا از hierarchy و بدون reward؛ Owner-only config؛ full-subtree Owner Freeze با snapshot دقیق Admin/User، provenance-safe unfreeze، session blocking، audit، idempotency و MySQL deadlock retry؛ migration=`7c9a2e4f1b65` | `b45e3af` + working tree | targeted=`16 passed`؛ adjacent=`72 passed, 2 skipped`؛ MySQL/InnoDB `8.0.43` fresh/current-schema migration + freeze/referral concurrency=`1 passed` و downgrade/re-upgrade=`PASS`؛ TypeScript/Vite=`1749 modules`؛ UI auth=`PASS`؛ Graphify=`4031/10110/446`؛ compileall/diff-check=`PASS` | توقف کامل پیش از Stage 8؛ browser/live infra و full suite=`NOT EXECUTED`؛ 11 zero-node Graphify file و 6 `.test-*` inaccessible=`UNCERTAINTY` غیرمسدودکننده؛ بدون commit/push/tag/release/deploy/publish |
+| `2026-08-23` | Runbook V3 Stage 8 resume | `BLOCKED` پیش از implementation | prerequisiteهای Stage 2/3/6/7=`PASS`؛ `D-06` target/default/filter semantics و `D-07` atomicity/partial-failure/resume/retry هنوز unresolved و حدس ممنوع | `b45e3af` + working tree | root/HEAD/upstream/diff-check/Graphify query=`PASS`؛ source/schema/query/UI/targeted/adjacent/MySQL=`NOT EXECUTED` | دریافت تصمیم صریح `D-06/D-07`؛ تکرار preflight و resume فقط Stage 8؛ Stage 9 و commit/push/tag/release/deploy/publish ممنوع |
+| `2026-08-23` | Runbook V3 Stage 8 final | `PASS`؛ فقط Stage 8 | scope صریح سه‌حالته و authorization server-side؛ snapshot immutable؛ job دائمی با target status/error/fingerprint؛ chunk محدود و transaction مستقل هر target؛ retry فقط incomplete/retryable؛ Bulk User و Admin Grant/Reclaim؛ UI preview/count/report؛ migration=`2e8c4a6f9b17` | `b45e3af` + working tree | targeted=`33 passed`؛ adjacent=`81 passed, 2 skipped`؛ MySQL/InnoDB `8.0.43` migration rerun+rollback، دو worker/۲۰ User، exact-once ledger و `EXPLAIN`=`1 passed`؛ TypeScript/Vite=`1749 modules`؛ UI auth/compileall/diff-check=`PASS`؛ Graphify=`4146/10577/452` | توقف کامل؛ Stage 9 شروع نشده؛ full suite/browser/Core/Node/Tunnel=`NOT EXECUTED`؛ 11 zero-node Graphify file=`UNCERTAINTY` غیرمسدودکننده؛ بدون commit/push/tag/release/deploy/publish |
+| `2026-08-23` | Runbook V3 Stage 9 final + Gate B | `PASS`؛ فقط Stage 9 و Gate B | phone اجباری Admin جدید بدون backfill فرضی؛ UI mode-aware بدون Discord؛ Seat Grant/Reclaim صحیح؛ dashboard scope-aware با week/timezone و چهار mode؛ migration=`6d4f2a9c8e10` و rollback FK-safe | `b45e3af` + working tree | targeted=`14 passed`؛ Gate B=`93 passed, 2 skipped`؛ MySQL/InnoDB `8.0.43` Stage 9=`1 passed` و hierarchy/bulk=`2 passed`؛ ۲۰۰۰ User + `EXPLAIN` دو index؛ TypeScript/Vite=`1750 modules`؛ compileall/diff-check=`PASS`؛ Graphify=`4195/10733/452` | توقف کامل پیش از Stage 10؛ full suite/browser/Core/Node/Tunnel=`NOT EXECUTED`؛ 11 zero-node Graphify file، دو skip اختیاری و 6 `.test-*` inaccessible=`UNCERTAINTY` غیرمسدودکننده؛ بدون commit/push/tag/release/deploy/publish |
+| `2026-08-23` | Runbook V3 Stage 10 final | `PASS`؛ فقط Stage 10 | business error code و fallback امن فارسی؛ Unlimited؛ pagination واقعی `10/25/50` با رد صریح مقدار/offset نامعتبر؛ search/filter/sort server-side، metadata صفحه و tie-breaker یکتا؛ migration=`1a9e7c3d5b20` با دو index مرکب | `b45e3af` + working tree | targeted=`32 passed`؛ adjacent=`48 passed`؛ MySQL/InnoDB `8.0.43` migration upgrade/downgrade، `SHOW INDEX`، ۱۰٬۰۰۰ User، `EXPLAIN ANALYZE` و deep-offset timing=`1 passed`؛ TypeScript/Vite=`1751 modules`؛ Graphify=`4217/10795/455` | توقف کامل پیش از Stage 11؛ full suite/browser/Core/Node/Tunnel=`NOT EXECUTED`؛ bundle-size warning، 11 zero-node Graphify file و 6 `.test-*` inaccessible=`UNCERTAINTY` غیرمسدودکننده؛ بدون commit/push/tag/release/deploy/publish |
+| `2026-08-23` | Runbook V3 Stage 11 start | `BLOCKED` پیش از implementation | Stage 10=`PASS`؛ `D-08` Backup policy و `D-11` outbox/audit retention/archive/purge هنوز unresolved؛ حدس درباره retention/security/operations ممنوع | `b45e3af` + working tree | root/HEAD/upstream/tag/remote/status=`PASS`؛ Graphify query=`PASS`؛ source/schema/migration/targeted/adjacent/MySQL/failure-path/retry/restore/live Telegram=`NOT EXECUTED` | دریافت تصمیم صریح `D-08/D-11`؛ سپس تکرار preflight و resume فقط Stage 11؛ Stage 12 و commit/push/tag/release/deploy/publish ممنوع |
+| `2026-08-23` | Runbook V3 Stage 11 final | `PASS`؛ فقط Stage 11 | D-08/D-11 resolved؛ outbox/audit transactional و idempotent؛ retry/dead-letter؛ retention 30/90 روز و audit دائمی؛ backup MySQL سی‌دقیقه‌ای AES-256-GCM/SHA-256، spool و state مجزای generation/delivery؛ migration=`4c8e1a7d9b30` | `b45e3af` + working tree | targeted=`5 passed`؛ adjacent شامل targeted=`73 passed`؛ MySQL/InnoDB `8.0.43` migration/rollback، index/EXPLAIN، concurrency exact-once 40 event و restore disposable=`1 passed`؛ compile/diff-check=`PASS`؛ Graphify=`4256/10915/467` | توقف پیش از Stage 12؛ live Telegram و production restore=`NOT EXECUTED`؛ `mysqldump` deployment=`UNCERTAINTY`؛ Bot API رسمی 50 MB و default برنامه 45 MiB؛ بدون commit/push/tag/release/deploy/publish |
+| `2026-08-23` | Runbook V3 Stage 12 start | `BLOCKED` پیش از external action | Stage 11=`PASS`؛ Runbook نیازمند explicit Owner authorization و authenticated GitHub است؛ ممنوعیت جاری push/publish با ساخت fork تعارض دارد؛ حساب مقصد تعیین نشده | `b45e3af` + working tree | upstream `gozargah/Marzban-scripts` reachable، HEAD=`24a772d297c7518dae7650b8f106419e73813cda`؛ `gh auth status`=`not logged in`؛ source/installer/targeted/adjacent/DB=`NOT EXECUTED` | دریافت destination account/org، GitHub login و مجوز محدود fork/push؛ سپس تکرار preflight و resume فقط Stage 12؛ Stage 13/tag/release/deploy ممنوع |
+| `2026-08-23` | Runbook V3 Stage 12 authorized resume | `BLOCKED` پیش از fork | Owner مقصد و مجوز محدود fork/commit/push فقط برای `smorad3363/Marzban-scripts` را تأیید کرد؛ authentication همچنان برقرار نیست | `b45e3af` + working tree | `gh auth status`=`not logged in`؛ `GH_TOKEN_PRESENT=false`؛ `GITHUB_TOKEN_PRESENT=false`؛ fork مقصد=`Repository not found`؛ upstream HEAD=`24a772d297c7518dae7650b8f106419e73813cda` | login امن GitHub به `smorad3363`؛ تکرار Stage 12؛ Gate مانع شروع Stage 13؛ main Marzban و release actions ممنوع |
+| `2026-08-23` | Runbook V3 Stage 12 final | `PASS`؛ فقط Stage 12 | fork معتبر `smorad3363/Marzban-scripts` با parent اصلی و upstream sync؛ self-update به fork؛ Owner URL با commit ثابت pin شد | `b45e3af` + working tree؛ fork=`1ef7ad62d2c16e4450f1a0de9678c8a8c883b154` | upstream=`24a772d...`؛ ahead/behind=`1/0`؛ raw/commit blob=`c7c1270...`؛ دو `bash -n`=`PASS`؛ release contract=`1 passed`؛ compile/diff-check=`PASS` | Stage 13 مجاز شد؛ نصب واقعی Node=`NOT EXECUTED` چون target لینوکسی disposable موجود نیست؛ main Marzban بدون publication |
+| `2026-08-23` | Runbook V3 Stage 13 final gate | `PASS` برای gate محلی/disposable؛ `READY FOR NEXT ENVIRONMENT` | بدون feature جدید؛ SQLite migration خارج production evidence؛ دو اصلاح فقط test-harness؛ نسخه عمداً `4.9.8` ماند | `b45e3af` + working tree؛ upstream=`0/0`؛ staged/stash=`0/0` | backend=`212 passed, 9 skipped`؛ frontend utility/auth/build=`PASS` و `1751 modules`؛ شش MySQL/InnoDB `8.0.43` test=`PASS`؛ head=`4c8e1a7d9b30`؛ Graphify=`4260/10919/461`؛ compile/release-contract/diff-check=`PASS` | Browser/Core/Node/Tunnel/live Telegram/native mysqldump=`NOT EXECUTED`؛ Graphify 11 zero-node و bundle warning=`UNCERTAINTY`؛ production migration/restore و main publish انجام نشد؛ bump/release `v5.0.0` نیازمند مجوز جدا |
+| `2026-08-23` | آماده‌سازی انتشار `v5.0.0-rc.1` | `PASS` برای pre-publication gate؛ فقط release candidate | مجوز صریح برای commit/push/tag/prerelease مخزن `smorad3363/Marzban`؛ نسخه runtime و قرارداد release به RC تغییر کرد؛ historical referenceها حفظ شدند؛ prerelease نباید `latest` را جابه‌جا کند | `b45e3af` + working tree | origin/مالک/branch/Stage 1–13 و چهار حذف tracked بررسی شد؛ دو حذف asset عمدی؛ دو حذف doc نامطمئن خارج commit؛ secret scan بدون credential واقعی؛ `git diff --check`=`PASS`؛ release contract=`1 passed`؛ workflow YAML=`PASS` | manifest دقیق commit شود؛ سپس branch/tag/prerelease منتشر شود؛ بدون deploy و بدون final `v5.0.0` |

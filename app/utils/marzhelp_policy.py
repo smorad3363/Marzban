@@ -7,6 +7,9 @@ apply the same rules. Marzhelp only edits the canonical settings rows.
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
+from enum import Enum
+from hashlib import sha256
+import secrets
 from typing import Any
 from uuid import uuid4
 from sqlalchemy import case, func, or_, update
@@ -20,9 +23,25 @@ from app.db.models import (
     MarzhelpAccountingTransaction,
     MarzhelpAdminSettings,
     MarzhelpDeletedUser,
+    SystemOwner,
     User,
     UserUsageResetLogs,
 )
+from app.utils import admin_billing
+
+
+MAX_CUSTOMER_USERNAME_LENGTH = 32
+RESTRICTED_CREATE_FIELDS = {
+    "auto_delete_in_days",
+    "concurrent_user_limit",
+    "data_limit_reset_strategy",
+    "inbounds",
+    "next_plan",
+    "on_hold_expire_duration",
+    "on_hold_timeout",
+    "proxies",
+    "status",
+}
 
 
 class MarzhelpPolicyError(ValueError):
@@ -42,6 +61,132 @@ class MarzhelpPolicyError(ValueError):
         self.audit_details = audit_details
 
 
+class UserUpdateOperation(str, Enum):
+    """Trusted server-side intent for policy-sensitive user updates."""
+
+    edit = "edit"
+    renew = "renew"
+
+
+def _base36(value: int) -> str:
+    alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
+    encoded = ""
+    while value:
+        value, remainder = divmod(value, 36)
+        encoded = alphabet[remainder] + encoded
+    return encoded or "0"
+
+
+def ensure_admin_namespace_prefix(db: Session, admin: Admin) -> str:
+    """Return one persisted, concurrency-safe namespace for an Admin/Owner."""
+
+    locked = db.query(Admin).filter(Admin.id == admin.id).with_for_update().one()
+    if locked.user_namespace_prefix:
+        return locked.user_namespace_prefix
+    # Admin ID makes concurrent prefixes unique; random material hides a plain
+    # sequential namespace while the DB unique constraint remains final authority.
+    locked.user_namespace_prefix = f"u{_base36(locked.id)}{secrets.token_hex(2)}"
+    db.flush()
+    return locked.user_namespace_prefix
+
+
+def customer_username(db: Session, admin: Admin, requested_username: str) -> str:
+    prefix = ensure_admin_namespace_prefix(db, admin)
+    final_username = f"{prefix}_{requested_username}"
+    if len(final_username) > MAX_CUSTOMER_USERNAME_LENGTH:
+        maximum = MAX_CUSTOMER_USERNAME_LENGTH - len(prefix) - 1
+        raise MarzhelpPolicyError(
+            "customer_username_too_long",
+            f"Requested username may contain at most {maximum} characters for this namespace",
+        )
+    return final_username
+
+
+def restricted_create_payload(settings: MarzhelpAdminSettings, user: Any):
+    """Replace restricted raw-create network/device input with Admin policy."""
+
+    mode = admin_billing.billing_mode(settings)
+    if mode not in {
+        admin_billing.BillingMode.USED_TRAFFIC,
+        admin_billing.BillingMode.ALLOCATED_TRAFFIC,
+    }:
+        return user
+    injected = sorted(RESTRICTED_CREATE_FIELDS & set(user.model_fields_set))
+    if injected:
+        raise MarzhelpPolicyError(
+            "protected_create_fields",
+            "Restricted creation does not accept protected fields: " + ", ".join(injected),
+        )
+
+    from app.models.proxy import ProxySettings, ProxyTypes
+    from app.models.user import UserCreate, UserDataLimitResetStrategy, UserStatusCreate
+
+    configured = set(xray.config.inbounds_by_tag)
+    if settings.all_inbounds:
+        selected = configured
+    else:
+        selected = set(settings.allowed_inbounds)
+        missing = sorted(selected - configured)
+        if missing:
+            raise MarzhelpPolicyError(
+                "inbound_unavailable",
+                "Configured Admin inbound is unavailable: " + ", ".join(missing),
+            )
+    if not selected:
+        raise MarzhelpPolicyError(
+            "inbound_scope_empty",
+            "Restricted creation requires at least one configured Admin inbound",
+        )
+
+    inbounds: dict[ProxyTypes, list[str]] = {}
+    for tag in sorted(selected):
+        protocol = ProxyTypes(xray.config.inbounds_by_tag[tag]["protocol"])
+        inbounds.setdefault(protocol, []).append(tag)
+    proxies = {
+        protocol: ProxySettings.from_dict(protocol, {})
+        for protocol in inbounds
+    }
+    concurrent_user_limit = None
+    if not settings.all_user_limits:
+        allowed_limits = list(settings.allowed_user_limits)
+        if not allowed_limits:
+            raise MarzhelpPolicyError(
+                "user_limit_scope_empty",
+                "Restricted creation requires at least one Admin device limit",
+            )
+        # Least-privilege deterministic policy; client cannot select or inject it.
+        concurrent_user_limit = min(allowed_limits)
+
+    return UserCreate(
+        username=user.username,
+        data_limit=user.data_limit,
+        expire=user.expire,
+        note=user.note,
+        status=UserStatusCreate.active,
+        proxies=proxies,
+        inbounds=inbounds,
+        concurrent_user_limit=concurrent_user_limit,
+        data_limit_reset_strategy=UserDataLimitResetStrategy.no_reset,
+    )
+
+
+def _billing_strategy(settings: MarzhelpAdminSettings) -> admin_billing.BillingStrategy:
+    try:
+        return admin_billing.strategy_for(settings)
+    except admin_billing.BillingModeError as exc:
+        raise MarzhelpPolicyError(exc.code, str(exc)) from exc
+
+
+def _validate_billing_plan(
+    settings: MarzhelpAdminSettings,
+    concurrent_user_limit: int | None,
+) -> None:
+    try:
+        _billing_strategy(settings).validate_plan(concurrent_user_limit)
+    except admin_billing.BillingModeError as exc:
+        raise MarzhelpPolicyError(exc.code, str(exc)) from exc
+
+
 def calculate_delete_refund(data_limit: int | None, actual_used_traffic: int | None) -> int:
     """Allocated credit is final; deleting a user never restores admin credit."""
 
@@ -53,7 +198,20 @@ def _settings(db: Session, admin_id: int | None, lock: bool = False) -> Marzhelp
         return None
     admin = db.get(Admin, admin_id)
     if admin is not None and admin.is_sudo:
-        return None
+        hierarchy_on = bool(
+            db.query(AdminHierarchySettings.enabled)
+            .filter(AdminHierarchySettings.id == 1)
+            .scalar()
+        )
+        if not hierarchy_on:
+            return None
+        owner_admin_id = (
+            db.query(SystemOwner.admin_id)
+            .filter(SystemOwner.id == 1)
+            .scalar()
+        )
+        if owner_admin_id == admin.id:
+            return None
     query = db.query(MarzhelpAdminSettings).filter(MarzhelpAdminSettings.admin_id == admin_id)
     if lock:
         query = query.with_for_update()
@@ -184,13 +342,24 @@ def _quota_summary_values(
     reset_usage: int = 0,
     deleted_usage: int = 0,
 ) -> dict[str, Any]:
-    mode = (settings.calculate_volume if settings is not None else None) or "used_traffic"
-    used = (
-        int(settings.used_traffic or 0)
-        if settings is not None and mode == "created_traffic"
-        else int(current_usage) + int(reset_usage) + int(deleted_usage)
-    )
-    configured_limit = settings.total_traffic if settings is not None else None
+    legacy_mode = (settings.calculate_volume if settings is not None else None) or "used_traffic"
+    billing_mode = admin_billing.billing_mode(settings).value if settings is not None else "LEGACY_COMPAT"
+    if settings is not None and billing_mode == admin_billing.BillingMode.SEAT_CREDIT.value:
+        used = int(settings.capacity_used or 0)
+        configured_limit = settings.device_capacity_limit
+    elif settings is not None and billing_mode == admin_billing.BillingMode.ALLOCATED_TRAFFIC.value:
+        used = int(settings.used_traffic or 0)
+        configured_limit = settings.total_traffic
+    elif settings is not None and billing_mode == admin_billing.BillingMode.USED_TRAFFIC.value:
+        used = int(current_usage) + int(reset_usage) + int(deleted_usage)
+        configured_limit = settings.total_traffic
+    else:
+        used = (
+            int(settings.used_traffic or 0)
+            if settings is not None and legacy_mode == "created_traffic"
+            else int(current_usage) + int(reset_usage) + int(deleted_usage)
+        )
+        configured_limit = settings.total_traffic if settings is not None else None
     limit = (
         int(configured_limit)
         if configured_limit is not None and (configured_limit > 0 or zero_is_finite)
@@ -207,7 +376,13 @@ def _quota_summary_values(
         if settings is not None
         else 80
     )
-    usage_warning_enabled = mode == "used_traffic" and percent is not None
+    usage_warning_enabled = (
+        billing_mode == admin_billing.BillingMode.USED_TRAFFIC.value
+        or (
+            billing_mode == admin_billing.BillingMode.LEGACY_COMPAT.value
+            and legacy_mode == "used_traffic"
+        )
+    ) and percent is not None
     maximum_users = settings.max_users if settings is not None else None
     return {
         "current_users": current_users,
@@ -221,7 +396,8 @@ def _quota_summary_values(
         "credit_used": used,
         "credit_remaining": max(limit - used, 0) if limit is not None else None,
         "credit_usage_percent": percent,
-        "credit_calculation_mode": mode,
+        "credit_calculation_mode": legacy_mode,
+        "billing_mode": billing_mode,
         "operation_allowance_remaining": settings.user_limit if settings is not None else None,
         "admin_warning_percent": admin_threshold,
         "sudo_warning_percent": sudo_threshold,
@@ -578,6 +754,13 @@ def used_traffic_spend(db: Session, admin_id: int) -> int:
 
 
 def _current_spend(db: Session, settings: MarzhelpAdminSettings) -> int:
+    mode = admin_billing.billing_mode(settings)
+    if mode == admin_billing.BillingMode.ALLOCATED_TRAFFIC:
+        return int(settings.used_traffic or 0)
+    if mode == admin_billing.BillingMode.USED_TRAFFIC:
+        return used_traffic_spend(db, settings.admin_id)
+    if mode == admin_billing.BillingMode.SEAT_CREDIT:
+        return 0
     if (settings.calculate_volume or "used_traffic") == "created_traffic":
         return int(settings.used_traffic or 0)
     return used_traffic_spend(db, settings.admin_id)
@@ -590,7 +773,10 @@ def _validate_traffic_credit(
     allocated_charge: int = 0,
     unlimited_requested: bool = False,
 ) -> None:
-    mode = settings.calculate_volume or "used_traffic"
+    billing_mode = admin_billing.billing_mode(settings)
+    legacy_mode = settings.calculate_volume or "used_traffic"
+    if billing_mode == admin_billing.BillingMode.SEAT_CREDIT:
+        return
     hierarchy_on = bool(
         db.query(AdminHierarchySettings.enabled)
         .filter(AdminHierarchySettings.id == 1)
@@ -604,7 +790,14 @@ def _validate_traffic_credit(
     )
     if limit is not None:
         limit = max(limit - int(getattr(settings, "delegated_traffic", 0) or 0), 0)
-    if mode == "created_traffic":
+    allocated_mode = (
+        billing_mode == admin_billing.BillingMode.ALLOCATED_TRAFFIC
+        or (
+            billing_mode == admin_billing.BillingMode.LEGACY_COMPAT
+            and legacy_mode == "created_traffic"
+        )
+    )
+    if allocated_mode:
         if unlimited_requested and limit is not None:
             raise MarzhelpPolicyError(
                 "unlimited_traffic_forbidden",
@@ -732,8 +925,10 @@ def validate_create(db: Session, admin_id: int | None, user: Any) -> MarzhelpAdm
     concurrent_user_limit = getattr(user, "concurrent_user_limit", None)
     _validate_inbounds(settings, _requested_inbound_tags(user))
     _validate_concurrent_user_limit(settings, concurrent_user_limit)
+    _validate_billing_plan(settings, concurrent_user_limit)
     _adjust_user_count(db, settings, 1)
-    _adjust_capacity(db, settings, capacity_weight(concurrent_user_limit))
+    strategy = _billing_strategy(settings)
+    _adjust_capacity(db, settings, strategy.create_capacity_charge(concurrent_user_limit))
 
     data_limit = _effective_data_limit(user.data_limit)
     expire = _effective_expire(user.expire)
@@ -743,7 +938,7 @@ def validate_create(db: Session, admin_id: int | None, user: Any) -> MarzhelpAdm
     _validate_traffic_credit(
         db,
         settings,
-        allocated_charge=int(data_limit or 0),
+        allocated_charge=strategy.allocated_charge(None, data_limit, renewal=False),
         unlimited_requested=data_limit is None,
     )
 
@@ -775,30 +970,50 @@ def record_create(db: Session, dbuser: User, quota_enforced: bool) -> None:
     )
 
 
-def _is_renewal(dbuser: User, modify: Any) -> bool:
-    if modify.data_limit is not None:
-        old_limit = _effective_data_limit(dbuser.data_limit)
-        new_limit = _effective_data_limit(modify.data_limit)
-        if (new_limit is None and old_limit is not None) or (
-            new_limit is not None and old_limit is not None and new_limit > old_limit
-        ):
-            return True
-    if modify.expire is not None:
-        old_expire = _effective_expire(dbuser.expire)
-        new_expire = _effective_expire(modify.expire)
-        if (new_expire is None and old_expire is not None) or (
-            new_expire is not None and old_expire is not None and new_expire > old_expire
-        ):
-            return True
-    return False
+def consume_seat_renewal(
+    db: Session,
+    settings: MarzhelpAdminSettings,
+    *,
+    user: User,
+    seat_cost: int,
+    idempotency_key: str,
+    plan_id: int,
+    version_id: int,
+) -> None:
+    """Consume one Plan renewal's Seat Credit inside the caller transaction."""
+
+    _adjust_capacity(db, settings, seat_cost)
+    operation_digest = sha256(idempotency_key.encode("utf-8")).hexdigest()
+    _record(
+        db,
+        f"seat-renew:{settings.admin_id}:{operation_digest}",
+        "plan_renew_seat",
+        settings.admin_id,
+        user.id,
+        user.username,
+        renewal_delta=1,
+        details={
+            "seat_credit_delta": -seat_cost,
+            "seat_cost": seat_cost,
+            "plan_id": plan_id,
+            "plan_version_id": version_id,
+            "idempotency_key_sha256": operation_digest,
+        },
+    )
 
 
-def validate_update(db: Session, dbuser: User, modify: Any) -> tuple[bool, bool]:
+def validate_update(
+    db: Session,
+    dbuser: User,
+    modify: Any,
+    operation: UserUpdateOperation = UserUpdateOperation.edit,
+) -> tuple[bool, bool]:
     settings = _settings(db, dbuser.admin_id, lock=True)
     if settings is None:
         return False, False
 
-    renewal = _is_renewal(dbuser, modify)
+    operation = UserUpdateOperation(operation)
+    renewal = operation == UserUpdateOperation.renew
     fields_set = getattr(modify, "model_fields_set", set())
     expire_requested = "expire" in fields_set if fields_set else modify.expire is not None
     expiration_changed = expire_requested and (
@@ -848,9 +1063,21 @@ def validate_update(db: Session, dbuser: User, modify: Any) -> tuple[bool, bool]
         {tag for tags in final_inbounds.values() for tag in tags},
     )
     _validate_concurrent_user_limit(settings, concurrent_user_limit)
-    old_capacity = capacity_weight(dbuser.concurrent_user_limit)
-    new_capacity = capacity_weight(concurrent_user_limit)
-    _adjust_capacity(db, settings, new_capacity - old_capacity)
+    _validate_billing_plan(settings, concurrent_user_limit)
+    strategy = _billing_strategy(settings)
+    if renewal and strategy.mode == admin_billing.BillingMode.SEAT_CREDIT:
+        raise MarzhelpPolicyError(
+            "seat_plan_renewal_required",
+            "SEAT_CREDIT renewals must use an explicit Plan and idempotency key",
+        )
+    _adjust_capacity(
+        db,
+        settings,
+        strategy.update_capacity_charge(
+            dbuser.concurrent_user_limit,
+            concurrent_user_limit,
+        ),
+    )
     old_data_limit = _effective_data_limit(dbuser.data_limit)
     data_limit = (
         _effective_data_limit(modify.data_limit)
@@ -870,7 +1097,11 @@ def validate_update(db: Session, dbuser: User, modify: Any) -> tuple[bool, bool]
     _validate_traffic_credit(
         db,
         settings,
-        allocated_charge=max(volume_delta, 0),
+        allocated_charge=strategy.allocated_charge(
+            old_data_limit,
+            data_limit,
+            renewal=renewal,
+        ),
         unlimited_requested=data_limit is None,
     )
     dbuser._marzhelp_volume_delta = volume_delta
@@ -943,19 +1174,30 @@ def validate_next_plan_activation(db: Session, dbuser: User) -> bool:
     if settings is None:
         return False
     _validate_account(settings)
+    if admin_billing.billing_mode(settings) == admin_billing.BillingMode.SEAT_CREDIT:
+        raise MarzhelpPolicyError(
+            "seat_plan_renewal_required",
+            "SEAT_CREDIT renewals must use an explicit Plan and idempotency key",
+        )
     data_limit = resulting_next_plan_data_limit(dbuser)
     expire = _effective_expire(dbuser.next_plan.expire)
     _validate_data_limit(settings, data_limit)
     _validate_subscription_mode(settings, data_limit, dbuser.concurrent_user_limit)
+    _validate_billing_plan(settings, dbuser.concurrent_user_limit)
     _validate_expiration(settings, expire)
     next_allocation = _effective_data_limit(dbuser.next_plan.data_limit)
     _validate_traffic_credit(
         db,
         settings,
-        allocated_charge=int(next_allocation or 0),
+        allocated_charge=_billing_strategy(settings).allocated_charge(
+            _effective_data_limit(dbuser.data_limit),
+            next_allocation,
+            renewal=True,
+        ),
         unlimited_requested=next_allocation is None,
     )
     volume_delta = int(data_limit or 0) - int(_effective_data_limit(dbuser.data_limit) or 0)
+    _consume_renewal(db, settings)
     limited_allowance = settings.user_limit is not None
     _consume_allowance(db, settings)
     dbuser._marzhelp_volume_delta = volume_delta
@@ -1016,6 +1258,7 @@ def validate_transfer(db: Session, dbuser: User, new_admin_id: int) -> None:
         _validate_account(settings)
         _validate_inbounds(settings, user_inbound_tags(dbuser))
         _validate_concurrent_user_limit(settings, dbuser.concurrent_user_limit)
+        _validate_billing_plan(settings, dbuser.concurrent_user_limit)
         _validate_data_limit(settings, dbuser.data_limit)
         _validate_subscription_mode(
             settings,
@@ -1032,11 +1275,23 @@ def validate_transfer(db: Session, dbuser: User, new_admin_id: int) -> None:
         )
         if owner_changes:
             _adjust_user_count(db, settings, 1)
-            _adjust_capacity(db, settings, capacity_weight(dbuser.concurrent_user_limit))
+            _adjust_capacity(
+                db,
+                settings,
+                _billing_strategy(settings).create_capacity_charge(
+                    dbuser.concurrent_user_limit
+                ),
+            )
     previous_settings = _settings(db, dbuser.admin_id, lock=True)
     if owner_changes and previous_settings is not None:
         _adjust_user_count(db, previous_settings, -1)
-        _adjust_capacity(db, previous_settings, -capacity_weight(dbuser.concurrent_user_limit))
+        _adjust_capacity(
+            db,
+            previous_settings,
+            _billing_strategy(previous_settings).delete_capacity_charge(
+                dbuser.concurrent_user_limit
+            ),
+        )
 
 
 def capture_delete(db: Session, dbuser: User) -> int:
@@ -1055,7 +1310,13 @@ def capture_delete(db: Session, dbuser: User) -> int:
 
     if settings is not None:
         _adjust_user_count(db, settings, -1)
-        _adjust_capacity(db, settings, -capacity_weight(dbuser.concurrent_user_limit))
+        _adjust_capacity(
+            db,
+            settings,
+            _billing_strategy(settings).delete_capacity_charge(
+                dbuser.concurrent_user_limit
+            ),
+        )
 
     used = max(int(dbuser.lifetime_used_traffic or 0), 0)
     refund = 0
@@ -1083,7 +1344,16 @@ def capture_delete(db: Session, dbuser: User) -> int:
             "refundable_traffic": 0,
             "credit_retained": (
                 int(dbuser.data_limit or 0)
-                if settings is not None and settings.calculate_volume == "created_traffic"
+                if settings is not None
+                and (
+                    admin_billing.billing_mode(settings)
+                    == admin_billing.BillingMode.ALLOCATED_TRAFFIC
+                    or (
+                        admin_billing.billing_mode(settings)
+                        == admin_billing.BillingMode.LEGACY_COMPAT
+                        and settings.calculate_volume == "created_traffic"
+                    )
+                )
                 else used
             ),
         },

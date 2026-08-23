@@ -3,6 +3,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.utils.admin_billing import BillingMode
+
 
 AdminRoleCode = Literal["OWNER", "SUPER_ADMIN", "ADMIN"]
 
@@ -19,12 +21,20 @@ class HierarchyAdminNode(BaseModel):
     delegated_traffic: int = 0
     own_spend: int = 0
     available_traffic: Optional[int] = None
+    renewal_enabled: bool = True
+    renewal_remaining: Optional[int] = None
+    trial_quota: int = 0
+    trials_used: int = 0
+    referral_referrer_admin_id: Optional[int] = None
+    referral_rate_bps: Optional[int] = None
+    active_owner_freeze_event_id: Optional[int] = None
     children: list["HierarchyAdminNode"] = Field(default_factory=list)
 
 
 class HierarchyChildCreate(BaseModel):
     username: str = Field(min_length=3, max_length=34)
     password: str = Field(min_length=6, max_length=128)
+    phone: str = Field(min_length=1, max_length=32)
     role: Literal["SUPER_ADMIN", "ADMIN"] = "ADMIN"
 
 
@@ -35,7 +45,7 @@ class ReparentRequest(BaseModel):
 class CreditTransferRequest(BaseModel):
     amount: int = Field(gt=0)
     idempotency_key: str = Field(min_length=8, max_length=128)
-    note: Optional[str] = Field(default=None, max_length=512)
+    note: str = Field(min_length=1, max_length=512)
 
 
 class CreditTransferResponse(BaseModel):
@@ -43,7 +53,14 @@ class CreditTransferResponse(BaseModel):
     from_admin_id: Optional[int]
     to_admin_id: Optional[int]
     actor_admin_id: int
+    adjusted_admin_id: Optional[int] = None
+    resource: Optional[str] = None
     amount: int
+    delta: Optional[int] = None
+    balance_before: Optional[int] = None
+    balance_after: Optional[int] = None
+    source_delegated_before: Optional[int] = None
+    source_delegated_after: Optional[int] = None
     operation_type: str
     idempotency_key: str
     created_at: datetime
@@ -90,9 +107,105 @@ class UserCreationModeUpdate(BaseModel):
     can_manage_plans: bool = False
 
 
+class BillingModeUpdate(BaseModel):
+    mode: BillingMode
+    idempotency_key: str = Field(min_length=8, max_length=128)
+    reason: str = Field(min_length=1, max_length=512)
+
+
+class AllocatedTrafficRefundCreate(BaseModel):
+    requested_refund_amount: int = Field(gt=0)
+    request_reason: str = Field(min_length=1, max_length=512)
+    request_note: Optional[str] = Field(default=None, max_length=1024)
+    correlation_id: str = Field(min_length=8, max_length=128)
+    idempotency_key: str = Field(min_length=8, max_length=128)
+
+
+class AllocatedTrafficRefundDecision(BaseModel):
+    idempotency_key: str = Field(min_length=8, max_length=128)
+    explanation: Optional[str] = Field(default=None, max_length=1024)
+
+
+class AllocatedTrafficRefundResponse(BaseModel):
+    id: int
+    requester_admin_id: int
+    account_admin_id: int
+    reviewer_admin_id: int
+    target_user_id: int
+    target_username: str
+    snapshot_billing_mode: str
+    snapshot_plan_id: Optional[int] = None
+    snapshot_plan_version_id: Optional[int] = None
+    snapshot_plan_name: Optional[str] = None
+    snapshot_allocated_quota: int
+    snapshot_current_quota: int
+    snapshot_used_traffic: int
+    snapshot_remaining_traffic: int
+    snapshot_user_created_at: Optional[datetime] = None
+    snapshot_user_expire_at: Optional[datetime] = None
+    snapshot_pre_delete_status: str
+    requested_refund_amount: int
+    request_reason: str
+    request_note: Optional[str] = None
+    correlation_id: str
+    idempotency_key: str
+    status: Literal["PENDING", "APPROVED", "REJECTED", "CANCELLED"]
+    requested_at: datetime
+    decided_at: Optional[datetime] = None
+    decided_by_admin_id: Optional[int] = None
+    decision_explanation: Optional[str] = None
+    ledger_transfer_id: Optional[int] = None
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AllocatedTrafficRefundEventResponse(BaseModel):
+    id: int
+    request_id: int
+    actor_admin_id: int
+    from_status: Optional[str] = None
+    to_status: Literal["PENDING", "APPROVED", "REJECTED", "CANCELLED"]
+    explanation: Optional[str] = None
+    operation_key: str
+    correlation_id: str
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
 class SuspendRequest(BaseModel):
     reason_id: int = Field(default=1, ge=1)
     include_subtree: bool = True
+
+
+class OwnerFreezeRequest(BaseModel):
+    reason_id: int = Field(default=1, ge=1)
+    idempotency_key: str = Field(min_length=8, max_length=128)
+    note: Optional[str] = Field(default=None, max_length=512)
+
+
+class OwnerUnfreezeRequest(BaseModel):
+    idempotency_key: str = Field(min_length=8, max_length=128)
+
+
+class ReferralAttributionUpdate(BaseModel):
+    referrer_username: str = Field(min_length=3, max_length=34)
+    rate_bps: int = Field(ge=0, le=10_000)
+    idempotency_key: str = Field(min_length=8, max_length=128)
+    note: Optional[str] = Field(default=None, max_length=512)
+
+
+class ReferralAttributionRemove(BaseModel):
+    idempotency_key: str = Field(min_length=8, max_length=128)
+    note: Optional[str] = Field(default=None, max_length=512)
+
+
+class ReferralAttributionResponse(BaseModel):
+    referred_admin_id: int
+    referred_username: str
+    referrer_admin_id: Optional[int] = None
+    referrer_username: Optional[str] = None
+    rate_bps: Optional[int] = None
+    last_event_id: Optional[int] = None
+    replayed: bool = False
 
 
 class BulkDisableRequest(BaseModel):
@@ -103,6 +216,7 @@ class BulkDisableRequest(BaseModel):
 
 class AccountSummary(BaseModel):
     username: str
+    user_namespace_prefix: str
     role: AdminRoleCode
     account_status: Literal["ACTIVE", "SUSPENDED", "DISABLED"]
     suspended_reason: Optional[str] = None
@@ -115,8 +229,11 @@ class AccountSummary(BaseModel):
     available_traffic: Optional[int] = None
     renewal_enabled: bool = True
     renewal_remaining: Optional[int] = None
+    billing_mode: BillingMode = BillingMode.LEGACY_COMPAT
     user_creation_mode: Literal["FREE_FORM", "PLAN_ONLY"] = "FREE_FORM"
     can_manage_plans: bool = False
+    trial_quota: int = 0
+    trials_used: int = 0
 
 
 class PlanCategoryCreate(BaseModel):
@@ -145,11 +262,31 @@ class PlanVersionInput(BaseModel):
     renewal_volume_strategy: Literal["replace"] = "replace"
     renewal_time_strategy: Literal["extend_max"] = "extend_max"
     inbounds: list[str] = Field(default_factory=list)
+    hosts: dict[str, list[int]] = Field(default_factory=dict)
 
     @field_validator("inbounds")
     @classmethod
     def normalize_inbounds(cls, value: list[str]) -> list[str]:
         return sorted({item.strip() for item in value if item.strip()})
+
+    @field_validator("hosts")
+    @classmethod
+    def normalize_hosts(cls, value: dict[str, list[int]]) -> dict[str, list[int]]:
+        return {
+            tag.strip(): sorted({int(host_id) for host_id in host_ids if int(host_id) > 0})
+            for tag, host_ids in value.items()
+            if tag.strip()
+        }
+
+    @model_validator(mode="after")
+    def require_explicit_network_scope(self):
+        if not self.inbounds:
+            raise ValueError("Plan requires at least one allowed inbound")
+        if set(self.hosts) != set(self.inbounds):
+            raise ValueError("Plan host scope must exactly match selected inbounds")
+        if any(not self.hosts[tag] for tag in self.inbounds):
+            raise ValueError("Every selected inbound requires at least one host")
+        return self
 
 
 class PlanCreate(BaseModel):
@@ -159,6 +296,7 @@ class PlanCreate(BaseModel):
     version: PlanVersionInput
     allowed_admin_ids: list[int] = Field(default_factory=list)
     include_subtree: bool = False
+    is_trial: bool = False
 
 
 class PlanUpdate(BaseModel):
@@ -167,6 +305,17 @@ class PlanUpdate(BaseModel):
     version: PlanVersionInput
     allowed_admin_ids: list[int] = Field(default_factory=list)
     include_subtree: bool = False
+
+
+class PlanVersionResponse(BaseModel):
+    data_limit: int
+    duration_days: int
+    concurrent_user_limit: Optional[int]
+    reset_strategy: Literal["no_reset", "day", "week", "month", "year"]
+    renewal_volume_strategy: Literal["replace"]
+    renewal_time_strategy: Literal["extend_max"]
+    inbounds: list[str]
+    hosts: dict[str, list[int]]
 
 
 class PlanResponse(BaseModel):
@@ -179,9 +328,24 @@ class PlanResponse(BaseModel):
     current_version_id: int
     version_number: int
     archived_at: Optional[datetime]
-    version: PlanVersionInput
+    version: PlanVersionResponse
     allowed_admin_ids: list[int]
     include_subtree: bool
+    is_trial: bool
+
+
+class PlanNetworkHostOption(BaseModel):
+    id: int
+    remark: str
+
+
+class PlanNetworkOption(BaseModel):
+    tag: str
+    protocol: str
+    network: str
+    tls: str
+    port: Optional[int] = None
+    hosts: list[PlanNetworkHostOption]
 
 
 class PlanUserCreate(BaseModel):
@@ -195,3 +359,20 @@ class PlanUserCreate(BaseModel):
 class PlanRenewRequest(BaseModel):
     plan_id: int
     idempotency_key: str = Field(min_length=8, max_length=128)
+
+
+class TrialQuotaAdjustmentRequest(BaseModel):
+    amount: int = Field(gt=0)
+    idempotency_key: str = Field(min_length=8, max_length=128)
+    note: str = Field(min_length=1, max_length=512)
+
+
+class TrialCleanupRequest(BaseModel):
+    expired_before: datetime
+    idempotency_key: str = Field(min_length=8, max_length=128)
+
+
+class TrialCleanupResponse(BaseModel):
+    count: int
+    usernames: list[str]
+    replayed: bool = False

@@ -11,6 +11,7 @@ import {
   Box,
   Button,
   Card,
+  Checkbox,
   FormControl,
   FormHelperText,
   FormLabel,
@@ -37,8 +38,17 @@ import useGetUser from "hooks/useGetUser";
 import { FC, FormEvent, useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 import { fetch } from "service/http";
-import { AccountSummary, PlanCategory, UserPlan } from "types/Admin";
+import { AccountSummary, PlanCategory, PlanNetworkOption, UserPlan } from "types/Admin";
 import { formatBytes } from "utils/formatByte";
+import { localizedApiError } from "utils/apiError";
+import {
+  missingPlanInboundTags,
+  missingPlanHostIds,
+  normalizePlanInboundTags,
+  normalizePlanHostScope,
+  togglePlanHostId,
+  togglePlanInboundTag,
+} from "utils/planInbounds";
 
 const GIB = 1024 ** 3;
 
@@ -49,8 +59,10 @@ type PlanDraft = {
   durationDays: string;
   deviceLimit: string;
   resetStrategy: "no_reset" | "day" | "week" | "month" | "year";
-  inbounds: string;
+  inbounds: string[];
+  hosts: Record<string, number[]>;
   categoryId: string;
+  isTrial: boolean;
 };
 
 const emptyDraft = (): PlanDraft => ({
@@ -60,14 +72,13 @@ const emptyDraft = (): PlanDraft => ({
   durationDays: "30",
   deviceLimit: "",
   resetStrategy: "no_reset",
-  inbounds: "",
+  inbounds: [],
+  hosts: {},
   categoryId: "",
+  isTrial: false,
 });
 
-const errorText = (error: any) => {
-  const detail = error?.data?.detail || error?.response?._data?.detail || error?.message;
-  return typeof detail === "object" ? detail.message || detail.code : detail;
-};
+const errorText = localizedApiError;
 
 export const Plans: FC = () => {
   const toast = useToast();
@@ -81,10 +92,17 @@ export const Plans: FC = () => {
   const [draft, setDraft] = useState<PlanDraft>(emptyDraft());
   const [newCategoryName, setNewCategoryName] = useState("");
   const [usernames, setUsernames] = useState<Record<number, string>>({});
-
   const account = useQuery<AccountSummary, Error>("account-summary", () => fetch("/account/summary"), { enabled: !getUserIsPending });
   const plans = useQuery<UserPlan[], Error>("user-plans", () => fetch("/user-plans"), { enabled: !getUserIsPending });
   const categories = useQuery<PlanCategory[], Error>("plan-categories", () => fetch("/plan-categories"), { enabled: !getUserIsPending });
+  const networkOptions = useQuery<PlanNetworkOption[], Error>("plan-network-options", () => fetch("/plan-network-options"), { enabled: !getUserIsPending });
+  const inboundOptions = networkOptions.data || [];
+  const missingInbounds = networkOptions.isLoading
+    ? []
+    : missingPlanInboundTags(draft.inbounds, inboundOptions);
+  const missingHosts = networkOptions.isLoading
+    ? []
+    : missingPlanHostIds(draft.hosts, inboundOptions);
   const canManage = account.data?.role === "OWNER" || account.data?.can_manage_plans;
 
   useEffect(() => {
@@ -96,15 +114,17 @@ export const Plans: FC = () => {
       durationDays: String(editing.version.duration_days),
       deviceLimit: editing.version.concurrent_user_limit === null ? "" : String(editing.version.concurrent_user_limit),
       resetStrategy: editing.version.reset_strategy,
-      inbounds: editing.version.inbounds.join(", "),
+      inbounds: normalizePlanInboundTags(editing.version.inbounds),
+      hosts: normalizePlanHostScope(editing.version.hosts || {}),
       categoryId: editing.category_id === null ? "" : String(editing.category_id),
+      isTrial: editing.is_trial,
     } : emptyDraft());
   }, [editing, modal.isOpen]);
 
   const save = useMutation(
     () => {
       const payload = {
-        ...(editing ? {} : { name: draft.name.trim() }),
+        ...(editing ? {} : { name: draft.name.trim(), is_trial: draft.isTrial }),
         description: draft.description.trim() || null,
         category_id: draft.categoryId ? Number(draft.categoryId) : null,
         version: {
@@ -114,7 +134,8 @@ export const Plans: FC = () => {
           reset_strategy: draft.resetStrategy,
           renewal_volume_strategy: "replace",
           renewal_time_strategy: "extend_max",
-          inbounds: draft.inbounds.split(",").map((value) => value.trim()).filter(Boolean),
+          inbounds: normalizePlanInboundTags(draft.inbounds),
+          hosts: normalizePlanHostScope(draft.hosts),
         },
         allowed_admin_ids: [],
         include_subtree: false,
@@ -171,6 +192,36 @@ export const Plans: FC = () => {
       toast({ title: "دسته‌بندی پلن را انتخاب کنید", status: "warning", duration: 3000 });
       return;
     }
+    if (networkOptions.isLoading) {
+      toast({ title: "فهرست Inboundها هنوز در حال دریافت است", status: "warning", duration: 3000 });
+      return;
+    }
+    if (draft.inbounds.length === 0) {
+      toast({ title: "حداقل یک Inbound انتخاب کنید", status: "warning", duration: 3000 });
+      return;
+    }
+    if (missingInbounds.length > 0) {
+      toast({
+        title: "Inbound قدیمی را تعیین تکلیف کنید",
+        description: "Tag حذف‌شده را از انتخاب خارج کنید یا ابتدا آن را در تنظیمات Xray برگردانید.",
+        status: "warning",
+        duration: 5000,
+      });
+      return;
+    }
+    if (missingHosts.length > 0) {
+      toast({
+        title: "Host حذف‌شده یا غیرفعال را تعیین تکلیف کنید",
+        description: `Host ID: ${missingHosts.join(", ")}`,
+        status: "warning",
+        duration: 5000,
+      });
+      return;
+    }
+    if (draft.inbounds.some((tag) => !(draft.hosts[tag] || []).length)) {
+      toast({ title: "برای هر Inbound حداقل یک Host فعال انتخاب کنید", status: "warning", duration: 4000 });
+      return;
+    }
     save.mutate();
   };
 
@@ -203,7 +254,7 @@ export const Plans: FC = () => {
         <SimpleGrid columns={{ base: 1, md: 2, xl: 3 }} gap={4}>
           {(plans.data || []).map((plan) => (
             <Card key={plan.id} p={5} bg="#111d17" color="gray.100" borderWidth="1px" borderColor="#33483b" borderRadius="18px" boxShadow="panel">
-              <HStack justify="space-between" align="start"><Box minW={0}><Text as="h2" fontSize="lg" fontWeight="800" overflowWrap="anywhere">{plan.name}</Text><Text color="gray.400" fontSize="sm" mt={1}>{plan.description || "بدون توضیح"}</Text></Box><Stack align="end" spacing={1}><Badge colorScheme="cyan">v{plan.version_number}</Badge><Badge colorScheme="purple">{plan.category_name || "بدون دسته"}</Badge></Stack></HStack>
+              <HStack justify="space-between" align="start"><Box minW={0}><Text as="h2" fontSize="lg" fontWeight="800" overflowWrap="anywhere">{plan.name}</Text><Text color="gray.400" fontSize="sm" mt={1}>{plan.description || "بدون توضیح"}</Text></Box><Stack align="end" spacing={1}>{plan.is_trial && <Badge colorScheme="orange">Trial</Badge>}<Badge colorScheme="cyan">v{plan.version_number}</Badge><Badge colorScheme="purple">{plan.category_name || "بدون دسته"}</Badge></Stack></HStack>
               <SimpleGrid columns={2} gap={3} mt={5}><Box><Text color="gray.400" fontSize="xs">حجم</Text><Text mt={1} fontWeight="700">{formatBytes(plan.version.data_limit)}</Text></Box><Box><Text color="gray.400" fontSize="xs">مدت</Text><Text mt={1} fontWeight="700">{plan.version.duration_days} روز</Text></Box><Box><Text color="gray.400" fontSize="xs">دستگاه</Text><Text mt={1}>{plan.version.concurrent_user_limit ?? "نامحدود"}</Text></Box><Box><Text color="gray.400" fontSize="xs">دسته‌بندی</Text><Text mt={1}>{plan.category_name || "بدون دسته"}</Text></Box></SimpleGrid>
               <FormControl mt={5}><FormLabel fontSize="xs">نام کاربری جدید</FormLabel><HStack><Input minH="44px" dir="ltr" value={usernames[plan.id] || ""} onChange={(event) => setUsernames((current) => ({ ...current, [plan.id]: event.target.value }))} /><Button minH="44px" isDisabled={!usernames[plan.id]?.trim()} isLoading={createUser.isLoading} onClick={() => createUser.mutate({ plan, username: usernames[plan.id].trim() })}>ساخت</Button></HStack></FormControl>
               {canManage && <HStack mt={4}><Button minH="44px" size="sm" variant="outline" onClick={() => openEdit(plan)}>نسخه جدید</Button><Button minH="44px" size="sm" variant="ghost" colorScheme="red" onClick={() => { setArchiveTarget(plan); archiveDialog.onOpen(); }}>بایگانی</Button></HStack>}
@@ -217,8 +268,97 @@ export const Plans: FC = () => {
         <FormControl isRequired><FormLabel>نام پلن</FormLabel><Input minH="44px" value={draft.name} isReadOnly={Boolean(editing)} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} /></FormControl>
         <FormControl><FormLabel>توضیح</FormLabel><Textarea value={draft.description} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} /></FormControl>
         <FormControl isRequired><FormLabel>دسته‌بندی</FormLabel><Select value={draft.categoryId} onChange={(event) => setDraft((current) => ({ ...current, categoryId: event.target.value }))}><option value="">انتخاب دسته‌بندی</option>{(categories.data || []).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</Select><FormHelperText>اختصاص این دسته به ادمین‌ها از صفحه مدیریت ادمین انجام می‌شود.</FormHelperText></FormControl>
+        {account.data?.role === "OWNER" && <FormControl><Checkbox minH="44px" alignItems="center" isChecked={draft.isTrial} isDisabled={Boolean(editing)} onChange={(event) => setDraft((current) => ({ ...current, isTrial: event.target.checked }))}>Plan آزمایشی (Trial)</Checkbox><FormHelperText>Trial metadata پس از ساخت تغییر نمی‌کند و هر ساخت موفق یک سهمیه Trial مصرف می‌کند.</FormHelperText></FormControl>}
         <SimpleGrid columns={{ base: 1, md: 2 }} gap={4}><FormControl isRequired><FormLabel>حجم (GiB)</FormLabel><Input minH="44px" type="number" min={0} step={0.01} dir="ltr" value={draft.dataGiB} onChange={(event) => setDraft((current) => ({ ...current, dataGiB: event.target.value }))} /></FormControl><FormControl isRequired><FormLabel>مدت (روز)</FormLabel><Input minH="44px" type="number" min={1} max={3650} dir="ltr" value={draft.durationDays} onChange={(event) => setDraft((current) => ({ ...current, durationDays: event.target.value }))} /></FormControl><FormControl><FormLabel>تعداد دستگاه</FormLabel><Input minH="44px" type="number" min={1} dir="ltr" value={draft.deviceLimit} onChange={(event) => setDraft((current) => ({ ...current, deviceLimit: event.target.value }))} /></FormControl><FormControl><FormLabel>ریست حجم</FormLabel><Select minH="44px" value={draft.resetStrategy} onChange={(event) => setDraft((current) => ({ ...current, resetStrategy: event.target.value as PlanDraft["resetStrategy"] }))}><option value="no_reset">بدون ریست</option><option value="day">روزانه</option><option value="week">هفتگی</option><option value="month">ماهانه</option><option value="year">سالانه</option></Select></FormControl></SimpleGrid>
-        <FormControl><FormLabel>Inboundها</FormLabel><Input minH="44px" dir="ltr" value={draft.inbounds} onChange={(event) => setDraft((current) => ({ ...current, inbounds: event.target.value }))} /><FormHelperText>Tagها را با ویرگول جدا کنید.</FormHelperText></FormControl>
+        <FormControl>
+          <FormLabel>Inboundها</FormLabel>
+          <Stack maxH="280px" overflowY="auto" spacing={1} p={2} borderWidth="1px" borderColor="#33483b" borderRadius="10px">
+            {networkOptions.isLoading && <Skeleton h="44px" borderRadius="8px" />}
+            {inboundOptions.map((inbound) => (
+              <Box key={inbound.tag} px={2} py={1} borderRadius="8px" bg={draft.inbounds.includes(inbound.tag) ? "whiteAlpha.50" : "transparent"}>
+                <Checkbox
+                  minH="44px"
+                  colorScheme="primary"
+                  isChecked={draft.inbounds.includes(inbound.tag)}
+                  onChange={(event) => setDraft((current) => {
+                    const inbounds = togglePlanInboundTag(current.inbounds, inbound.tag, event.target.checked);
+                    const hosts = { ...current.hosts };
+                    if (event.target.checked) hosts[inbound.tag] = hosts[inbound.tag] || [];
+                    else delete hosts[inbound.tag];
+                    return { ...current, inbounds, hosts: normalizePlanHostScope(hosts) };
+                  })}
+                >
+                  <Stack spacing={0} dir="ltr">
+                    <Text fontSize="sm" fontWeight="700" overflowWrap="anywhere">{inbound.tag}</Text>
+                    <Text color="gray.400" fontSize="xs">
+                      {inbound.protocol} · {inbound.network} · {inbound.tls || "none"}{inbound.port ? ` · ${inbound.port}` : ""}
+                    </Text>
+                  </Stack>
+                </Checkbox>
+                {draft.inbounds.includes(inbound.tag) && (
+                  <Stack ms={7} mb={2} spacing={1}>
+                    {inbound.hosts.map((host) => (
+                      <Checkbox
+                        key={host.id}
+                        minH="44px"
+                        colorScheme="cyan"
+                        isChecked={(draft.hosts[inbound.tag] || []).includes(host.id)}
+                        onChange={(event) => setDraft((current) => ({
+                          ...current,
+                          hosts: togglePlanHostId(current.hosts, inbound.tag, host.id, event.target.checked),
+                        }))}
+                      >
+                        <Text fontSize="sm" overflowWrap="anywhere" dir="ltr">#{host.id} · {host.remark}</Text>
+                      </Checkbox>
+                    ))}
+                    {(draft.hosts[inbound.tag] || [])
+                      .filter((hostId) => !inbound.hosts.some((host) => host.id === hostId))
+                      .map((hostId) => (
+                        <Checkbox
+                          key={hostId}
+                          minH="44px"
+                          colorScheme="red"
+                          isChecked
+                          onChange={(event) => setDraft((current) => ({
+                            ...current,
+                            hosts: togglePlanHostId(current.hosts, inbound.tag, hostId, event.target.checked),
+                          }))}
+                        >
+                          <HStack dir="ltr"><Text fontSize="sm">#{hostId}</Text><Badge colorScheme="red">حذف‌شده / غیرفعال</Badge></HStack>
+                        </Checkbox>
+                      ))}
+                    {inbound.hosts.length === 0 && (
+                      <Text color="red.300" fontSize="xs">Host فعال و واجدشرایطی برای این Inbound وجود ندارد.</Text>
+                    )}
+                  </Stack>
+                )}
+              </Box>
+            ))}
+            {missingInbounds.map((tag) => (
+              <Checkbox
+                key={tag}
+                minH="44px"
+                px={2}
+                colorScheme="red"
+                isChecked
+                onChange={(event) => setDraft((current) => ({
+                  ...current,
+                  inbounds: togglePlanInboundTag(current.inbounds, tag, event.target.checked),
+                  hosts: Object.fromEntries(Object.entries(current.hosts).filter(([key]) => key !== tag)),
+                }))}
+              >
+                <HStack dir="ltr">
+                  <Text fontSize="sm" overflowWrap="anywhere">{tag}</Text>
+                  <Badge colorScheme="red">حذف‌شده / قدیمی</Badge>
+                </HStack>
+              </Checkbox>
+            ))}
+            {inboundOptions.length === 0 && missingInbounds.length === 0 && (
+              <Text color="gray.400" fontSize="sm" p={2}>Inbound تنظیم‌شده‌ای پیدا نشد.</Text>
+            )}
+          </Stack>
+          <FormHelperText>حداقل یک Inbound و برای هر Inbound حداقل یک Host فعال باید صریح انتخاب شود. انتخاب خالی هرگز به معنی همه نیست.</FormHelperText>
+        </FormControl>
       </Stack></ModalBody><ModalFooter gap={3}><Button minH="44px" variant="ghost" onClick={modal.onClose}>انصراف</Button><Button minH="44px" type="submit" colorScheme="primary" color="#07130e" isLoading={save.isLoading}>ذخیره</Button></ModalFooter></ModalContent></Modal>
 
       <AlertDialog isOpen={archiveDialog.isOpen} leastDestructiveRef={cancelRef} onClose={archiveDialog.onClose}><AlertDialogOverlay><AlertDialogContent bg="#111d17" color="gray.100"><AlertDialogHeader>بایگانی پلن</AlertDialogHeader><AlertDialogBody>پلن «{archiveTarget?.name}» برای ساخت و تمدید جدید غیرفعال می‌شود.</AlertDialogBody><AlertDialogFooter gap={3}><Button ref={cancelRef} onClick={archiveDialog.onClose}>انصراف</Button><Button colorScheme="red" isLoading={archive.isLoading} onClick={() => archiveTarget && archive.mutate(archiveTarget)}>بایگانی</Button></AlertDialogFooter></AlertDialogContent></AlertDialogOverlay></AlertDialog>

@@ -79,6 +79,7 @@ function generatePageItems(total: number, current: number, width: number) {
 export const Pagination: FC = () => {
   const {
     filters,
+    loading,
     onFilterChange,
     users: { total },
   } = useDashboard();
@@ -122,17 +123,16 @@ export const Pagination: FC = () => {
       <Box order={{ base: 2, md: 1 }}>
         <HStack>
           <Select
-            minW="60px"
+            minW="76px"
+            minH="44px"
             value={perPage}
             onChange={handlePageSizeChange}
             size="sm"
             rounded="md"
           >
             <option>10</option>
-            <option>100</option>
-            <option>250</option>
-            <option>500</option>
-            <option>1000</option>
+            <option>25</option>
+            <option>50</option>
           </Select>
           <Text whiteSpace={"nowrap"} fontSize="sm">
             {t("itemsPerPage")}
@@ -140,13 +140,15 @@ export const Pagination: FC = () => {
         </HStack>
       </Box>
 
-      <Box order={{ base: 1, md: 2 }} maxW="full" overflowX="auto" pb={1}>
+      <Box order={{ base: 1, md: 2 }} maxW="full" overflowX="auto" pb={1} aria-busy={loading}>
       <ButtonGroup size="sm" isAttached variant="outline" whiteSpace="nowrap">
         <IconButton
           icon={<PrevIcon />}
           aria-label={t("previous")}
           onClick={changePage.bind(null, page - 1)}
           isDisabled={page === 0 || noPages === 0}
+          minW="44px"
+          minH="44px"
         />
         {pages.map((pageIndex) => {
           if (typeof pageIndex === "string")
@@ -158,6 +160,8 @@ export const Pagination: FC = () => {
               colorScheme={(pageIndex as number) === page ? "primary" : "gray"}
               onClick={changePage.bind(null, pageIndex)}
               aria-current={(pageIndex as number) === page ? "page" : undefined}
+              minW="44px"
+              minH="44px"
             >
               {(pageIndex as number) + 1}
             </Button>
@@ -169,6 +173,8 @@ export const Pagination: FC = () => {
           aria-label={t("next")}
           onClick={changePage.bind(null, page + 1)}
           isDisabled={page + 1 === noPages || noPages === 0}
+          minW="44px"
+          minH="44px"
         />
       </ButtonGroup>
       </Box>

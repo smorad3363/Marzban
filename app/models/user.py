@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Dict, List, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
 from app import xray
 from app.models.admin import Admin
@@ -48,6 +48,7 @@ class BulkUserOperation(str, Enum):
     subtract_data = "subtract_data"
     add_days = "add_days"
     subtract_days = "subtract_days"
+    add_data_and_days = "add_data_and_days"
     delete = "delete"
 
 
@@ -344,10 +345,15 @@ class UserResponse(User):
     model_config = ConfigDict(from_attributes=True)
 
     @model_validator(mode="after")
-    def validate_links(self):
+    def validate_links(self, info: ValidationInfo):
         if not self.links:
+            host_scope = (info.context or {}).get("host_scope")
             self.links = generate_v2ray_links(
-                self.proxies, self.inbounds, extra_data=self.model_dump(), reverse=False,
+                self.proxies,
+                self.inbounds,
+                extra_data=self.model_dump(),
+                reverse=False,
+                host_scope=host_scope,
             )
         return self
 
@@ -391,6 +397,9 @@ class SubscriptionUserResponse(UserResponse):
 class UsersResponse(BaseModel):
     users: List[UserResponse]
     total: int
+    page: int
+    page_size: int
+    pages: int
 
 
 class UserUsageResponse(BaseModel):

@@ -2,6 +2,7 @@ from fastapi import APIRouter
 from . import (
     admin,
     admin_hierarchy,
+    bulk,
     audit,
     core, 
     node, 
@@ -18,6 +19,7 @@ api_router = APIRouter()
 routers = [
     admin.router,
     admin_hierarchy.router,
+    bulk.router,
     audit.router,
     core.router,
     node.router,

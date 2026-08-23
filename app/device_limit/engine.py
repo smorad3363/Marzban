@@ -28,6 +28,7 @@ from app.db.models import (
 )
 from app.device_limit.constants import DeviceEventState, PenaltyAction, PenaltyStatus
 from app.models.user import UserStatus
+from app.utils import marzhelp_policy
 from app.utils.audit import AuditLogService
 
 
@@ -732,6 +733,7 @@ class DeviceLimitEngine:
         )
         self._write_event(incident)
         if action == PenaltyAction.delete:
+            marzhelp_policy.capture_delete(db, user)
             incident.user_id = None
             db.delete(user)
 

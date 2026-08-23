@@ -114,10 +114,48 @@ export type BulkUserOperation =
   | "subtract_data"
   | "add_days"
   | "subtract_days"
+  | "add_data_and_days"
   | "delete";
 
-export type BulkUserActionResponse = {
-  operation: BulkUserOperation;
-  updated: string[];
-  skipped: string[];
+export type BulkTargetScope =
+  | "ALL_USERS"
+  | "SELECTED_ADMINS_DIRECT"
+  | "SELECTED_ADMINS_SUBTREE";
+
+export type BulkTargetResult = {
+  target_type: "USER" | "ADMIN";
+  target_id: number;
+  target_username: string;
+  owner_admin_id: number | null;
+  status: "PENDING" | "SUCCESS" | "FAILED" | "SKIPPED";
+  attempts: number;
+  retryable: boolean;
+  error_code: string | null;
+  error_message: string | null;
+  result_details: Record<string, unknown> | null;
+};
+
+export type BulkJobResponse = {
+  operation_id: string;
+  job_kind: "USER" | "ADMIN_CREDIT";
+  operation: string;
+  target_scope: BulkTargetScope | "SELECTED_ADMINS_DIRECT" | null;
+  selected_admin_ids: number[];
+  status: string;
+  total: number;
+  success: number;
+  failed: number;
+  skipped: number;
+  pending: number;
+  has_more: boolean;
+  report_has_more: boolean;
+  next_target_cursor: number | null;
+  targets: BulkTargetResult[];
+};
+
+export type BulkPreviewResponse = {
+  target_scope: BulkTargetScope | "SELECTED_ADMINS_DIRECT";
+  selected_admin_ids: number[];
+  resolved_target_count: number;
+  sample_targets: string[];
 };

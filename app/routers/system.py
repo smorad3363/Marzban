@@ -7,13 +7,30 @@ from app.db import Session, crud, get_db
 from app.db.models import MarzhelpMetadata
 from app.models.admin import Admin
 from app.models.proxy import ProxyHost, ProxyInbound, ProxyTypes
-from app.models.system import SystemStats
+from app.models.system import DashboardOverview, SystemStats
 from app.models.user import UserStatus
-from app.utils import admin_hierarchy, marzhelp_policy, responses
+from app.utils import admin_hierarchy, dashboard_metrics, marzhelp_policy, responses
 from app.utils.audit import AuditLogService
 from app.utils.system import cpu_usage, memory_usage, realtime_bandwidth
 
 router = APIRouter(tags=["System"], prefix="/api", responses={401: responses._401})
+
+
+@router.get("/dashboard/overview", response_model=DashboardOverview)
+def get_dashboard_overview(
+    timezone_offset_minutes: int = 0,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
+    """Return bounded, authorization-scoped dashboard aggregates."""
+    if timezone_offset_minutes < -840 or timezone_offset_minutes > 840:
+        raise HTTPException(status_code=422, detail="Invalid timezone offset")
+    dbadmin = crud.get_admin(db, admin.username)
+    return dashboard_metrics.overview(
+        db,
+        dbadmin or admin,
+        timezone_offset_minutes=timezone_offset_minutes,
+    )
 
 
 @router.get("/marzhelp/compatibility")

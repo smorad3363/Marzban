@@ -1,0 +1,30 @@
+import i18n from "locales/i18n";
+
+type ApiErrorDetail = {
+  code?: unknown;
+  correlation_id?: unknown;
+  operation_id?: unknown;
+};
+
+const safeIdentifier = (value: unknown): string | null => {
+  if (typeof value !== "string" || !/^[A-Za-z0-9_.:-]{1,128}$/.test(value)) return null;
+  return value;
+};
+
+export const localizedApiError = (error: unknown): string => {
+  const candidate = error as any;
+  const detail = (candidate?.data?.detail || candidate?.response?._data?.detail) as ApiErrorDetail | string | undefined;
+  const status = Number(candidate?.status || candidate?.statusCode || candidate?.response?.status || 0);
+  if (detail && typeof detail === "object") {
+    const code = safeIdentifier(detail.code);
+    if (code) {
+      const key = `errors.codes.${code}`;
+      const translated = i18n.t(key, { defaultValue: "" });
+      if (translated && translated !== key) return translated;
+      return i18n.t("errors.unknownCode", { code });
+    }
+    const correlation = safeIdentifier(detail.correlation_id) || safeIdentifier(detail.operation_id);
+    if (correlation) return i18n.t("errors.fallbackWithReference", { reference: correlation });
+  }
+  return status ? i18n.t("errors.fallbackWithStatus", { status }) : i18n.t("errors.fallback");
+};

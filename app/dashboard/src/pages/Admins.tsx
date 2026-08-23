@@ -69,6 +69,7 @@ import { useMutation, useQuery, useQueryClient } from "react-query";
 import { fetch } from "service/http";
 import { AdminPolicy, ManagedAdmin, ManagedAdminList, ManagedAdminPayload, PlanCategory, SubscriptionMode } from "types/Admin";
 import { formatBytes } from "utils/formatByte";
+import { localizedApiError } from "utils/apiError";
 
 const SearchIcon = chakra(MagnifyingGlassIcon, { baseStyle: { w: 4, h: 4 } });
 const AddIcon = chakra(PlusIcon, { baseStyle: { w: 4, h: 4 } });
@@ -81,6 +82,7 @@ const PAGE_SIZE = 20;
 const GIB = 1024 ** 3;
 
 const emptyPolicy = (): AdminPolicy => ({
+  billing_mode: "LEGACY_COMPAT",
   total_traffic: null,
   expiry_date: null,
   user_limit: null,
@@ -113,15 +115,13 @@ const emptyAdmin = (): ManagedAdminPayload => ({
   is_sudo: false,
   role: "ADMIN",
   telegram_id: null,
+  phone: "",
   discord_webhook: null,
   policy: emptyPolicy(),
   plan_category_ids: [],
 });
 
-const getErrorMessage = (error: any) => {
-  const detail = error?.data?.detail || error?.response?._data?.detail || error?.message;
-  return typeof detail === "object" ? detail.message || detail.code : detail;
-};
+const getErrorMessage = localizedApiError;
 
 type StatProps = { label: string; value: string | number; icon: JSX.Element };
 const AdminStat: FC<StatProps> = ({ label, value, icon }) => (
@@ -146,7 +146,9 @@ const CreditRemaining: FC<{ admin: ManagedAdmin }> = ({ admin }) => {
       <Text>
         {quota.credit_remaining === null
           ? t("unlimited")
-          : formatBytes(quota.credit_remaining)}
+          : admin.policy.billing_mode === "SEAT_CREDIT"
+            ? `${quota.credit_remaining} seats`
+            : formatBytes(quota.credit_remaining)}
       </Text>
       {quota.credit_usage_percent !== null && (
         <HStack spacing={2}>
@@ -183,6 +185,7 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
       is_sudo: admin.is_sudo,
       role: admin.role,
       telegram_id: admin.telegram_id,
+      phone: admin.phone,
       discord_webhook: admin.discord_webhook,
       policy: { ...admin.policy },
       plan_category_ids: [...admin.plan_category_ids],
@@ -231,6 +234,10 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
     event.preventDefault();
     if (!isEditing && !form.password) {
       toast({ title: t("admins.passwordRequired"), status: "warning", duration: 3000 });
+      return;
+    }
+    if (!form.phone?.trim()) {
+      toast({ title: "Phone is required for Admin accounts", status: "warning", duration: 3000 });
       return;
     }
     if (!form.policy.all_inbounds && form.policy.allowed_inbounds.length === 0) {
@@ -334,9 +341,9 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
                   <FormLabel>{t("admins.telegramId")}</FormLabel>
                   <Input type="number" value={form.telegram_id ?? ""} dir="ltr" onChange={(e) => setField("telegram_id", nullableNumber(e))} />
                 </FormControl>
-                <FormControl>
-                  <FormLabel>{t("admins.discordWebhook")}</FormLabel>
-                  <Input value={form.discord_webhook || ""} onChange={(e) => setField("discord_webhook", e.target.value || null)} dir="ltr" />
+                <FormControl isRequired>
+                  <FormLabel>Phone</FormLabel>
+                  <Input type="tel" autoComplete="tel" minH="44px" maxLength={32} value={form.phone || ""} onChange={(e) => setField("phone", e.target.value)} dir="ltr" />
                 </FormControl>
               </SimpleGrid>
               <FormControl mt={4} maxW={{ md: "320px" }}>
@@ -357,12 +364,40 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
               <Text fontWeight="700">{t("admins.limitsSection")}</Text>
               <Text color="gray.400" fontSize="sm" mt={1}>{t("admins.limitsSectionHelp")}</Text>
               <SimpleGrid columns={{ base: 1, lg: 2 }} gap={5} mt={4}>
-                <FormControl isReadOnly>
-                  <FormLabel>{t("admins.creditLimit")}</FormLabel>
-                  <Input type="number" min={0} step="0.01" dir="ltr" value={form.policy.total_traffic === null ? "" : form.policy.total_traffic / GIB} readOnly />
-                  <FormHelperText>{t("admins.creditLedgerHelp")}</FormHelperText>
+                <FormControl isRequired={!isEditing}>
+                  <FormLabel>Billing mode</FormLabel>
+                  <Select
+                    value={form.policy.billing_mode}
+                    isDisabled={isEditing}
+                    minH="44px"
+                    onChange={(event) => setPolicy("billing_mode", event.target.value as AdminPolicy["billing_mode"])}
+                  >
+                    <option value="LEGACY_COMPAT">Legacy compatibility</option>
+                    <option value="SEAT_CREDIT">Seat credit</option>
+                    <option value="USED_TRAFFIC">Used traffic</option>
+                    <option value="ALLOCATED_TRAFFIC">Allocated traffic</option>
+                  </Select>
+                  <FormHelperText>Billing mode is immutable after account creation.</FormHelperText>
                 </FormControl>
-                <FormControl>
+                {form.policy.billing_mode !== "SEAT_CREDIT" && <FormControl isReadOnly={isEditing}>
+                  <FormLabel>{t("admins.creditLimit")}</FormLabel>
+                  <Input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    dir="ltr"
+                    value={form.policy.total_traffic === null ? "" : form.policy.total_traffic / GIB}
+                    readOnly={isEditing}
+                    onChange={(event) => setPolicy(
+                      "total_traffic",
+                      event.target.value === "" ? null : Math.round(Number(event.target.value) * GIB)
+                    )}
+                  />
+                  <FormHelperText>
+                    {t(isEditing ? "admins.creditLedgerHelp" : "admins.initialCreditLedgerHelp")}
+                  </FormHelperText>
+                </FormControl>}
+                {form.policy.billing_mode === "LEGACY_COMPAT" && <FormControl>
                   <FormLabel>{t("admins.volumeMode")}</FormLabel>
                   <Select
                     value={form.policy.calculate_volume}
@@ -375,7 +410,7 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
                     <option value="created_traffic">{t("admins.createdTrafficMode")}</option>
                   </Select>
                   <FormHelperText>{t("admins.volumeModeHelp")}</FormHelperText>
-                </FormControl>
+                </FormControl>}
                 <FormControl>
                   <FormLabel>{t("admins.operationLimit")}</FormLabel>
                   <Input type="number" min={0} dir="ltr" value={form.policy.user_limit ?? ""} onChange={(e) => setPolicy("user_limit", nullableNumber(e))} />
@@ -386,11 +421,11 @@ const AdminFormModal: FC<FormModalProps> = ({ isOpen, admin, onClose }) => {
                   <Input type="number" min={1} dir="ltr" value={form.policy.max_users ?? ""} onChange={(e) => setPolicy("max_users", nullableNumber(e))} />
                   <FormHelperText>{t("admins.maxUsersHelp")}</FormHelperText>
                 </FormControl>
-                <FormControl>
+                {form.policy.billing_mode === "SEAT_CREDIT" && <FormControl isReadOnly={isEditing} isRequired={!isEditing}>
                   <FormLabel>{t("admins.deviceCapacity")}</FormLabel>
                   <Input type="number" min={1} dir="ltr" value={form.policy.device_capacity_limit ?? ""} onChange={(e) => setPolicy("device_capacity_limit", nullableNumber(e))} />
-                  <FormHelperText>{t("admins.deviceCapacityHelp")}</FormHelperText>
-                </FormControl>
+                  <FormHelperText>Initial finite Seat Credit balance.</FormHelperText>
+                </FormControl>}
                 <FormControl>
                   <FormLabel>{t("admins.maxDuration")}</FormLabel>
                   <Input type="number" min={1} dir="ltr" value={form.policy.max_user_duration_days ?? ""} onChange={(e) => setPolicy("max_user_duration_days", nullableNumber(e))} />
@@ -698,8 +733,8 @@ export const Admins: FC = () => {
                   <Thead><Tr><Th>{t("admins.admin")}</Th><Th>{t("admins.access")}</Th><Th>{t("admins.usersCount")}</Th><Th>{t("admins.creditRemaining")}</Th><Th>{t("admins.operationRemaining")}</Th><Th>{t("admins.maxDuration")}</Th><Th>{t("admins.expiryDate")}</Th><Th textAlign="end">{t("admins.actions")}</Th></Tr></Thead>
                   <Tbody>{admins.map((item) => (
                     <Tr key={item.username}>
-                      <Td><Text color="white" fontWeight="650">{item.username}</Text><Text fontSize="xs" color="gray.400">{item.telegram_id ? `Telegram: ${item.telegram_id}` : t("admins.noContact")}</Text></Td>
-                      <Td><Badge colorScheme={item.role === "OWNER" ? "purple" : item.role === "SUPER_ADMIN" ? "cyan" : "gray"}>{t(`admins.role.${item.role}`)}</Badge></Td>
+                      <Td><Text color="white" fontWeight="650">{item.username}</Text><Text fontSize="xs" color="gray.400">{item.phone || t("admins.noContact")}</Text></Td>
+                      <Td><Stack align="start" spacing={1}><Badge colorScheme={item.role === "OWNER" ? "purple" : item.role === "SUPER_ADMIN" ? "cyan" : "gray"}>{t(`admins.role.${item.role}`)}</Badge><Badge variant="outline">{item.policy.billing_mode}</Badge></Stack></Td>
                       <Td>{item.quota.current_users} / {item.quota.max_users ?? t("unlimited")}</Td>
                       <Td><CreditRemaining admin={item} /></Td>
                       <Td>{item.quota.operation_allowance_remaining ?? t("unlimited")}</Td>

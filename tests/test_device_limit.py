@@ -14,17 +14,21 @@ from app.db.base import Base
 from app.db import crud
 from app.db.models import (
     Admin,
+    AdminAuditLog,
+    MarzhelpAccountingTransaction,
     MarzhelpAdminSettings,
     MarzhelpAdminSubscriptionModePermission,
+    MarzhelpDeletedUser,
     Proxy,
     User,
     MarzhelpAdminUserLimitPermission,
+    DeviceLimitPenaltyStage,
     DeviceLimitUserState,
     DeviceLimitIncident,
     DeviceLimitSettings,
 )
 from app.device_limit.clients import observe_subscription_client, parse_user_agent
-from app.device_limit.constants import SubscriptionMode
+from app.device_limit.constants import PenaltyAction, SubscriptionMode
 from app.device_limit.engine import DeviceLimitEngine, HIT_BUFFER_CAPACITY, mask_ip
 from app.device_limit.slots import slot_email, sync_device_slots
 from app.models.user import UserStatus
@@ -73,6 +77,85 @@ def test_xray_access_parser_is_bounded_and_requires_hit_threshold():
     assert sources == {"node:7"}
     assert per_slot == {2: {"8.8.8.8"}}
     assert mask_ip("8.8.8.8") == "8.8.***.***"
+
+
+def test_auto_delete_uses_credit_guard_and_never_refunds_allocated_traffic(
+    session,
+    monkeypatch,
+):
+    allocated = 50 * 1024**3
+    used = 30 * 1024**3
+    admin = Admin(username="device-delete-admin", hashed_password="x")
+    session.add(admin)
+    session.flush()
+    policy_settings = MarzhelpAdminSettings(
+        admin_id=admin.id,
+        total_traffic=allocated,
+        used_traffic=allocated,
+        calculate_volume="created_traffic",
+        max_users=1,
+        user_count_used=1,
+        device_capacity_limit=2,
+        capacity_used=2,
+    )
+    settings = DeviceLimitSettings(id=1, enabled=True, auto_delete_enabled=True)
+    stage = DeviceLimitPenaltyStage(
+        violation_count=1,
+        action=PenaltyAction.delete.value,
+        enabled=True,
+    )
+    user = User(
+        username="device-auto-delete",
+        admin=admin,
+        data_limit=allocated,
+        used_traffic=used,
+        concurrent_user_limit=2,
+        status=UserStatus.active,
+    )
+    state = DeviceLimitUserState(user=user)
+    session.add_all((policy_settings, settings, stage, user, state))
+    session.commit()
+    user_id = user.id
+
+    monkeypatch.setattr(operations, "remove_user", lambda _user: None)
+    tracker = DeviceLimitEngine()
+    tracker._apply_penalty(
+        session,
+        settings,
+        user,
+        state,
+        stage,
+        {"8.8.8.8", "1.1.1.1"},
+        {"master"},
+        {},
+        datetime(2026, 8, 22, 12, 0, 0),
+        100,
+        {"ip_concurrency": True},
+    )
+    session.commit()
+
+    session.refresh(policy_settings)
+    ledger = session.get(MarzhelpDeletedUser, user_id)
+    transaction = (
+        session.query(MarzhelpAccountingTransaction)
+        .filter_by(operation_key=f"delete:{user_id}")
+        .one()
+    )
+    audit = session.query(AdminAuditLog).filter_by(action="device_limit.delete").one()
+    assert session.get(User, user_id) is None
+    assert ledger.admin_id == admin.id
+    assert ledger.allocated_traffic == allocated
+    assert ledger.used_traffic_total == used
+    assert ledger.refunded_traffic == 0
+    assert transaction.admin_id == admin.id
+    assert transaction.traffic_delta == 0
+    assert transaction.volume_delta == 0
+    assert policy_settings.used_traffic == allocated
+    assert policy_settings.user_count_used == 0
+    assert policy_settings.capacity_used == 0
+    assert audit.admin_username == "device-limit-engine"
+    assert audit.target_id == str(user_id)
+    assert audit.target_name == "device-auto-delete"
 
 
 def test_xray_26_7_28_access_source_variants_and_slot_identity_parse():

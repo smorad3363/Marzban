@@ -1,6 +1,7 @@
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from inspect import signature
+from types import SimpleNamespace
 
 import pytest
 import sqlalchemy as sa
@@ -9,12 +10,17 @@ from sqlalchemy.orm import sessionmaker
 from starlette.requests import Request
 
 from app import xray
+from app.db import crud
 from app.db.base import Base
 from app.db.models import (
     Admin as DBAdmin,
     AdminAuditLog,
     AdminHierarchy,
     AdminHierarchySettings,
+    AdminBulkJobTarget,
+    MarzhelpAccountingTransaction,
+    MarzhelpAdminSettings,
+    MarzhelpDeletedUser,
     AdminRole,
     NodeUserUsage,
     Proxy,
@@ -23,12 +29,14 @@ from app.db.models import (
 )
 from app.dependencies import get_expired_users_list, get_validated_user
 from app.models.admin import Admin as APIAdmin
+from app.models.bulk import BulkTargetScope, BulkUserJobCreateRequest
 from app.models.proxy import ProxyTypes
 from app.models import user as user_models
 from app.models.user import (
     BulkUserActionRequest,
     BulkUserOperation,
     UserCreate,
+    UserModify,
     UserStatus,
 )
 from app.routers.user import (
@@ -45,7 +53,7 @@ from app.routers.user import (
     revoke_user_subscription,
     set_owner as set_user_owner,
 )
-from app.utils import marzhelp_policy, report
+from app.utils import bulk_operations, marzhelp_policy, report
 from app.utils.audit import AuditLogService
 from cli import user as cli_user
 
@@ -103,8 +111,8 @@ def _api_admin(admin: DBAdmin) -> APIAdmin:
 
 def _list_users(db, admin: DBAdmin, owners=None) -> list[str]:
     response = get_users(
-        offset=None,
-        limit=None,
+        offset=0,
+        limit=50,
         username=None,
         search=None,
         owner=owners,
@@ -226,6 +234,103 @@ def _seed_hierarchy_on(db):
     }
     db.commit()
     return owner, super_admin, child, sibling, users
+
+
+def _seed_credit_hierarchy(db):
+    db.add_all(
+        [
+            AdminRole(id=1, code="OWNER"),
+            AdminRole(id=2, code="SUPER_ADMIN"),
+            AdminRole(id=3, code="ADMIN"),
+            AdminHierarchySettings(id=1, enabled=True, max_depth=64),
+        ]
+    )
+    owner = DBAdmin(
+        username="credit-owner",
+        hashed_password="x",
+        is_sudo=True,
+        role_id=1,
+    )
+    super_admin = DBAdmin(
+        username="credit-super-a",
+        hashed_password="x",
+        is_sudo=True,
+        role_id=2,
+        parent=owner,
+    )
+    child = DBAdmin(
+        username="credit-admin-b",
+        hashed_password="x",
+        role_id=3,
+        parent=super_admin,
+    )
+    foreign = DBAdmin(
+        username="credit-foreign",
+        hashed_password="x",
+        role_id=3,
+        parent=owner,
+    )
+    db.add_all((owner, super_admin, child, foreign))
+    db.flush()
+    db.add(SystemOwner(id=1, admin_id=owner.id))
+    db.add_all(
+        [
+            AdminHierarchy(ancestor_id=owner.id, descendant_id=owner.id, depth=0),
+            AdminHierarchy(ancestor_id=owner.id, descendant_id=super_admin.id, depth=1),
+            AdminHierarchy(ancestor_id=owner.id, descendant_id=child.id, depth=2),
+            AdminHierarchy(ancestor_id=owner.id, descendant_id=foreign.id, depth=1),
+            AdminHierarchy(ancestor_id=super_admin.id, descendant_id=super_admin.id, depth=0),
+            AdminHierarchy(ancestor_id=super_admin.id, descendant_id=child.id, depth=1),
+            AdminHierarchy(ancestor_id=child.id, descendant_id=child.id, depth=0),
+            AdminHierarchy(ancestor_id=foreign.id, descendant_id=foreign.id, depth=0),
+        ]
+    )
+    settings = {}
+    for admin in (super_admin, child, foreign):
+        settings[admin.username] = MarzhelpAdminSettings(
+            admin_id=admin.id,
+            total_traffic=100 * 1024**3,
+            calculate_volume="created_traffic",
+            max_users=10,
+            device_capacity_limit=20,
+        )
+    db.add_all(settings.values())
+    db.commit()
+    return owner, super_admin, child, foreign, settings
+
+
+def _provision_credit_user(
+    db,
+    admin: DBAdmin,
+    username: str,
+    allocated: int,
+    *,
+    used: int = 0,
+    concurrent_user_limit: int = 2,
+) -> User:
+    request = SimpleNamespace(
+        data_limit=allocated,
+        expire=None,
+        on_hold_expire_duration=None,
+        concurrent_user_limit=concurrent_user_limit,
+        inbounds={},
+        next_plan=None,
+    )
+    quota = marzhelp_policy.validate_create(db, admin.id, request)
+    user = User(
+        username=username,
+        admin=admin,
+        status=UserStatus.active,
+        data_limit=allocated,
+        used_traffic=used,
+        concurrent_user_limit=concurrent_user_limit,
+        proxies=[Proxy(type=ProxyTypes.VLESS, settings={})],
+    )
+    db.add(user)
+    db.flush()
+    marzhelp_policy.record_create(db, user, quota is not None)
+    db.commit()
+    return user
 
 
 def test_hierarchy_off_list_and_usage_are_owner_scoped(db):
@@ -423,9 +528,10 @@ def test_create_user_records_authenticated_owner_and_audit_actor(
         admin=_api_admin(admin_a),
     )
 
-    created = db.query(User).filter(User.username == payload.username).one()
+    created = db.query(User).filter(User.username == response.username).one()
     audit = db.query(AdminAuditLog).filter_by(action="user.create").one()
     assert created.admin_id == admin_a.id
+    assert created.username == f"{admin_a.user_namespace_prefix}_{payload.username}"
     assert response.admin.username == admin_a.username
     assert reported["by"].username == admin_a.username
     assert reported["user_admin"].username == admin_a.username
@@ -519,3 +625,227 @@ def test_cli_set_owner_is_an_explicit_audited_operation(db, monkeypatch):
     assert audit.target_id == str(user_a.id)
     assert audit.previous_value == {"admin": admin_a.username}
     assert audit.new_value == {"admin": admin_b.username}
+
+
+@pytest.mark.parametrize("delete_actor", ["self", "parent"])
+def test_delete_charges_actual_owner_never_actor_and_never_refunds_credit(
+    db,
+    delete_actor,
+):
+    _, super_admin, child, _, settings = _seed_credit_hierarchy(db)
+    allocated = 12 * 1024**3
+    user = _provision_credit_user(
+        db,
+        child,
+        f"delete-{delete_actor}",
+        allocated,
+        used=5 * 1024**3,
+        concurrent_user_limit=3,
+    )
+    user_id = user.id
+    actor = child if delete_actor == "self" else super_admin
+    validated = get_validated_user(user.username, admin=_api_admin(actor), db=db)
+
+    remove_user(
+        request=_request("DELETE", f"/api/user/{user.username}"),
+        bg=BackgroundTasks(),
+        db=db,
+        dbuser=validated,
+        admin=_api_admin(actor),
+    )
+
+    child_settings = settings[child.username]
+    db.refresh(child_settings)
+    ledger = db.get(MarzhelpDeletedUser, user_id)
+    transaction = (
+        db.query(MarzhelpAccountingTransaction)
+        .filter_by(operation_key=f"delete:{user_id}")
+        .one()
+    )
+    audit = db.query(AdminAuditLog).filter_by(action="user.delete").one()
+    assert ledger.admin_id == child.id
+    assert ledger.allocated_traffic == allocated
+    assert ledger.refunded_traffic == 0
+    assert transaction.admin_id == child.id
+    assert transaction.traffic_delta == 0
+    assert transaction.volume_delta == 0
+    assert child_settings.used_traffic == allocated
+    assert child_settings.user_count_used == 0
+    assert child_settings.capacity_used == 0
+    assert audit.admin_id == actor.id
+    assert audit.target_id == str(user_id)
+    assert audit.target_name == f"delete-{delete_actor}"
+
+
+def test_super_admin_and_owner_creation_keep_owner_credit_boundaries(db):
+    owner, super_admin, _, _, settings = _seed_credit_hierarchy(db)
+    allocated = 8 * 1024**3
+    super_user = _provision_credit_user(
+        db,
+        super_admin,
+        "super-credit-user",
+        allocated,
+    )
+    owner_user = User(
+        username="owner-exempt-user",
+        admin=owner,
+        status=UserStatus.active,
+        data_limit=allocated,
+        used_traffic=1024**3,
+        proxies=[Proxy(type=ProxyTypes.VLESS, settings={})],
+    )
+    db.add(owner_user)
+    db.commit()
+    owner_user_id = owner_user.id
+
+    assert super_user.admin_id == super_admin.id
+    db.refresh(settings[super_admin.username])
+    assert settings[super_admin.username].used_traffic == allocated
+    assert db.get(MarzhelpAdminSettings, owner.id) is None
+
+    remove_user(
+        request=_request("DELETE", f"/api/user/{owner_user.username}"),
+        bg=BackgroundTasks(),
+        db=db,
+        dbuser=owner_user,
+        admin=_api_admin(owner),
+    )
+    owner_ledger = db.get(MarzhelpDeletedUser, owner_user_id)
+    assert owner_ledger.admin_id == owner.id
+    assert owner_ledger.refunded_traffic == 0
+
+
+def test_explicit_owner_transfer_then_delete_keeps_both_allocations_non_refundable(db):
+    owner, super_admin, child, _, settings = _seed_credit_hierarchy(db)
+    allocated = 10 * 1024**3
+    user = _provision_credit_user(db, child, "transfer-delete", allocated)
+    user_id = user.id
+
+    transferred = set_user_owner(
+        request=_request("PUT", f"/api/user/{user.username}/set-owner"),
+        admin_username=super_admin.username,
+        dbuser=user,
+        db=db,
+        admin=_api_admin(owner),
+    )
+    transferred_dbuser = db.get(User, user_id)
+    assert transferred.admin.username == super_admin.username
+    remove_user(
+        request=_request("DELETE", f"/api/user/{user.username}"),
+        bg=BackgroundTasks(),
+        db=db,
+        dbuser=transferred_dbuser,
+        admin=_api_admin(owner),
+    )
+
+    child_settings = settings[child.username]
+    super_settings = settings[super_admin.username]
+    db.refresh(child_settings)
+    db.refresh(super_settings)
+    ledger = db.get(MarzhelpDeletedUser, user_id)
+    audits = db.query(AdminAuditLog).order_by(AdminAuditLog.id).all()
+    assert child_settings.used_traffic == allocated
+    assert child_settings.user_count_used == 0
+    assert super_settings.used_traffic == allocated
+    assert super_settings.user_count_used == 0
+    assert ledger.admin_id == super_admin.id
+    assert ledger.refunded_traffic == 0
+    assert [entry.action for entry in audits] == [
+        "user.owner_change",
+        "user.delete",
+    ]
+    assert all(entry.admin_id == owner.id for entry in audits)
+    assert all(entry.target_id == str(user_id) for entry in audits)
+
+
+def test_foreign_delete_is_rejected_before_bulk_parent_delete_accounts_by_owner(db):
+    _, super_admin, child, foreign, settings = _seed_credit_hierarchy(db)
+    first = _provision_credit_user(db, child, "bulk-child-one", 4 * 1024**3)
+    second = _provision_credit_user(db, child, "bulk-child-two", 6 * 1024**3)
+
+    with pytest.raises(HTTPException) as raised:
+        get_validated_user(first.username, admin=_api_admin(foreign), db=db)
+    assert raised.value.status_code == 403
+    assert db.get(User, first.id) is not None
+    assert db.query(MarzhelpDeletedUser).count() == 0
+
+    job, created = bulk_operations.create_user_job(
+        db,
+        super_admin,
+        BulkUserJobCreateRequest(
+            operation_id="bulk-delete-child-scope",
+            operation=BulkUserOperation.delete,
+            target_scope=BulkTargetScope.SELECTED_ADMINS_DIRECT,
+            selected_admin_ids=[child.id],
+        ),
+    )
+    response, _ = bulk_operations.execute_job(
+        db,
+        super_admin,
+        job.idempotency_key,
+        chunk_size=100,
+        retry_failed=False,
+    )
+
+    child_settings = settings[child.username]
+    db.refresh(child_settings)
+    ledgers = db.query(MarzhelpDeletedUser).order_by(MarzhelpDeletedUser.user_id).all()
+    targets = db.query(AdminBulkJobTarget).filter_by(job_id=job.id).order_by(AdminBulkJobTarget.sequence).all()
+    assert created is True
+    assert response.status == "COMPLETE"
+    assert response.success_count == 2
+    assert [target.target_username for target in targets] == ["bulk-child-one", "bulk-child-two"]
+    assert all(target.status == "SUCCESS" for target in targets)
+    assert [entry.admin_id for entry in ledgers] == [child.id, child.id]
+    assert [entry.refunded_traffic for entry in ledgers] == [0, 0]
+    assert child_settings.used_traffic == 10 * 1024**3
+    assert child_settings.user_count_used == 0
+    assert child_settings.capacity_used == 0
+
+
+def test_delete_after_usage_reset_and_renewal_preserves_lifetime_and_credit(db):
+    _, _, child, _, settings = _seed_credit_hierarchy(db)
+    user = _provision_credit_user(
+        db,
+        child,
+        "reset-renew-delete",
+        10 * 1024**3,
+        used=3 * 1024**3,
+    )
+    user_id = user.id
+
+    crud.reset_user_data_usage(db, user)
+    crud.update_user(
+        db,
+        user,
+        UserModify(data_limit=15 * 1024**3),
+        operation=marzhelp_policy.UserUpdateOperation.renew,
+    )
+    user.used_traffic = 2 * 1024**3
+    db.commit()
+    remove_user(
+        request=_request("DELETE", f"/api/user/{user.username}"),
+        bg=BackgroundTasks(),
+        db=db,
+        dbuser=user,
+        admin=_api_admin(child),
+    )
+
+    child_settings = settings[child.username]
+    db.refresh(child_settings)
+    ledger = db.get(MarzhelpDeletedUser, user_id)
+    transactions = (
+        db.query(MarzhelpAccountingTransaction)
+        .filter_by(user_id=user_id)
+        .order_by(MarzhelpAccountingTransaction.id)
+        .all()
+    )
+    assert ledger.used_traffic_total == 5 * 1024**3
+    assert ledger.allocated_traffic == 15 * 1024**3
+    assert ledger.refunded_traffic == 0
+    assert child_settings.used_traffic == 15 * 1024**3
+    assert [entry.operation_type for entry in transactions] == [
+        "create",
+        "renew",
+        "delete",
+    ]
