@@ -30,6 +30,24 @@ sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/
 Take and verify a backup before updating. Production database evidence for this
 project is MySQL 8.x with InnoDB.
 
+## v5.0.0-rc.2 CI-fix candidate
+
+This candidate keeps all `rc.1` application behavior. It corrects only CI test
+orchestration: dedicated Stage 8–11 database tests no longer run against shared
+`marzban_test`; each runs against its required isolated MySQL 8.0/InnoDB database.
+
+Update a staging server to this exact candidate:
+
+```bash
+marzban update --version v5.0.0-rc.2
+```
+
+Fresh-install this exact candidate from GitHub:
+
+```bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.0.0-rc.2/scripts/marzban.sh)" @ install --version v5.0.0-rc.2 --database mysql
+```
+
 ## Release process
 
 1. Update `VERSION` and `app.__version__`.

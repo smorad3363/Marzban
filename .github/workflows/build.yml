@@ -80,6 +80,10 @@ jobs:
           if ! python -m pytest -q --tb=short --disable-warnings \
             --ignore=tests/test_mysql_device_limit_migration.py \
             --ignore=tests/test_mysql_admin_hierarchy_migration.py \
+            --ignore=tests/test_mysql_stage8_bulk_jobs.py \
+            --ignore=tests/test_mysql_stage9_dashboard.py \
+            --ignore=tests/test_mysql_stage10_pagination.py \
+            --ignore=tests/test_mysql_stage11_operations.py \
             2>&1 | tee "${pytest_log}"; then
             {
               echo '### Backend regression failure'
@@ -100,6 +104,32 @@ jobs:
           python -m pytest -q
           tests/test_mysql_device_limit_migration.py
           tests/test_mysql_admin_hierarchy_migration.py
+
+      - name: Verify Stage 8-11 isolated MySQL evidence
+        if: ${{ matrix.mysql-image == 'mysql:8.0' }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mysql_container="$(docker ps --filter publish=3306 --format '{{.ID}}' | head -1)"
+          test -n "${mysql_container}"
+
+          run_isolated_test() {
+            local stage="$1"
+            local test_file="$2"
+            local database="stage${stage}_${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}_test"
+            local database_url="mysql+pymysql://root:root-test-password@127.0.0.1:3306/${database}"
+            docker exec -e MYSQL_PWD=root-test-password "${mysql_container}" \
+              mysql --user=root --execute \
+              "CREATE DATABASE \`${database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+            SQLALCHEMY_DATABASE_URL="${database_url}" \
+              TEST_MYSQL_DATABASE_URL="${database_url}" \
+              python -m pytest -q "${test_file}"
+          }
+
+          run_isolated_test 8 tests/test_mysql_stage8_bulk_jobs.py
+          run_isolated_test 9 tests/test_mysql_stage9_dashboard.py
+          run_isolated_test 10 tests/test_mysql_stage10_pagination.py
+          run_isolated_test 11 tests/test_mysql_stage11_operations.py
 
       - name: Verify backup checksum and restore
         run: |
