@@ -48,6 +48,24 @@ Fresh-install this exact candidate from GitHub:
 sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.0.0-rc.2/scripts/marzban.sh)" @ install --version v5.0.0-rc.2 --database mysql
 ```
 
+## v5.0.0-rc.3 Admin usability candidate
+
+This candidate simplifies the Persian Admin and Dashboard text, adds a separate
+audited control for granting or reclaiming an Admin's credit, and fixes the public
+`marzban set-owner USERNAME` server command in the maintained Marzban-scripts fork.
+
+Update a staging server to this exact candidate:
+
+```bash
+marzban update --version v5.0.0-rc.3
+```
+
+Fresh-install this exact candidate from GitHub:
+
+```bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.0.0-rc.3/scripts/marzban.sh)" @ install --version v5.0.0-rc.3 --database mysql
+```
+
 ## Release process
 
 1. Update `VERSION` and `app.__version__`.

@@ -1,4 +1,9 @@
 import {
+  Accordion,
+  AccordionButton,
+  AccordionIcon,
+  AccordionItem,
+  AccordionPanel,
   Alert,
   AlertIcon,
   Badge,
@@ -30,6 +35,24 @@ import { canManageHierarchyNode } from "utils/adminHierarchyAuthorization";
 
 const GIB = 1024 ** 3;
 
+const roleLabels: Record<string, string> = {
+  OWNER: "مالک",
+  SUPER_ADMIN: "ادمین ارشد",
+  ADMIN: "ادمین",
+};
+const accountStatusLabels: Record<string, string> = {
+  ACTIVE: "فعال",
+  SUSPENDED: "متوقف",
+  FROZEN: "مسدود",
+};
+const jobStatusLabels: Record<string, string> = {
+  PENDING: "در انتظار",
+  RUNNING: "در حال انجام",
+  COMPLETED: "تمام‌شده",
+  COMPLETED_WITH_ERRORS: "تمام‌شده با خطا",
+  FAILED: "ناموفق",
+};
+
 type FlatNode = HierarchyAdminNode & { visualDepth: number };
 
 const flatten = (nodes: HierarchyAdminNode[], visualDepth = 0): FlatNode[] =>
@@ -59,6 +82,7 @@ export const AdminHierarchyPanel: FC = () => {
   const [bulkPreview, setBulkPreview] = useState<BulkPreviewResponse | null>(null);
   const [bulkResult, setBulkResult] = useState<BulkJobResponse | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [expandedAdminId, setExpandedAdminId] = useState<number | null>(null);
   const query = useQuery<HierarchyAdminNode[], Error>(
     "admin-hierarchy-tree",
     () => fetch("/admin-management/tree"),
@@ -86,7 +110,7 @@ export const AdminHierarchyPanel: FC = () => {
       } catch (error) {
         if (!controller.signal.aborted) {
           setBulkPreview(null);
-          toast({ title: "پیش‌نمایش ادمین‌ها ناموفق بود", description: errorText(error), status: "error" });
+          toast({ title: "فهرست ادمین‌های انتخابی آماده نشد", description: errorText(error), status: "error" });
         }
       }
     }, 300);
@@ -137,11 +161,11 @@ export const AdminHierarchyPanel: FC = () => {
       queryClient.invalidateQueries("admin-hierarchy-tree");
       queryClient.invalidateQueries("account-summary");
       toast({
-        title: `موفق ${current.success} · ناموفق ${current.failed} · نادیده‌گرفته ${current.skipped}`,
+        title: `انجام‌شده ${current.success} · خطا ${current.failed} · ردشده ${current.skipped}`,
         status: current.failed ? "warning" : "success",
       });
     } catch (error) {
-      toast({ title: "عملیات گروهی اعتبار انجام نشد", description: errorText(error), status: "error" });
+      toast({ title: "تغییر گروهی اعتبار انجام نشد", description: errorText(error), status: "error" });
     } finally {
       setBulkBusy(false);
     }
@@ -217,55 +241,77 @@ export const AdminHierarchyPanel: FC = () => {
           setTrialAmounts((current) => ({ ...current, [variables.node.id]: "" }));
           setTrialReasons((current) => ({ ...current, [variables.node.id]: "" }));
         }
-        toast({ title: "عملیات با موفقیت انجام شد", status: "success", duration: 3000 });
+        toast({ title: "تغییر با موفقیت ذخیره شد", status: "success", duration: 3000 });
       },
-      onError: (error) => { toast({ title: "عملیات انجام نشد", description: errorText(error), status: "error", duration: 5000 }); },
+      onError: (error) => { toast({ title: "تغییر ذخیره نشد", description: errorText(error), status: "error", duration: 5000 }); },
     }
   );
 
   if (query.isLoading) return <Skeleton h="190px" borderRadius="18px" mb={5} />;
-  if (query.isError) return <Alert status="error" mb={5}><AlertIcon />درخت مدیریتی دریافت نشد.</Alert>;
+  if (query.isError) return <Alert status="error" mb={5}><AlertIcon />فهرست ادمین‌ها بارگذاری نشد.</Alert>;
 
   return (
     <Card mb={5} p={{ base: 4, md: 5 }} bg="#111d17" color="gray.100" borderWidth="1px" borderColor="#33483b" borderRadius="18px" boxShadow="panel">
       <Box mb={4}>
-        <Text as="h2" fontSize="lg" fontWeight="800">ساختار سلسله‌مراتبی</Text>
-        <Text color="gray.400" fontSize="sm" mt={1}>نقش، وضعیت حساب و اعتبار قابل‌انتقال هر شاخه.</Text>
+        <Text as="h2" fontSize="lg" fontWeight="800">ادمین‌های زیرمجموعه</Text>
+        <Text color="gray.400" fontSize="sm" mt={1}>وضعیت و اعتبار ادمین‌های زیرمجموعه را اینجا می‌بینید.</Text>
       </Box>
-      <Stack mb={4} p={4} spacing={3} bg="blackAlpha.300" borderWidth="1px" borderColor="whiteAlpha.200" borderRadius="12px">
-        <Text fontWeight="800">Grant / Reclaim گروهی</Text>
-        <Text fontSize="sm" color="gray.300">
-          ادمین‌ها را از checkbox هر ردیف انتخاب کنید. پیش‌نمایش سرور قبل از اجرا الزامی است.
-        </Text>
-        <HStack align="end" spacing={2} flexWrap="wrap">
-          <FormControl maxW={{ md: "170px" }} isRequired>
-            <FormLabel fontSize="xs">اعتبار برای هر ادمین (GiB)</FormLabel>
-            <Input minH="44px" type="number" min={0.01} step={0.01} dir="ltr" value={bulkAmount} onChange={(event) => setBulkAmount(event.target.value)} />
-          </FormControl>
-          <FormControl flex="1" minW={{ base: "100%", md: "240px" }} isRequired>
-            <FormLabel fontSize="xs">دلیل</FormLabel>
-            <Input minH="44px" maxLength={512} value={bulkReason} onChange={(event) => setBulkReason(event.target.value)} />
-          </FormControl>
-          <Button minH="44px" colorScheme="green" isLoading={bulkBusy} isDisabled={!bulkPreview || !bulkReason.trim() || Number(bulkAmount) <= 0} onClick={() => runBulkCredit("grant_credit")}>Grant</Button>
-          <Button minH="44px" variant="outline" isLoading={bulkBusy} isDisabled={!bulkPreview || !bulkReason.trim() || Number(bulkAmount) <= 0} onClick={() => runBulkCredit("reclaim_credit")}>Reclaim</Button>
-        </HStack>
-        <Alert status={bulkPreview ? "info" : "warning"} borderRadius="10px">
-          <AlertIcon />
-          {bulkPreview
-            ? `${bulkPreview.resolved_target_count} ادمین snapshot می‌شود.`
-            : "حداقل یک ادمین مجاز انتخاب کنید."}
-        </Alert>
-        {bulkResult && (
-          <Box fontSize="sm" aria-live="polite">
-            <Text fontWeight="700">job {bulkResult.status}: کل {bulkResult.total} · موفق {bulkResult.success} · ناموفق {bulkResult.failed} · نادیده‌گرفته {bulkResult.skipped}</Text>
-            {bulkResult.failed > 0 && (
-              <Button mt={2} minH="44px" size="sm" variant="outline" isLoading={bulkBusy} onClick={() => runBulkCredit(bulkResult.operation as "grant_credit" | "reclaim_credit", bulkResult.operation_id)}>
-                Retry خطاهای قابل‌تکرار
-              </Button>
-            )}
-          </Box>
-        )}
-      </Stack>
+      <Accordion allowToggle mb={4} reduceMotion>
+        <AccordionItem border="none">
+          <AccordionButton
+            minH="58px"
+            px={4}
+            bg="blackAlpha.300"
+            borderWidth="1px"
+            borderColor="whiteAlpha.200"
+            borderRadius="12px"
+            _expanded={{ borderEndRadius: 0, borderBottomColor: "transparent" }}
+          >
+            <Box flex="1" textAlign="start">
+              <HStack spacing={2} flexWrap="wrap">
+                <Text fontWeight="800">اعتبار گروهی</Text>
+                <Badge colorScheme={bulkAdminIds.length ? "green" : "gray"}>{bulkAdminIds.length} انتخاب</Badge>
+              </HStack>
+              <Text fontSize="xs" color="gray.400" mt={1}>ادمین‌ها را انتخاب کنید، تعداد را بررسی کنید، سپس اعتبار بدهید یا پس بگیرید.</Text>
+            </Box>
+            <AccordionIcon />
+          </AccordionButton>
+          <AccordionPanel p={4} bg="blackAlpha.300" borderWidth="1px" borderTopWidth={0} borderColor="whiteAlpha.200" borderBottomRadius="12px">
+            <Stack spacing={3}>
+              <Alert status={bulkPreview ? "info" : "warning"} borderRadius="10px">
+                <AlertIcon />
+                {bulkPreview
+                  ? `${bulkPreview.resolved_target_count} ادمین انتخاب شده است.`
+                  : "از فهرست زیر حداقل یک ادمین مجاز انتخاب کنید."}
+              </Alert>
+              <SimpleGrid columns={{ base: 1, md: 2 }} gap={3}>
+                <FormControl isRequired>
+                  <FormLabel fontSize="xs">مقدار برای هر ادمین (گیگابایت)</FormLabel>
+                  <Input minH="44px" type="number" min={0.01} step={0.01} dir="ltr" value={bulkAmount} onChange={(event) => setBulkAmount(event.target.value)} />
+                </FormControl>
+                <FormControl isRequired>
+                  <FormLabel fontSize="xs">دلیل تغییر</FormLabel>
+                  <Input minH="44px" maxLength={512} value={bulkReason} onChange={(event) => setBulkReason(event.target.value)} />
+                </FormControl>
+              </SimpleGrid>
+              <HStack justify="end" flexWrap="wrap">
+                <Button minH="44px" colorScheme="green" isLoading={bulkBusy} isDisabled={!bulkPreview || !bulkReason.trim() || Number(bulkAmount) <= 0} onClick={() => runBulkCredit("grant_credit")}>واگذاری گروهی</Button>
+                <Button minH="44px" variant="outline" isLoading={bulkBusy} isDisabled={!bulkPreview || !bulkReason.trim() || Number(bulkAmount) <= 0} onClick={() => runBulkCredit("reclaim_credit")}>بازپس‌گیری گروهی</Button>
+              </HStack>
+              {bulkResult && (
+                <Box p={3} borderWidth="1px" borderColor="whiteAlpha.200" borderRadius="10px" fontSize="sm" aria-live="polite">
+                  <Text fontWeight="700">وضعیت: {jobStatusLabels[bulkResult.status] || bulkResult.status} · کل {bulkResult.total} · انجام‌شده {bulkResult.success} · خطا {bulkResult.failed} · ردشده {bulkResult.skipped}</Text>
+                  {bulkResult.failed > 0 && (
+                    <Button mt={2} minH="44px" size="sm" variant="outline" isLoading={bulkBusy} onClick={() => runBulkCredit(bulkResult.operation as "grant_credit" | "reclaim_credit", bulkResult.operation_id)}>
+                      تلاش دوباره برای خطاها
+                    </Button>
+                  )}
+                </Box>
+              )}
+            </Stack>
+          </AccordionPanel>
+        </AccordionItem>
+      </Accordion>
       <Stack spacing={2}>
         {nodes.map((node) => {
           const canAct = canManageHierarchyNode(userData, node);
@@ -283,7 +329,15 @@ export const AdminHierarchyPanel: FC = () => {
           const referralRate = Number(referralRateText);
           const referralNote = referralNotes[node.id] || "";
           return (
-            <Box key={node.id} p={3} ps={{ base: 3, md: `${12 + node.visualDepth * 24}px` }} bg="rgba(255,255,255,.025)" borderWidth="1px" borderColor="whiteAlpha.200" borderRadius="12px">
+            <Box
+              key={node.id}
+              p={3}
+              ps={{ base: 3, md: `${12 + node.visualDepth * 24}px` }}
+              bg={expandedAdminId === node.id ? "rgba(72, 213, 139, .055)" : "rgba(255,255,255,.025)"}
+              borderWidth="1px"
+              borderColor={expandedAdminId === node.id ? "rgba(72, 213, 139, .38)" : "whiteAlpha.200"}
+              borderRadius="12px"
+            >
               <SimpleGrid columns={{ base: 1, xl: 2 }} gap={3} alignItems="center">
                 <Box minW={0}>
                   <HStack flexWrap="wrap">
@@ -303,22 +357,34 @@ export const AdminHierarchyPanel: FC = () => {
                       />
                     )}
                     <Text fontWeight="750" dir="ltr" overflowWrap="anywhere">{node.username}</Text>
-                    <Badge colorScheme={node.role === "OWNER" ? "purple" : node.role === "SUPER_ADMIN" ? "cyan" : "gray"}>{node.role.replace("_", " ")}</Badge>
-                    <Badge colorScheme={node.account_status === "ACTIVE" ? "green" : "orange"}>{node.account_status}</Badge>
+                    <Badge colorScheme={node.role === "OWNER" ? "purple" : node.role === "SUPER_ADMIN" ? "cyan" : "gray"}>{roleLabels[node.role] || node.role}</Badge>
+                    <Badge colorScheme={node.account_status === "ACTIVE" ? "green" : "orange"}>{accountStatusLabels[node.account_status] || node.account_status}</Badge>
                   </HStack>
-                  <Text mt={1} color="gray.400" fontSize="xs">عمق {node.visualDepth} · اعتبار: {node.available_traffic === null ? "نامحدود" : String(formatBytes(node.available_traffic))} · Trial باقی‌مانده: {node.trial_quota}</Text>
+                  <Text mt={1} color="gray.400" fontSize="xs">سطح {node.visualDepth} · اعتبار: {node.available_traffic === null ? "نامحدود" : String(formatBytes(node.available_traffic))} · اشتراک آزمایشی: {node.trial_quota}</Text>
                 </Box>
-                <HStack spacing={3} fontSize="xs" color="gray.300" flexWrap="wrap">
+                <HStack spacing={3} justify={{ xl: "end" }} fontSize="xs" color="gray.300" flexWrap="wrap">
                   <Text>مصرف: {formatBytes(node.own_spend)}</Text>
                   <Text>واگذارشده: {formatBytes(node.delegated_traffic)}</Text>
-                  <Text>API: {node.external_api_enabled ? "فعال" : "خاموش"}</Text>
+                  <Text>دسترسی API: {node.external_api_enabled ? "فعال" : "خاموش"}</Text>
+                  {canAct && (
+                    <Button
+                      minH="40px"
+                      size="sm"
+                      variant={expandedAdminId === node.id ? "solid" : "outline"}
+                      colorScheme="green"
+                      aria-expanded={expandedAdminId === node.id}
+                      onClick={() => setExpandedAdminId((current) => current === node.id ? null : node.id)}
+                    >
+                      {expandedAdminId === node.id ? "بستن مدیریت" : "مدیریت"}
+                    </Button>
+                  )}
                 </HStack>
               </SimpleGrid>
-              {canAct && (
+              {canAct && expandedAdminId === node.id && (
                 <SimpleGrid columns={{ base: 1, xl: 2 }} gap={3} mt={3}>
                   <Stack direction={{ base: "column", md: "row" }} align={{ md: "end" }} spacing={2} p={3} bg="blackAlpha.200" borderRadius="10px">
                     <FormControl maxW={{ md: "145px" }}>
-                      <FormLabel fontSize="xs" mb={1}>اعتبار (GiB)</FormLabel>
+                      <FormLabel fontSize="xs" mb={1}>اعتبار (گیگابایت)</FormLabel>
                       <Input minH="44px" type="number" min={0.01} step={0.01} dir="ltr" value={amounts[node.id] || ""} onChange={(event) => setAmounts((current) => ({ ...current, [node.id]: event.target.value }))} />
                     </FormControl>
                     <FormControl flex="1">
@@ -341,54 +407,54 @@ export const AdminHierarchyPanel: FC = () => {
                       <Input minH="44px" type="number" min={0} step={1} dir="ltr" value={remainingText} onChange={(event) => setRenewalRemaining((current) => ({ ...current, [node.id]: event.target.value }))} />
                       <FormHelperText fontSize="xs">خالی یعنی نامحدود؛ فقط تمدید واقعی مصرف می‌کند.</FormHelperText>
                     </FormControl>
-                    <Button minH="44px" size="sm" colorScheme="green" variant="outline" isDisabled={remaining !== null && (!Number.isInteger(remaining) || remaining < 0)} isLoading={action.isLoading} onClick={() => action.mutate({ node, operation: "renewal", enabled, remaining })}>ذخیره سیاست تمدید</Button>
+                    <Button minH="44px" size="sm" colorScheme="green" variant="outline" isDisabled={remaining !== null && (!Number.isInteger(remaining) || remaining < 0)} isLoading={action.isLoading} onClick={() => action.mutate({ node, operation: "renewal", enabled, remaining })}>ذخیره تنظیم تمدید</Button>
                     {isOwner && node.role !== "OWNER" && (
                       <Button minH="44px" size="sm" colorScheme={node.active_owner_freeze_event_id === null ? "orange" : "green"} variant="ghost" isLoading={action.isLoading} onClick={() => {
                         const operation = node.active_owner_freeze_event_id === null ? "freeze" : "unfreeze";
                         const warning = operation === "freeze" ? `تمام زیرشاخه ${node.username} مسدود شود؟` : `مسدودی مالک برای ${node.username} رفع شود؟`;
                         if (window.confirm(warning)) action.mutate({ node, operation, reason: "Owner dashboard operation" });
-                      }}>{node.active_owner_freeze_event_id === null ? "Freeze کل شاخه" : "Unfreeze کل شاخه"}</Button>
+                      }}>{node.active_owner_freeze_event_id === null ? "مسدودکردن این شاخه" : "بازکردن این شاخه"}</Button>
                     )}
                     {!isOwner && node.account_status === "ACTIVE" && (
-                      <Button minH="44px" size="sm" colorScheme="orange" variant="ghost" isLoading={action.isLoading} onClick={() => window.confirm(`تعلیق عملیاتی شاخه ${node.username}؟`) && action.mutate({ node, operation: "suspend" })}>تعلیق شاخه</Button>
+                      <Button minH="44px" size="sm" colorScheme="orange" variant="ghost" isLoading={action.isLoading} onClick={() => window.confirm(`فعالیت شاخه ${node.username} متوقف شود؟`) && action.mutate({ node, operation: "suspend" })}>توقف این شاخه</Button>
                     )}
                     {node.account_status !== "ACTIVE" && node.active_owner_freeze_event_id === null && (
-                      <Button minH="44px" size="sm" colorScheme="green" variant="ghost" isLoading={action.isLoading} onClick={() => action.mutate({ node, operation: "resume" })}>رفع تعلیق عملیاتی</Button>
+                      <Button minH="44px" size="sm" colorScheme="green" variant="ghost" isLoading={action.isLoading} onClick={() => action.mutate({ node, operation: "resume" })}>فعال‌کردن دوباره</Button>
                     )}
                   </Stack>
                 </SimpleGrid>
               )}
-              {canAct && (userData.role === "OWNER" || userData.is_sudo) && (
+              {canAct && expandedAdminId === node.id && (userData.role === "OWNER" || userData.is_sudo) && (
                 <Stack direction={{ base: "column", md: "row" }} align={{ md: "end" }} spacing={2} p={3} mt={3} bg="blackAlpha.200" borderRadius="10px">
                   <FormControl maxW={{ md: "145px" }}>
-                    <FormLabel fontSize="xs" mb={1}>تعداد Trial</FormLabel>
+                    <FormLabel fontSize="xs" mb={1}>تعداد اشتراک آزمایشی</FormLabel>
                     <Input minH="44px" type="number" min={1} step={1} dir="ltr" value={trialAmounts[node.id] || ""} onChange={(event) => setTrialAmounts((current) => ({ ...current, [node.id]: event.target.value }))} />
                   </FormControl>
                   <FormControl flex="1">
-                    <FormLabel fontSize="xs" mb={1}>دلیل تغییر سهمیه Trial</FormLabel>
+                    <FormLabel fontSize="xs" mb={1}>دلیل تغییر</FormLabel>
                     <Input minH="44px" maxLength={512} value={trialReason} onChange={(event) => setTrialReasons((current) => ({ ...current, [node.id]: event.target.value }))} />
                   </FormControl>
-                  <Button minH="44px" size="sm" colorScheme="orange" isDisabled={!Number.isInteger(trialAmount) || trialAmount <= 0 || !trialReason.trim()} isLoading={action.isLoading} onClick={() => action.mutate({ node, operation: "trial-grant", amount: trialAmount, reason: trialReason.trim() })}>افزایش Trial</Button>
-                  <Button minH="44px" size="sm" variant="outline" colorScheme="orange" isDisabled={!Number.isInteger(trialAmount) || trialAmount <= 0 || !trialReason.trim()} isLoading={action.isLoading} onClick={() => window.confirm(`بازپس‌گیری ${trialAmount} سهمیه Trial از ${node.username}؟`) && action.mutate({ node, operation: "trial-reclaim", amount: trialAmount, reason: trialReason.trim() })}>بازپس‌گیری Trial</Button>
+                  <Button minH="44px" size="sm" colorScheme="orange" isDisabled={!Number.isInteger(trialAmount) || trialAmount <= 0 || !trialReason.trim()} isLoading={action.isLoading} onClick={() => action.mutate({ node, operation: "trial-grant", amount: trialAmount, reason: trialReason.trim() })}>افزایش سهمیه آزمایشی</Button>
+                  <Button minH="44px" size="sm" variant="outline" colorScheme="orange" isDisabled={!Number.isInteger(trialAmount) || trialAmount <= 0 || !trialReason.trim()} isLoading={action.isLoading} onClick={() => window.confirm(`${trialAmount} سهمیه آزمایشی از ${node.username} پس گرفته شود؟`) && action.mutate({ node, operation: "trial-reclaim", amount: trialAmount, reason: trialReason.trim() })}>پس‌گرفتن سهمیه آزمایشی</Button>
                 </Stack>
               )}
-              {isOwner && node.role !== "OWNER" && (
+              {expandedAdminId === node.id && isOwner && node.role !== "OWNER" && (
                 <Stack direction={{ base: "column", md: "row" }} align={{ md: "end" }} spacing={2} p={3} mt={3} bg="blackAlpha.200" borderRadius="10px">
                   <FormControl maxW={{ md: "180px" }}>
-                    <FormLabel fontSize="xs" mb={1}>Referrer username</FormLabel>
+                    <FormLabel fontSize="xs" mb={1}>نام کاربری معرف</FormLabel>
                     <Input minH="44px" dir="ltr" value={referrer} onChange={(event) => setReferrers((current) => ({ ...current, [node.id]: event.target.value }))} />
                   </FormControl>
                   <FormControl maxW={{ md: "145px" }}>
-                    <FormLabel fontSize="xs" mb={1}>Rate (bps)</FormLabel>
+                    <FormLabel fontSize="xs" mb={1}>نرخ معرف (از ۱۰٬۰۰۰)</FormLabel>
                     <Input minH="44px" type="number" min={0} max={10000} step={1} dir="ltr" value={referralRateText} onChange={(event) => setReferralRates((current) => ({ ...current, [node.id]: event.target.value }))} />
                   </FormControl>
                   <FormControl flex="1">
-                    <FormLabel fontSize="xs" mb={1}>یادداشت attribution</FormLabel>
+                    <FormLabel fontSize="xs" mb={1}>توضیح</FormLabel>
                     <Input minH="44px" maxLength={512} value={referralNote} onChange={(event) => setReferralNotes((current) => ({ ...current, [node.id]: event.target.value }))} />
-                    <FormHelperText fontSize="xs">فقط attribution و audit؛ هیچ اعتبار یا منبعی خودکار ایجاد نمی‌شود.</FormHelperText>
+                    <FormHelperText fontSize="xs">این بخش فقط معرف را ثبت می‌کند و اعتبار خودکار نمی‌دهد.</FormHelperText>
                   </FormControl>
-                  <Button minH="44px" size="sm" colorScheme="purple" isDisabled={!referrer.trim() || !Number.isInteger(referralRate) || referralRate < 0 || referralRate > 10000} isLoading={action.isLoading} onClick={() => action.mutate({ node, operation: "referral-set", referrer: referrer.trim(), rateBps: referralRate, reason: referralNote.trim() || undefined })}>ذخیره Referral</Button>
-                  <Button minH="44px" size="sm" variant="outline" colorScheme="purple" isDisabled={node.referral_referrer_admin_id === null} isLoading={action.isLoading} onClick={() => window.confirm(`Referral ${node.username} حذف شود؟`) && action.mutate({ node, operation: "referral-remove", reason: referralNote.trim() || undefined })}>حذف Referral</Button>
+                  <Button minH="44px" size="sm" colorScheme="purple" isDisabled={!referrer.trim() || !Number.isInteger(referralRate) || referralRate < 0 || referralRate > 10000} isLoading={action.isLoading} onClick={() => action.mutate({ node, operation: "referral-set", referrer: referrer.trim(), rateBps: referralRate, reason: referralNote.trim() || undefined })}>ذخیره معرف</Button>
+                  <Button minH="44px" size="sm" variant="outline" colorScheme="purple" isDisabled={node.referral_referrer_admin_id === null} isLoading={action.isLoading} onClick={() => window.confirm(`معرف ${node.username} حذف شود؟`) && action.mutate({ node, operation: "referral-remove", reason: referralNote.trim() || undefined })}>حذف معرف</Button>
                 </Stack>
               )}
             </Box>

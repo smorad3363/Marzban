@@ -830,6 +830,23 @@ reason codeهای حداقلی برای لاگ parent:
 
 ## نقطه دقیق ادامه
 
+در `2026-08-23` یک برش اصلاحی پس از `v5.0.0-rc.2` با مجوز صریح Owner شروع شد:
+ساده‌سازی متن‌های Admin/Dashboard، افزودن کنترل روشن افزایش/کاهش اعتبار به فرم
+ویرایش ادمین و تعمیر فرمان عمومی `marzban set-owner`. baseline محلی و remote برابر
+`agent/admin-hierarchy-v4.9.0@49c9e1ddeeb2cf2784d256420657a2350ca41fb7`
+و tag متناظر `v5.0.0-rc.2` است؛ GitHub origin به
+`https://github.com/smorad3363/Marzban.git` اشاره دارد و GHCR همین tag با digest
+`sha256:7a5437403c6a45f6abb2e4673b28de7c2f58855410e3564cbe2dc435604a77c6`
+قابل دریافت است. علت واقعی خرابی فرمان کوتاه در نسخه نصب‌شده‌ی fork تأیید شد و
+میان‌بر در commit ثابت
+`smorad3363/Marzban-scripts@4830af3566022502159935eeb8636f1af3148502`
+اضافه و روی `master` منتشر شد؛ remote مستقل `upstream` نیز حفظ شده است. UI از
+endpointهای موجود دفترکل برای افزایش/کاهش جداگانه اعتبار استفاده می‌کند و هیچ
+schema، migration یا قاعده حسابداری تغییر نکرده است. نقطه ادامه: gate نهایی
+`v5.0.0-rc.3`، commit/tag/prerelease و انتظار CI؛ بدون deploy و بدون final `v5.0.0`.
+
+### سابقه نقطه ادامه Stage 12
+
 در `2026-08-23` مجوز Owner برای external action محدود Stage 12 و مقصد
 `smorad3363/Marzban-scripts` دریافت شد، اما preflight تکرارشده هنوز `BLOCKED` است:
 `gh auth status` کاربر authenticated ندارد، `GH_TOKEN/GITHUB_TOKEN` موجود نیست و
@@ -947,3 +964,5 @@ git log -3 --oneline --decorate
 | `2026-08-23` | Runbook V3 Stage 13 final gate | `PASS` برای gate محلی/disposable؛ `READY FOR NEXT ENVIRONMENT` | بدون feature جدید؛ SQLite migration خارج production evidence؛ دو اصلاح فقط test-harness؛ نسخه عمداً `4.9.8` ماند | `b45e3af` + working tree؛ upstream=`0/0`؛ staged/stash=`0/0` | backend=`212 passed, 9 skipped`؛ frontend utility/auth/build=`PASS` و `1751 modules`؛ شش MySQL/InnoDB `8.0.43` test=`PASS`؛ head=`4c8e1a7d9b30`؛ Graphify=`4260/10919/461`؛ compile/release-contract/diff-check=`PASS` | Browser/Core/Node/Tunnel/live Telegram/native mysqldump=`NOT EXECUTED`؛ Graphify 11 zero-node و bundle warning=`UNCERTAINTY`؛ production migration/restore و main publish انجام نشد؛ bump/release `v5.0.0` نیازمند مجوز جدا |
 | `2026-08-23` | آماده‌سازی انتشار `v5.0.0-rc.1` | `PASS` برای pre-publication gate؛ فقط release candidate | مجوز صریح برای commit/push/tag/prerelease مخزن `smorad3363/Marzban`؛ نسخه runtime و قرارداد release به RC تغییر کرد؛ historical referenceها حفظ شدند؛ prerelease نباید `latest` را جابه‌جا کند | `b45e3af` + working tree | origin/مالک/branch/Stage 1–13 و چهار حذف tracked بررسی شد؛ دو حذف asset عمدی؛ دو حذف doc نامطمئن خارج commit؛ secret scan بدون credential واقعی؛ `git diff --check`=`PASS`؛ release contract=`1 passed`؛ workflow YAML=`PASS` | manifest دقیق commit شود؛ سپس branch/tag/prerelease منتشر شود؛ بدون deploy و بدون final `v5.0.0` |
 | `2026-08-23` | آماده‌سازی `v5.0.0-rc.2` | `PASS` برای pre-publication gate؛ فقط CI orchestration | `rc.1` immutable و منتشرشده در `df23dd8` حفظ شد؛ چهار تست MySQL Stage 8–11 از suite مشترک جدا و روی MySQL 8.0 با DB مستقل اجرا می‌شوند؛ application behavior جز version بدون تغییر | `df23dd8` + working tree | failure run=`32609917367`؛ remote tag/release `rc.1` بازتأیید شد؛ regression عمومی اصلاح‌شده=`212 passed, 3 skipped`؛ local MySQL/Docker=`NOT EXECUTED` چون runtime/port موجود نبود | YAML/diff/secret/release-contract gate؛ سپس commit/push/tag/prerelease و انتظار کامل CI/MySQL/image evidence؛ بدون deploy/final v5 |
+| `2026-08-23` | بازطراحی UX/UI ادمین | implementation=`PASS`؛ browser gate=`BLOCKED` | فرم یک‌مرحله‌ای حذف و Drawer پنج‌مرحله‌ای با `100dvh`، body scroll مستقل، footer ثابت و Advanced بسته جایگزین شد؛ Grant/Reclaim گروهی و عملیات هر ادمین progressive disclosure شدند؛ جدول به پنج ستون اصلی و جزئیات expandable کاهش یافت؛ Dashboard به account/KPI/trends/breakdown/system/quick-actions گروه‌بندی شد؛ backend/schema تغییر نکرد | `49c9e1d` + working tree | TypeScript+Vite=`PASS`, `1752 modules`؛ Admin UX contract=`22 assertions passed`؛ hierarchy authorization=`PASS`؛ Plan/Inbound=`14 assertions passed`؛ diff-check=`PASS`؛ Graphify=`4285/10950/456` و diagnose بدون dangling/duplicate؛ Browser دو بار=`Error: No browser is available` | screenshot قبل/بعد، viewport desktop/laptop، console و overflow واقعی=`NOT EXECUTED/BLOCKED` تا اتصال Browser؛ بدون commit/push/tag/release/deploy/publish |
+| `2026-08-23` | Admin UX / `set-owner` / آماده‌سازی `v5.0.0-rc.3` | pre-publication gate=`PASS` | فرم ویرایش ادمین کنترل جداگانه افزایش/کاهش اعتبار با دلیل، تأیید reclaim و idempotency ثابت دارد؛ endpoint و ledger موجود حفظ شد؛ متن فارسی نقش روشن شد؛ alias واقعی `marzban set-owner USERNAME` در fork scripts منتشر شد؛ schema/migration/accounting behavior تغییر نکرد | main=`49c9e1d` + working tree؛ scripts=`4830af3566022502159935eeb8636f1af3148502` | backend/release contract=`10 passed`؛ Admin UX=`25 assertions`؛ hierarchy auth=`PASS`؛ Plan/Inbound=`14 assertions`؛ TypeScript/Vite=`1752 modules`؛ JSON/YAML/compile/diff/secret scan و سه shell contract=`PASS`؛ Graphify code update=`4297/13084` | commit/tag/prerelease `v5.0.0-rc.3` و انتظار CI/GHCR؛ Browser واقعی و direct CLI روی Windows=`NOT EXECUTED`؛ bundle warning و 11 zero-node Graphify=`UNCERTAINTY`؛ بدون deploy/final v5 |

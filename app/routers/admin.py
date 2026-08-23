@@ -183,7 +183,11 @@ def create_admin(
     if new_admin.is_sudo:
         raise HTTPException(
             status_code=403,
-            detail="Owner can only be selected with marzban set-owner <username>",
+            detail=(
+                "Owner can only be selected from the server. Use "
+                "marzban set-owner <username>, or on older scripts: "
+                "marzban cli admin set-owner --username <username>"
+            ),
         )
     try:
         dbadmin = crud.create_admin(db, new_admin)
@@ -536,7 +540,11 @@ def create_managed_admin(
     if new_admin.is_sudo:
         raise HTTPException(
             status_code=403,
-            detail="Owner can only be selected with marzban set-owner <username>",
+            detail=(
+                "Owner can only be selected from the server. Use "
+                "marzban set-owner <username>, or on older scripts: "
+                "marzban cli admin set-owner --username <username>"
+            ),
         )
     actor = crud.get_admin(db, admin.username)
     requested_mode = new_admin.policy.billing_mode
