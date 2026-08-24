@@ -141,7 +141,7 @@ detect_compose() {
 marzban_script_ref() {
     local requested_version="${1:-latest}"
     local release_ref=""
-    if [[ "$requested_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    if [[ "$requested_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
         echo "$requested_version"
         return
     fi

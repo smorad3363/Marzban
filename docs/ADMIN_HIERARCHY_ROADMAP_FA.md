@@ -830,15 +830,17 @@ reason codeهای حداقلی برای لاگ parent:
 
 ## نقطه دقیق ادامه
 
-> [!warning] انتشار immutable `v5.0.0-rc.7` — در حال اجرا (`2026-08-25`)
-> مجوز صریح کاربر برای commit، push، tag و prerelease دریافت شد. baseline راه‌اندازی
-> `v5.0.0-rc.6@cee2c74ce520c503f9dd66847cc62aa93edd5062` از remote و GitHub
-> بازتأیید شد و `v5.0.0-rc.7` روی remote وجود ندارد. manifest فقط کد، build، آزمون
-> و مستندات مرتبطِ working tree را شامل می‌شود؛ `.codex/`، `graphify-out/`،
-> `design-system/`، `.graphifyignore` و دو حذف نامطمئن مستندات خارج انتشار می‌مانند.
-> نقطهٔ ادامه: bump نسخه و release notes؛ گیت کامل آزمون/DB contract؛ بازبینی manifest؛
-> commit و push branch؛ tag annotated؛ انتظار برای CI MySQL/GHCR/GitHub Release؛
-> سپس تطبیق commit/tag/image digest و ارائهٔ دستور دقیق update. هیچ deploy اجرا نشود.
+> [!warning] انتشار immutable `v5.0.0-rc.8` — گیت parity updater (`2026-08-25`)
+> `v5.0.0-rc.7@a4045b87e89f33d62c79f00f837db9ac62d8558f` با CI، MySQL، GHCR
+> و GitHub Release موفق منتشر شد؛ اما بازبینی نهایی updater نشان داد regex قدیمی فقط
+> tag پایدار را به‌عنوان ref اسکریپت می‌پذیرد و برای tagهای `rc` پس از pull ایمیج دقیق،
+> اسکریپت را از `master` می‌گیرد. `rc.7` immutable و دست‌نخورده می‌ماند. اصلاح فقط
+> پذیرش SemVer prerelease در `marzban_script_ref` است و هیچ application/API/UI/DB/
+> migration/dependency تغییری ندارد. `.codex/`، `graphify-out/`، `design-system/`،
+> `.graphifyignore` و دو حذف نامطمئن مستندات خارج انتشار می‌مانند. نقطهٔ ادامه:
+> اجرای release/update contract و regression؛ بازبینی diff/manifest/secret؛ commit و
+> push branch؛ tag annotated `v5.0.0-rc.8`؛ انتظار کامل CI؛ سپس تطبیق commit/tag/
+> Release و digest دو tag ایمیج. هیچ deploy اجرا نشود.
 
 > [!success] برش بازطراحی داده‌محور فهرست Admin — کامل (`2026-08-24`)
 > صفحهٔ `Admins` طبق مرجع فشردهٔ مشکی–طلایی کاربر بازطراحی شد، بدون افزودن
@@ -1153,6 +1155,7 @@ git log -3 --oneline --decorate
 | `2026-08-24` | بازطراحی داده‌محور Dashboard | `PASS` | چیدمان فشردهٔ مشکی–طلایی با خلاصهٔ mode-aware حساب، KPIهای scope-aware، وضعیت‌های انحصاری کاربران، پنج فعالیت آخر، نمودار چند-mode مشروط، منابع Owner-only و جزئیات جمع‌شوندهٔ موبایل؛ mountهای تکراری credit/statistics حذف شدند | `3ca44d4` + working tree؛ بدون commit | Admin UX، hierarchy authorization، Plan/Inbound، TypeScript و Vite `1773 modules`=`PASS`؛ Browser `375/768/812x375/1024/1440` بدون overflow، mobile scroll بسته=`1005`، console=`0 error`؛ role/API matrix Owner/Super/Admin=`PASS`؛ Graphify=`4424/11375/458` | API/schema/migration/query/index/accounting/permission/dependency/version/install/update=`UNCHANGED`؛ MySQL/SQL review از endpointهای bounded و queryهای موجود استفاده کرد و DB زنده لازم/اجرا نشد؛ preview باز؛ بدون commit/push/tag/release/deploy |
 | `2026-08-24` | بازطراحی داده‌محور فهرست Admin | `PASS` | یک فهرست فشرده با چهار گروه دادهٔ غیرتکراری؛ status surface همراه badge متنی، progress صریح مصرف اعتبار، اکشن‌های permission-aware همان ردیف، secondary menu موبایل، filter/search بدون overlap و کارت موبایل بدون جدول افقی | `3ca44d4` + working tree؛ بدون commit | Admin UX، hierarchy authorization، Plan/Inbound و TypeScript=`PASS`؛ Vite=`1773 modules` و asset `index.0541cb66.js`؛ Browser `375/768/812x375/1024/1440` بدون overflow، filter/search overlap=`false`، menu/filter/details/credit-dialog/bulk-selection=`PASS` و console=`0 error`؛ Graphify=`4426/11377/454` | endpoint و query موجود `/admin-management` حفظ شد؛ backend/API/schema/migration/query/index/accounting/permission/dependency/version/install/update=`UNCHANGED`؛ MySQL زنده لازم/اجرا نشد؛ بدون commit/push/tag/release/deploy |
 | `2026-08-25` | آماده‌سازی انتشار `v5.0.0-rc.7` | pre-publication local gate=`PASS` | نسخه runtime/contract/مستندات به rc.7؛ build نهایی با API نسبی `/api/` و asset `index.132a6776.js`؛ manifest فقط برش Admin/Dashboard تأییدشده و فایل‌های release | `3ca44d4` + working tree؛ بدون commit | full backend=`223 passed, 9 skipped`؛ release/API/Plan-only targeted=`13 passed`؛ Admin UX، hierarchy authorization و Plan/Inbound=`PASS`؛ TypeScript/Vite=`1773 modules`؛ compileall/diff-check=`PASS`؛ Graphify=`4432/11382/461` | schema/migration/query/index/dependency/install/update-script=`UNCHANGED`؛ MySQL محلی موجود نبود و CI روی 8.0/latest + existing-volume گیت نهایی است؛ manifest/secret review، commit/push/tag immutable، سپس تطبیق GitHub/GHCR؛ بدون deploy |
+| `2026-08-25` | گیت parity پس از انتشار `v5.0.0-rc.7` و آماده‌سازی `rc.8` | `rc.7 CI=PASS`؛ updater parity=`FAIL` پیش از تحویل | commit/tag/CI/GHCR `rc.7` دقیق بودند؛ ریشهٔ اختلاف بالقوه regex پایدار-only در `marzban_script_ref` بود که برای prerelease اسکریپت را از `master` می‌گرفت؛ اصلاح محدود به پذیرش SemVer prerelease و bump immutable بعدی است | `a4045b87e89f33d62c79f00f837db9ac62d8558f` + working tree | Actions `32784403799` تمام jobها=`PASS`؛ GHCR digest rc.7/sha=`sha256:0aa58215d7e61981d85029c2eedaec3cd8a530114e81848f042ccebc6b201b79`؛ remote branch/tag peeled/CI head یکسان | تست contract updater و regression؛ انتشار immutable `v5.0.0-rc.8`؛ تطبیق نهایی؛ `rc.7` بازنویسی نشود و هیچ deploy اجرا نشود |
 
 ### گزارش DB انتشار `v5.0.0-rc.6`
 

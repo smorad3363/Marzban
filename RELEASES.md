@@ -142,6 +142,25 @@ Fresh-install this exact candidate from GitHub:
 sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.0.0-rc.7/scripts/marzban.sh)" @ install --version v5.0.0-rc.7 --database mysql
 ```
 
+## v5.0.0-rc.8 Immutable prerelease update candidate
+
+This candidate keeps all `rc.7` application behavior. It fixes prerelease update
+parity so `marzban update --version` downloads both the container image and the
+installed `marzban` script from the same immutable prerelease tag instead of using
+the moving `master` branch for the script.
+
+Update to this exact candidate:
+
+```bash
+marzban update --version v5.0.0-rc.8
+```
+
+Fresh-install this exact candidate from GitHub:
+
+```bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.0.0-rc.8/scripts/marzban.sh)" @ install --version v5.0.0-rc.8 --database mysql
+```
+
 ## Release process
 
 1. Update `VERSION` and `app.__version__`.
