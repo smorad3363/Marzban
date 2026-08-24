@@ -26,6 +26,13 @@ def _indexes(table: str) -> set[str]:
     return {index["name"] for index in sa.inspect(op.get_bind()).get_indexes(table)}
 
 
+def _index_columns(table: str) -> dict[str, tuple[str, ...]]:
+    return {
+        index["name"]: tuple(index.get("column_names") or ())
+        for index in sa.inspect(op.get_bind()).get_indexes(table)
+    }
+
+
 def upgrade() -> None:
     tables = _tables()
     if "admins" in tables:
@@ -110,6 +117,24 @@ def downgrade() -> None:
     tables = _tables()
     if "marzhelp_admin_settings" in tables:
         indexes = _indexes("marzhelp_admin_settings")
+        # MySQL may discard its implicit account_status_id FK index after the
+        # composite status/admin index is added. Restore a supporting index before
+        # dropping the composite one, otherwise downgrade fails with error 1553.
+        if (
+            op.get_bind().dialect.name == "mysql"
+            and "ix_marzhelp_admin_settings_status_admin" in indexes
+            and not any(
+                name != "ix_marzhelp_admin_settings_status_admin"
+                and columns[:1] == ("account_status_id",)
+                for name, columns in _index_columns("marzhelp_admin_settings").items()
+            )
+        ):
+            op.create_index(
+                "ix_marzhelp_admin_settings_account_status_id",
+                "marzhelp_admin_settings",
+                ["account_status_id"],
+            )
+            indexes.add("ix_marzhelp_admin_settings_account_status_id")
         for name in (
             "ix_marzhelp_admin_settings_status_admin",
             "ix_marzhelp_admin_settings_billing_admin",

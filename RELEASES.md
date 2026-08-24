@@ -104,6 +104,25 @@ Fresh-install this exact candidate from GitHub:
 sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.0.0-rc.5/scripts/marzban.sh)" @ install --version v5.0.0-rc.5 --database mysql
 ```
 
+## v5.0.0-rc.6 MySQL 8.0 downgrade safety candidate
+
+This candidate keeps all `rc.5` behavior and restores a supporting
+`account_status_id` foreign-key index before removing the newer composite index
+during MySQL downgrade. This prevents MySQL error `1553` without dropping or
+recreating the foreign key.
+
+Update a staging server to this exact candidate:
+
+```bash
+marzban update --version v5.0.0-rc.6
+```
+
+Fresh-install this exact candidate from GitHub:
+
+```bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.0.0-rc.6/scripts/marzban.sh)" @ install --version v5.0.0-rc.6 --database mysql
+```
+
 ## Release process
 
 1. Update `VERSION` and `app.__version__`.

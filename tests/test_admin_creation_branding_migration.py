@@ -17,6 +17,15 @@ def _module():
     return module
 
 
+def test_migration_contains_mysql_fk_index_downgrade_guard():
+    source = MIGRATION_PATH.read_text(encoding="utf-8")
+    assert 'op.get_bind().dialect.name == "mysql"' in source
+    assert '"ix_marzhelp_admin_settings_account_status_id"' in source
+    assert source.index('"ix_marzhelp_admin_settings_account_status_id"') < source.index(
+        'for name in (\n            "ix_marzhelp_admin_settings_status_admin"'
+    )
+
+
 def test_admin_creation_branding_upgrade_is_additive_backfilled_and_rerunnable(monkeypatch):
     engine = sa.create_engine("sqlite+pysqlite:///:memory:")
     with engine.begin() as connection:
