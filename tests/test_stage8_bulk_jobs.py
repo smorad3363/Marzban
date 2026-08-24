@@ -347,7 +347,7 @@ def test_bulk_admin_credit_grant_uses_per_target_ledgers_and_replay_is_safe(db):
     assert processed == []
     assert db.get(MarzhelpAdminSettings, tree["direct"].id).total_traffic == 10_100
     assert db.get(MarzhelpAdminSettings, tree["sibling"].id).total_traffic == 10_100
-    assert db.get(MarzhelpAdminSettings, tree["owner"].id).delegated_traffic == 200
+    assert db.get(MarzhelpAdminSettings, tree["owner"].id).delegated_traffic == 0
 
 
 def test_snapshot_creation_uses_bounded_bulk_inserts_and_report_is_paginated(db):

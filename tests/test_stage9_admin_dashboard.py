@@ -25,13 +25,13 @@ def db(tmp_path):
         engine.dispose()
 
 
-def test_new_managed_admin_requires_nonblank_phone():
+def test_new_managed_admin_phone_is_optional_and_validated_when_present():
     values = dict(username="stage9", password="long-enough-password", policy=MarzhelpAdminPolicy())
+    assert ManagedAdminCreate(**values).phone is None
+    assert ManagedAdminCreate(**values, phone="   ").phone is None
     with pytest.raises(ValidationError):
-        ManagedAdminCreate(**values)
-    with pytest.raises(ValidationError):
-        ManagedAdminCreate(**values, phone="   ")
-    assert ManagedAdminCreate(**values, phone="+98 21 0000").phone == "+98 21 0000"
+        ManagedAdminCreate(**values, phone="+982100000000")
+    assert ManagedAdminCreate(**values, phone="09395253363").phone == "09395253363"
 
 
 def test_existing_admin_modify_remains_compatible_without_phone():
@@ -39,15 +39,15 @@ def test_existing_admin_modify_remains_compatible_without_phone():
     assert "phone" not in change.model_fields_set
 
 
-@pytest.mark.parametrize("mode", ["LEGACY_COMPAT", "SEAT_CREDIT", "USED_TRAFFIC", "ALLOCATED_TRAFFIC"])
+@pytest.mark.parametrize("mode", ["USED_TRAFFIC", "ALLOCATED_TRAFFIC", "USER_CREDIT"])
 def test_admin_creation_contract_accepts_each_explicit_billing_mode(mode):
     policy = MarzhelpAdminPolicy(
         billing_mode=mode,
-        device_capacity_limit=10 if mode == "SEAT_CREDIT" else None,
-        total_traffic=None if mode == "SEAT_CREDIT" else 1_000,
+        max_users=10 if mode == "USER_CREDIT" else None,
+        total_traffic=None if mode == "USER_CREDIT" else 1_000,
     )
     created = ManagedAdminCreate(
-        username=f"admin-{mode.lower()}", password="long-enough-password", phone="+982100000000", policy=policy
+        username=f"admin-{mode.lower()}", password="long-enough-password", phone="09395253363", policy=policy
     )
     assert created.policy.billing_mode.value == mode
 
@@ -89,7 +89,7 @@ def test_dashboard_aggregate_week_boundary_modes_and_fixed_query_count(db):
     assert result.new_users.previous == 1
     assert result.new_users.change_percent == 0
     assert [metric.billing_mode for metric in result.billing_modes] == [
-        "LEGACY_COMPAT", "SEAT_CREDIT", "USED_TRAFFIC", "ALLOCATED_TRAFFIC"
+        "LEGACY_COMPAT", "SEAT_CREDIT", "USED_TRAFFIC", "ALLOCATED_TRAFFIC", "USER_CREDIT"
     ]
     assert next(metric for metric in result.billing_modes if metric.billing_mode == "SEAT_CREDIT").user_count == 1
 
@@ -97,12 +97,14 @@ def test_dashboard_aggregate_week_boundary_modes_and_fixed_query_count(db):
 def test_stage9_schema_and_ui_contracts():
     migration = Path("app/db/migrations/versions/6d4f2a9c8e10_add_stage9_admin_phone_dashboard_indexes.py").read_text(encoding="utf-8")
     admins = Path("app/dashboard/src/pages/Admins.tsx").read_text(encoding="utf-8")
+    admin_form = Path("app/dashboard/src/components/AdminFormDrawer.tsx").read_text(encoding="utf-8")
     dashboard = Path("app/dashboard/src/components/DashboardOverview.tsx").read_text(encoding="utf-8")
     assert 'sa.String(32)' in migration
     assert 'ix_users_created_at_id' in migration
     assert 'ix_users_admin_status' in migration
     assert 'admins.discordWebhook' not in admins
-    assert 'type="tel"' in admins
-    assert 'billing_mode' in admins
+    assert 'type="tel"' in admin_form
+    assert 'billing_mode' in admin_form
+    assert 'USER_CREDIT' in admin_form
     assert '/dashboard/overview?timezone_offset_minutes=' in dashboard
     assert 'aria-live="polite"' in dashboard

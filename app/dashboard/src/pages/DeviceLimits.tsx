@@ -12,6 +12,7 @@ import {
   FormLabel,
   HStack,
   Input,
+  IconButton,
   Select,
   SimpleGrid,
   Skeleton,
@@ -29,6 +30,7 @@ import {
   ChevronRightIcon,
   ExclamationTriangleIcon,
   ShieldCheckIcon,
+  TrashIcon,
 } from "@heroicons/react/24/outline";
 import { AppShell } from "components/AppShell";
 import useGetUser from "hooks/useGetUser";
@@ -115,6 +117,11 @@ const SettingsSection: FC<{
   ) => setStageForm((current) => current.map((stage, itemIndex) =>
     itemIndex === index ? { ...stage, [key]: value } : stage
   ));
+
+  const removeStage = (index: number) => {
+    if (stageForm.length <= 1) return;
+    setStageForm((current) => current.filter((_, itemIndex) => itemIndex !== index));
+  };
 
   const submitSettings = (event: FormEvent) => {
     event.preventDefault();
@@ -228,27 +235,28 @@ const SettingsSection: FC<{
             <Text color="gray.400" fontSize="sm" mt={1}>{t("deviceLimit.penaltyStagesHelp")}</Text>
           </Box>
         </HStack>
-        <Stack p={{ base: 4, md: 5 }} spacing={3}>
+        <Stack p={{ base: 3, md: 4 }} spacing={2}>
           {stageForm.map((stage, index) => (
-            <SimpleGrid key={`${stage.violation_count}-${index}`} columns={{ base: 1, sm: 2, lg: 5 }} gap={3} p={3} borderWidth="1px" borderColor="rgba(148,163,184,.16)" borderRadius="11px" alignItems="end">
+            <SimpleGrid key={`${stage.id || "new"}-${index}`} columns={{ base: 1, sm: 2, lg: 12 }} gap={2} p={2.5} bg="var(--panel-nested)" borderWidth="1px" borderColor="var(--panel-border)" borderRadius="10px" alignItems="end">
               <FormControl>
                 <FormLabel fontSize="xs">{t("deviceLimit.violationNumber")}</FormLabel>
-                <Input dir="ltr" type="number" min={1} value={stage.violation_count} onChange={(event) => updateStage(index, "violation_count", Number(event.target.value))} />
+                <Input size="sm" dir="ltr" type="number" min={1} value={stage.violation_count} onChange={(event) => updateStage(index, "violation_count", Number(event.target.value))} />
               </FormControl>
-              <FormControl gridColumn={{ lg: "span 2" }}>
+              <FormControl gridColumn={{ lg: "span 5" }}>
                 <FormLabel fontSize="xs">{t("deviceLimit.action")}</FormLabel>
-                <Select value={stage.action} onChange={(event) => updateStage(index, "action", event.target.value as PenaltyAction)}>
+                <Select size="sm" value={stage.action} onChange={(event) => updateStage(index, "action", event.target.value as PenaltyAction)}>
                   <option value="warn">{t("deviceLimit.actionWarn")}</option>
                   <option value="temporary_disable">{t("deviceLimit.actionTemporary")}</option>
                   <option value="permanent_disable">{t("deviceLimit.actionPermanent")}</option>
                   <option value="delete">{t("deviceLimit.actionDelete")}</option>
                 </Select>
               </FormControl>
-              <FormControl isDisabled={stage.action !== "temporary_disable"}>
+              <FormControl gridColumn={{ lg: "span 3" }} isDisabled={stage.action !== "temporary_disable"}>
                 <FormLabel fontSize="xs">{t("deviceLimit.durationMinutes")}</FormLabel>
-                <Input dir="ltr" type="number" min={1} value={secondsToMinutes(stage.duration_seconds)} onChange={(event) => updateStage(index, "duration_seconds", event.target.value ? Number(event.target.value) * 60 : null)} />
+                <Input size="sm" dir="ltr" type="number" min={1} value={secondsToMinutes(stage.duration_seconds)} onChange={(event) => updateStage(index, "duration_seconds", event.target.value ? Number(event.target.value) * 60 : null)} />
               </FormControl>
-              <Checkbox minH="44px" colorScheme="primary" isChecked={stage.enabled} onChange={(event) => updateStage(index, "enabled", event.target.checked)}>{t("deviceLimit.stageEnabled")}</Checkbox>
+              <Checkbox gridColumn={{ lg: "span 2" }} minH="40px" colorScheme="primary" isChecked={stage.enabled} onChange={(event) => updateStage(index, "enabled", event.target.checked)}>{t("deviceLimit.stageEnabled")}</Checkbox>
+              <IconButton gridColumn={{ lg: "span 1" }} size="sm" minW="40px" h="40px" variant="ghost" colorScheme="red" aria-label="حذف این مرحله" title={stageForm.length <= 1 ? "حداقل یک مرحله لازم است" : "حذف مرحله"} isDisabled={stageForm.length <= 1} icon={<TrashIcon width={18} />} onClick={() => removeStage(index)} />
             </SimpleGrid>
           ))}
           <HStack justify="space-between" flexWrap="wrap" gap={3}>

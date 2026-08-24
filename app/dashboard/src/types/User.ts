@@ -97,6 +97,8 @@ export type UserApi = {
   external_api_enabled?: boolean;
   telegram_id: number | string;
   username: string;
+  dashboard_theme?: "heisenberg" | "black_gold";
+  logo_url?: string | null;
 };
 
 export type UseGetUserReturn = {

@@ -1,4 +1,5 @@
 from datetime import date
+import re
 from typing import Literal, Optional
 
 from fastapi import Depends, HTTPException, Request, status
@@ -35,6 +36,8 @@ class Admin(BaseModel):
     api_scopes: set[str] = Field(default_factory=set, exclude=True)
     telegram_id: Optional[int] = None
     phone: Optional[str] = None
+    dashboard_theme: Literal["heisenberg", "black_gold"] = "heisenberg"
+    logo_url: Optional[str] = None
     discord_webhook: Optional[str] = None
     users_usage: Optional[int] = None
     model_config = ConfigDict(from_attributes=True)
@@ -190,6 +193,8 @@ class AdminCreate(Admin):
     @classmethod
     def normalize_phone(cls, value):
         value = value.strip() if value else None
+        if value and re.fullmatch(r"09\d{9}", value) is None:
+            raise ValueError("Phone must match 09xxxxxxxxx")
         return value or None
 
 
@@ -216,6 +221,8 @@ class AdminModify(BaseModel):
     @classmethod
     def normalize_phone(cls, value):
         value = value.strip() if value else None
+        if value and re.fullmatch(r"09\d{9}", value) is None:
+            raise ValueError("Phone must match 09xxxxxxxxx")
         return value or None
 
 
@@ -312,11 +319,26 @@ class AdminQuotaSummary(BaseModel):
 
 
 class ManagedAdmin(Admin):
+    account_status: Literal["ACTIVE", "SUSPENDED", "DISABLED"] = "ACTIVE"
+    parent_username: Optional[str] = None
+    active_owner_freeze_event_id: Optional[int] = None
+    trial_quota: int = 0
+    trial_quota_limit: int = 0
+    trials_used: int = 0
     user_count: int = 0
     capacity_used: int = 0
     policy: MarzhelpAdminPolicy
     quota: AdminQuotaSummary
     plan_category_ids: list[int] = Field(default_factory=list)
+    user_creation_mode: Literal["FREE_FORM", "PLAN_ONLY"] = "PLAN_ONLY"
+    can_manage_plans: bool = False
+    can_create_admins: bool = False
+    can_delegate_admin_creation: bool = False
+    can_create_allocated_children: bool = True
+    admin_creation_limit: Optional[int] = None
+    admin_creations_used: int = 0
+    delegated_admin_creation_limit: int = 0
+    admin_creation_remaining: Optional[int] = None
 
 
 class AdminCapabilities(BaseModel):
@@ -336,6 +358,18 @@ class AdminCapabilities(BaseModel):
             current_users=0,
         )
     )
+    can_manage_admins: bool = False
+    can_create_admins: bool = False
+    can_delegate_admin_creation: bool = False
+    can_create_allocated_children: bool = True
+    admin_creation_limit: Optional[int] = None
+    admin_creations_used: int = 0
+    delegated_admin_creation_limit: int = 0
+    admin_creation_remaining: Optional[int] = None
+    allowed_child_roles: list[Literal["SUPER_ADMIN", "ADMIN"]] = Field(default_factory=list)
+    allowed_child_billing_modes: list[BillingMode] = Field(default_factory=list)
+    allowed_child_user_creation_modes: list[Literal["FREE_FORM", "PLAN_ONLY"]] = Field(default_factory=list)
+    can_delegate_plan_management: bool = False
 
 
 class ManagedAdminList(BaseModel):
@@ -346,23 +380,35 @@ class ManagedAdminList(BaseModel):
 
 
 class ManagedAdminCreate(AdminCreate):
-    phone: str = Field(min_length=1, max_length=32)
     policy: MarzhelpAdminPolicy = Field(default_factory=MarzhelpAdminPolicy)
     plan_category_ids: list[int] = Field(default_factory=list)
-
-    @field_validator("phone")
-    @classmethod
-    def require_phone(cls, value):
-        value = value.strip() if value else ""
-        if not value:
-            raise ValueError("Phone is required for new Admins")
-        return value
+    user_creation_mode: Literal["FREE_FORM", "PLAN_ONLY"] = "PLAN_ONLY"
+    can_manage_plans: bool = False
+    can_create_admins: bool = False
+    can_delegate_admin_creation: bool = False
+    can_create_allocated_children: bool = True
+    admin_creation_limit: Optional[int] = Field(default=0, ge=0)
 
 
 class ManagedAdminModify(AdminModify):
     policy: MarzhelpAdminPolicy
     plan_category_ids: Optional[list[int]] = None
+    user_creation_mode: Optional[Literal["FREE_FORM", "PLAN_ONLY"]] = None
+    can_manage_plans: Optional[bool] = None
+    can_create_admins: bool = False
+    can_delegate_admin_creation: bool = False
+    can_create_allocated_children: bool = True
+    admin_creation_limit: Optional[int] = Field(default=0, ge=0)
 
 
 class AdminDeleteRequest(BaseModel):
     strategy: Literal["delete_users", "disable_users", "keep_users"] = "keep_users"
+
+
+class BrandingUpdate(BaseModel):
+    dashboard_theme: Literal["heisenberg", "black_gold"]
+
+
+class BrandingResponse(BaseModel):
+    dashboard_theme: Literal["heisenberg", "black_gold"] = "heisenberg"
+    logo_url: Optional[str] = None

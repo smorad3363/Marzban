@@ -298,6 +298,18 @@ const unrestrictedCapabilities: AdminCapabilities = {
     admin_warning_active: false,
     sudo_warning_active: false,
   },
+  can_manage_admins: false,
+  can_create_admins: false,
+  can_delegate_admin_creation: false,
+  can_create_allocated_children: false,
+  admin_creation_limit: 0,
+  admin_creations_used: 0,
+  delegated_admin_creation_limit: 0,
+  admin_creation_remaining: 0,
+  allowed_child_roles: [],
+  allowed_child_billing_modes: [],
+  allowed_child_user_creation_modes: [],
+  can_delegate_plan_management: false,
 };
 
 export const UserDialog: FC<UserDialogProps> = () => {
@@ -348,6 +360,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
     { enabled: isOpen, staleTime: 30000 }
   );
   const restrictedCreate = !isEditing && (
+    accountQuery.data?.user_creation_mode === "PLAN_ONLY" ||
     accountQuery.data?.billing_mode === "USED_TRAFFIC" ||
     accountQuery.data?.billing_mode === "ALLOCATED_TRAFFIC"
   );
@@ -372,6 +385,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
   );
   const effectiveCapabilities: AdminCapabilities = selectedOwner
     ? {
+      ...unrestrictedCapabilities,
       all_inbounds: selectedOwner.policy.all_inbounds,
       allowed_inbounds: selectedOwner.policy.allowed_inbounds,
       all_user_limits: selectedOwner.policy.all_user_limits,
@@ -616,6 +630,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
       <FormProvider {...form}>
         <ModalContent
           mx="3"
+          my="3"
           maxH="calc(100dvh - 24px)"
           overflow="hidden"
           dir={i18n.dir()}
@@ -633,11 +648,12 @@ export const UserDialog: FC<UserDialogProps> = () => {
             },
           }}
         >
-          <form onSubmit={form.handleSubmit(submit)} style={{ display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
+          <form onSubmit={form.handleSubmit(submit)} style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0, maxWidth: "100%", overflow: "hidden" }}>
             <ModalHeader
               px={{ base: 4, md: 6 }}
               py={{ base: 4, md: 5 }}
-              pe={{ base: 12, md: 14 }}
+              ps={{ base: 12, md: 14 }}
+              pe={{ base: 4, md: 6 }}
               lineHeight="1.7"
               borderBottomWidth="1px"
               borderColor="#33483b"
@@ -668,7 +684,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                 </Box>
               </HStack>
             </ModalHeader>
-            <ModalCloseButton mt={3} isDisabled={disabled} />
+            <ModalCloseButton top={3} insetInlineStart={3} insetInlineEnd="auto" isDisabled={disabled} aria-label={t("close")} />
             <ModalBody overflowY="auto" overflowX="hidden" px={{ base: 3, sm: 4, md: 6 }} py={{ base: 4, md: 5 }}>
               <Grid
                 templateColumns={{
@@ -1171,12 +1187,12 @@ export const UserDialog: FC<UserDialogProps> = () => {
                 </Alert>
               )}
             </ModalBody>
-            <ModalFooter mt={0} px={{ base: 3, sm: 4, md: 6 }} py={4} borderTopWidth="1px" borderColor="#33483b" bg="#0b1710">
+            <ModalFooter flexShrink={0} mt={0} px={{ base: 3, sm: 4, md: 6 }} py={{ base: 3, md: 4 }} borderTopWidth="1px" borderColor="#33483b" bg="#0b1710">
               <Stack
                 justify="space-between"
                 align={{ base: "stretch", md: "center" }}
                 w="full"
-                spacing={4}
+                spacing={2}
                 direction={{ base: "column", md: "row" }}
               >
                 <HStack
@@ -1226,7 +1242,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                 <Stack
                   direction={{ base: "column-reverse", sm: "row" }}
                   w="full"
-                  maxW={{ md: "50%", base: "full" }}
+                  maxW={{ md: "420px", base: "full" }}
                   spacing={2}
                   justify="end"
                 >

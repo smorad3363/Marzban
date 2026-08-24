@@ -27,7 +27,7 @@ import React, { FC, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "react-query";
 import { fetch } from "service/http";
-import { AccountSummary } from "types/Admin";
+import { AccountSummary, AdminCapabilities } from "types/Admin";
 
 const iconProps = {
   baseStyle: {
@@ -60,7 +60,8 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
   const { t, i18n } = useTranslation();
   const { userData } = useGetUser();
   const account = useQuery<AccountSummary, Error>("account-summary", () => fetch("/account/summary"));
-  const canManageAdmins = userData.is_sudo || userData.role === "OWNER" || userData.role === "SUPER_ADMIN";
+  const capabilities = useQuery<AdminCapabilities, Error>(["admin-capabilities", userData.username], () => fetch("/admin/capabilities"));
+  const canManageAdmins = Boolean(capabilities.data?.can_manage_admins);
   const adminOptions = useQuery<AdminOption[], Error>(
     ["user-filter-admins"],
     fetchAdminOptions,
@@ -217,7 +218,7 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
             <option value="limited">{t("limited")}</option>
             <option value="expired">{t("expired")}</option>
           </Select>
-          {userData.is_sudo && (
+          {canManageAdmins && (
             <Select
               aria-label={t("usersTable.filterAdmin")}
               value={filters.admin || ""}

@@ -1,6 +1,6 @@
 # نقشه راه Owner، Super Admin، Admin، سلسله‌مراتب و انتقال اعتبار
 
-آخرین به‌روزرسانی: `2026-08-23`
+آخرین به‌روزرسانی: `2026-08-24`
 
 وضعیت: `V4.9.3_RELEASE_CANDIDATE` — پشتیبانی نصب تازه با MySQL latest و ارتقای مرحله‌ای دیتای موجود `8.0 → 8.4 → 9.7 → latest` پیاده و در CI با حفظ یک volume واقعی تأیید شد. انتشار immutable `v4.9.3` در انتظار گیت نهایی است.
 
@@ -830,6 +830,80 @@ reason codeهای حداقلی برای لاگ parent:
 
 ## نقطه دقیق ادامه
 
+در `2026-08-24` Owner رفع کامل رگرسیون‌های دسترسی و اصلاح UX فهرست‌شده در
+بازخورد مرورگر را تأیید کرد. baseline برابر
+`agent/admin-hierarchy-v4.9.0@91461d7b1637589b8189b4fba4193fc8eb5f3849`
+با working tree موجود است؛ tag تغییرناپذیر remote برابر `v5.0.0-rc.3` و
+GitHub Release پایدار دارای نشان `Latest` برابر `v4.9.8` بازتأیید شد. Docker
+محلی برای بازتأیید digest GHCR موجود نیست و publication همچنان ممنوع است.
+
+نقطه ادامه دقیق این برش:
+
+1. ابتدا تست رگرسیون برای ممنوعیت raw/free-form در `PLAN_ONLY`، reset سهمیه
+   Trial و دلیل اجباری Freeze نوشته و رفتار فعلی ثبت شود.
+2. منطق دسترسی API پیش از UI اصلاح شود؛ Admin فقط طبق mode صریح والد و Plan
+   واگذارشده کاربر بسازد و UI نتواند محدودیت server-side را دور بزند.
+3. صفحه Admin، User dialog، Dashboard، Device Limit و Audit Log به‌صورت برش‌های
+   کوچک و مستقل فشرده و فارسی شوند؛ قراردادهای سالم قبلی حفظ شوند.
+4. دیتای preview متنوع و قابل‌بازتولید ساخته شود؛ targeted، full regression،
+   TypeScript، Vite، browser در `375/768/1024/1440` و Graphify update اجرا شوند.
+
+هیچ commit/push/tag/release/deploy/publish و هیچ migration روی DB واقعی مجاز نیست.
+
+در `2026-08-24` Owner اجرای کامل برش اصلاحی مدیریت Admin و Dashboard را تأیید کرد.
+baseline محلی و remote برابر
+`agent/admin-hierarchy-v4.9.0@91461d7b1637589b8189b4fba4193fc8eb5f3849`
+و tag تغییرناپذیر `v5.0.0-rc.3` است. GitHub Release پایدار دارای
+نشان `Latest` هنوز `v4.9.8` است. image
+`ghcr.io/smorad3363/marzban:v5.0.0-rc.3` با `404` تأیید نشد؛ image
+قابل‌بازگشت `v5.0.0-rc.2` با digest
+`sha256:7a5437403c6a45f6abb2e4673b28de7c2f58855410e3564cbe2dc435604a77c6`
+و `latest` با digest
+`sha256:f0fb12952f4120705eb1be24d1f174be7f877023133c1d53c73441f24e683081`
+از GHCR قابل دریافت‌اند.
+
+قرارداد برش جدید:
+
+- Owner هیچ محدودیت تجاری/سهمیه‌ای ندارد و تمام بخش‌های پنل را مدیریت می‌کند؛
+  invariantهای امنیتی و حسابداری همچنان اجباری‌اند.
+- ساخت Admin با دو مجوز مستقل `can_create_admins` و
+  `can_delegate_admin_creation` و سهمیه قابل‌واگذاری کنترل می‌شود؛ فرزند هرگز از
+  والد قدرتمندتر نمی‌شود.
+- والد `USED_TRAFFIC` در ساخت فرزن باید صریحاً بین
+  `USED_TRAFFIC` و `ALLOCATED_TRAFFIC` انتخاب کند؛ هیچ پیش‌فرضی مجاز نیست.
+- والد `ALLOCATED_TRAFFIC` فقط فرزن همان نوع، والد `SEAT_CREDIT` فقط
+  فرزن همان نوع و Admin نامحدود فقط فرزن نامحدود می‌سازد.
+- Freeze تکی و گروهی، عملیات گروهی فشرده و mode-aware، فرم ساخت
+  تک‌صفحه‌ای، تلفن اختیاری با قرارداد `09xxxxxxxxx`، اقدام سریع reset
+  سهمیه Trial، و عنوان‌های روشن در UI لازم است.
+- Dashboard براساس billing mode با KPI، chart و دسترسی سریع تطبیق می‌یابد.
+  theme اختیاری مشکی–طلایی و branding هر Admin با logo اختیاری و
+  SVG پیش‌فرض هماهنگ با theme اضافه می‌شود.
+
+وضعیت اجرای برش در همان تاریخ:
+
+- migration افزایشی `8b7d3e5f1a24` برای مجوز/سهمیه ساخت Admin، baseline
+  سهمیه Trial، theme و branding اضافه شد؛ mode قدیمی فقط برای migration حفظ و
+  از ساخت تازه پنهان شد.
+- Owner از تمام quotaهای تجاری معاف است؛ Super Admin و Admin فقط طبق مجوز،
+  سهمیه، نقش و resource والد فرزند می‌سازند. والد `USED_TRAFFIC` برای هر فرزند
+  انتخاب صریح `USED_TRAFFIC` یا `ALLOCATED_TRAFFIC` دارد و delegation آن مصرف
+  واقعی subtree را جایگزین نمی‌کند.
+- فرم ساخت/ویرایش تک‌صفحه‌ای و فشرده شد؛ تلفن اختیاری `09xxxxxxxxx`، Freeze و
+  reset Trial سریع، فیلتر role/mode/status و bulk mode-aware بدون دلیل اجباری
+  اضافه شد.
+- Dashboard تطبیقی با KPI، نمودار، دسترسی سریع، تاریخ شمسی/تعطیلی، theme
+  مشکی–طلایی و لوگوی اختیاری با SVG پیش‌فرض آماده شد. خروجی Vite مستقیماً در
+  `app/dashboard/build` ساخته می‌شود تا preview و image همان نسخه جدید را سرو کنند.
+- برای queryهای پرتکرار settings دو index مرکب mode/status و aggregate ثابت
+  subtree افزوده شد تا tree و dashboard به N+1 برنگردند.
+
+نقطه ادامه دقیق: full regression نهایی، Graphify update، ثبت evidence محیط MySQL
+و Browser و سپس تحویل preview محلی. MySQL زنده در این Windows موجود نیست؛ migration
+واقعی production تا clone امن MySQL 8.x همچنان ممنوع است.
+commit/push/tag/release/deploy/publish در این برش ممنوع است.
+
+
 در `2026-08-23` یک برش اصلاحی پس از `v5.0.0-rc.2` با مجوز صریح Owner شروع شد:
 ساده‌سازی متن‌های Admin/Dashboard، افزودن کنترل روشن افزایش/کاهش اعتبار به فرم
 ویرایش ادمین و تعمیر فرمان عمومی `marzban set-owner`. baseline محلی و remote برابر
@@ -842,8 +916,12 @@ reason codeهای حداقلی برای لاگ parent:
 `smorad3363/Marzban-scripts@4830af3566022502159935eeb8636f1af3148502`
 اضافه و روی `master` منتشر شد؛ remote مستقل `upstream` نیز حفظ شده است. UI از
 endpointهای موجود دفترکل برای افزایش/کاهش جداگانه اعتبار استفاده می‌کند و هیچ
-schema، migration یا قاعده حسابداری تغییر نکرده است. نقطه ادامه: gate نهایی
-`v5.0.0-rc.3`، commit/tag/prerelease و انتظار CI؛ بدون deploy و بدون final `v5.0.0`.
+schema، migration یا قاعده حسابداری تغییر نکرده است. tag تغییرناپذیر
+`v5.0.0-rc.3@91461d7b1637589b8189b4fba4193fc8eb5f3849` منتشر شد، اما CI به‌علت
+قرارداد تست قدیمی Stage 9 که هنوز `type="tel"` را فقط در `Admins.tsx` می‌جوید
+شکست خورد؛ فیلد اکنون بدون حذف رفتار به `AdminFormDrawer.tsx` منتقل شده است.
+نقطه ادامه: حفظ کامل rc.3 و دریافت مجوز Owner برای test-only fix و rc بعدی؛ بدون
+deploy و بدون final `v5.0.0`.
 
 ### سابقه نقطه ادامه Stage 12
 
@@ -966,3 +1044,8 @@ git log -3 --oneline --decorate
 | `2026-08-23` | آماده‌سازی `v5.0.0-rc.2` | `PASS` برای pre-publication gate؛ فقط CI orchestration | `rc.1` immutable و منتشرشده در `df23dd8` حفظ شد؛ چهار تست MySQL Stage 8–11 از suite مشترک جدا و روی MySQL 8.0 با DB مستقل اجرا می‌شوند؛ application behavior جز version بدون تغییر | `df23dd8` + working tree | failure run=`32609917367`؛ remote tag/release `rc.1` بازتأیید شد؛ regression عمومی اصلاح‌شده=`212 passed, 3 skipped`؛ local MySQL/Docker=`NOT EXECUTED` چون runtime/port موجود نبود | YAML/diff/secret/release-contract gate؛ سپس commit/push/tag/prerelease و انتظار کامل CI/MySQL/image evidence؛ بدون deploy/final v5 |
 | `2026-08-23` | بازطراحی UX/UI ادمین | implementation=`PASS`؛ browser gate=`BLOCKED` | فرم یک‌مرحله‌ای حذف و Drawer پنج‌مرحله‌ای با `100dvh`، body scroll مستقل، footer ثابت و Advanced بسته جایگزین شد؛ Grant/Reclaim گروهی و عملیات هر ادمین progressive disclosure شدند؛ جدول به پنج ستون اصلی و جزئیات expandable کاهش یافت؛ Dashboard به account/KPI/trends/breakdown/system/quick-actions گروه‌بندی شد؛ backend/schema تغییر نکرد | `49c9e1d` + working tree | TypeScript+Vite=`PASS`, `1752 modules`؛ Admin UX contract=`22 assertions passed`؛ hierarchy authorization=`PASS`؛ Plan/Inbound=`14 assertions passed`؛ diff-check=`PASS`؛ Graphify=`4285/10950/456` و diagnose بدون dangling/duplicate؛ Browser دو بار=`Error: No browser is available` | screenshot قبل/بعد، viewport desktop/laptop، console و overflow واقعی=`NOT EXECUTED/BLOCKED` تا اتصال Browser؛ بدون commit/push/tag/release/deploy/publish |
 | `2026-08-23` | Admin UX / `set-owner` / آماده‌سازی `v5.0.0-rc.3` | pre-publication gate=`PASS` | فرم ویرایش ادمین کنترل جداگانه افزایش/کاهش اعتبار با دلیل، تأیید reclaim و idempotency ثابت دارد؛ endpoint و ledger موجود حفظ شد؛ متن فارسی نقش روشن شد؛ alias واقعی `marzban set-owner USERNAME` در fork scripts منتشر شد؛ schema/migration/accounting behavior تغییر نکرد | main=`49c9e1d` + working tree؛ scripts=`4830af3566022502159935eeb8636f1af3148502` | backend/release contract=`10 passed`؛ Admin UX=`25 assertions`؛ hierarchy auth=`PASS`؛ Plan/Inbound=`14 assertions`؛ TypeScript/Vite=`1752 modules`؛ JSON/YAML/compile/diff/secret scan و سه shell contract=`PASS`؛ Graphify code update=`4297/13084` | commit/tag/prerelease `v5.0.0-rc.3` و انتظار CI/GHCR؛ Browser واقعی و direct CLI روی Windows=`NOT EXECUTED`؛ bundle warning و 11 zero-node Graphify=`UNCERTAINTY`؛ بدون deploy/final v5 |
+| `2026-08-23` | انتشار `v5.0.0-rc.3` | `FAIL` در CI؛ tag/commit immutable حفظ شد | branch و tag منتشر شدند؛ تست Stage 9 هنوز محل قدیمی فیلد تماس را در `Admins.tsx` hard-code کرده، درحالی‌که refactor فیلد `type="tel"` را به `AdminFormDrawer.tsx` منتقل کرده است؛ application failure گزارش نشد | main/tag commit=`91461d7b1637589b8189b4fba4193fc8eb5f3849`؛ tag object=`ed32e1e27b29fff419506d0afe0fe56d607963a9` | workflow `32638997993`: volume-upgrade=`PASS`؛ MySQL 8.0/latest=`FAIL` با `1 failed, 213 passed, 1 skipped`؛ Docker build=`SKIPPED`؛ GHCR rc.3=`404`؛ GitHub Release=`NOT CREATED` | rc.3 بازنویسی نشود؛ test contract با ساختار جدید همسو و فقط پس از مجوز Owner کاندیدای بعدی ساخته شود؛ بدون deploy/final v5 |
+| `2026-08-24` | Admin/Dashboard corrective slice | implementation/regression=`PASS`؛ MySQL live=`NOT EXECUTED` | مجوز/سهمیه سلسله‌مراتبی ساخت Admin، انتخاب صریح mode، `USER_CREDIT`، Owner unrestricted، Freeze/Trial reset، bulk mode-aware، فرم فشرده، Dashboard KPI/chart/quick access، theme مشکی–طلایی و branding logo؛ migration=`8b7d3e5f1a24` و دو index settings | `91461d7` + working tree؛ بدون commit | full=`215 passed, 9 skipped`؛ targeted جدید=`36 passed`؛ TypeScript/Vite/UI contract=`PASS` و `1775 modules`؛ Browser login در `375/768/1024/1440` بدون overflow و asset/console نسخه جدید=`PASS`؛ API چهار حساب demo=`PASS`؛ MySQL 8.x زنده در محیط موجود نبود؛ Graphify=`4365/11222/454` و diagnose بدون dangling/duplicate | preview روی `127.0.0.1:8000` باز بماند؛ migration production فقط روی clone امن MySQL 8.x؛ بدون commit/push/tag/release/deploy/publish |
+| `2026-08-24` | Preview login repair | `PASS` | علت login خراب، build دستی بدون `VITE_BASE_API` بود و UI به `/admin/token` می‌رفت؛ fallback دائمی `/api/` در HTTP client/Core settings و build صحیح افزوده شد؛ modalهای زیرساخت فقط برای Owner mount می‌شوند تا فرزند درخواست غیرمجاز Node نفرستد | `91461d7` + working tree؛ بدون commit | Browser واقعی: Owner/Super/Admin خالی هر سه login=`200`؛ Owner dashboard مشکی–طلایی، Super بدون core و Admin بدون menu ادمین/کاربر=`0`؛ console نسخه `4d8ef5af` بدون error؛ TypeScript/Vite=`PASS`؛ Admin UX=`34 assertions` | مرورگر با `owner_demo` روی dashboard باز و preview server فعال بماند؛ بدون publication |
+| `2026-08-24` | Admin UX regression repair final | `PASS` | فهرست و عملیات ادمین در یک سطح ادغام شد؛ فیلتر و عملیات گروهی فشرده و mode-aware شدند؛ Trial reset در سهمیهٔ پر دیگر انتقال صفر و HTTP 500 تولید نمی‌کند؛ Freeze دلیل اجباری فارسی دارد؛ `PLAN_ONLY` پیش‌فرض امن فرزند و جلوگیری از ارتقای مجوز اعمال شد؛ فرم‌های User/Plan/Audit/Device داخل viewport، مرحلهٔ دستگاه قابل حذف، گزارش فعالیت فارسی و Dashboard موبایل پیش‌فرض جمع‌شده است | `91461d7` + working tree؛ بدون commit | full backend=`217 passed, 9 skipped`؛ TypeScript=`PASS`؛ Admin UX contract=`PASS`؛ Vite production=`1773 modules` و asset `index.4e8e87b9.js`؛ compileall/diff-check=`PASS`؛ Browser واقعی desktop=`1440x900` modal=`top 12/bottom 888` و mobile=`375x812` بدون overflow، scroll height بسته=`2107`؛ Audit بدون متن event انگلیسی؛ API raw برای `admin_demo`=`403 plan_only` و create-from-plan=`PASS`؛ Graphify=`4380/11265/472` | preview روی `http://127.0.0.1:8000/dashboard/#/admins/` باز بماند؛ MySQL 8.x زنده/EXPLAIN در این محیط اجرا نشد؛ هیچ migration جدیدی در این برش نبود؛ بدون commit/push/tag/release/deploy/publish |
+| `2026-08-24` | آماده‌سازی `v5.0.0-rc.4` | `AUTHORIZED / IN PROGRESS` | کاربر مجوز ارسال به GitHub و دریافت فرمان نصب/آپدیت داد؛ مقصد `smorad3363/Marzban` و احراز هویت `gh` تأیید شد؛ `rc.3` immutable حفظ و نسخه به `rc.4` افزایش یافت؛ فایل‌های محلی `.codex/`، `graphify-out/`، `design-system/` و دو حذف نامطمئن سند خارج manifest می‌مانند | `91461d7` + working tree | preflight remote/tag/auth=`PASS`؛ تست application همان برش=`217 passed, 9 skipped`؛ release contract و manifest gate در حال اجرا | اجرای release contract، secret/diff check، commit و push branch، tag immutable، انتظار CI/GHCR/Release؛ بدون deploy و بدون final `v5.0.0` |

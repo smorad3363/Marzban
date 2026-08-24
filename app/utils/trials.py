@@ -32,7 +32,7 @@ def adjust_quota(
     amount: int,
     operation: str,
     idempotency_key: str,
-    note: str,
+    note: str | None,
 ) -> tuple[AdminCreditTransfer, bool]:
     if not admin_hierarchy.is_owner(db, actor):
         raise admin_hierarchy.HierarchyError(
@@ -40,7 +40,7 @@ def adjust_quota(
         )
     if operation not in {"grant", "reclaim"} or amount <= 0:
         raise admin_hierarchy.HierarchyError("invalid_trial_adjustment", "Invalid Trial adjustment")
-    reason = note.strip()
+    reason = (note or f"system:trial_{operation}").strip()
     operation_type = f"trial_{operation}"
     settings = (
         db.query(MarzhelpAdminSettings)
@@ -76,6 +76,10 @@ def adjust_quota(
         )
     after = before + amount if operation == "grant" else before - amount
     settings.trial_quota = after
+    limit_before = int(settings.trial_quota_limit or 0)
+    settings.trial_quota_limit = (
+        limit_before + amount if operation == "grant" else max(limit_before - amount, 0)
+    )
     row = AdminCreditTransfer(
         from_admin_id=actor.id if operation == "grant" else target.id,
         to_admin_id=target.id if operation == "grant" else actor.id,
@@ -87,6 +91,80 @@ def adjust_quota(
         balance_before=before,
         balance_after=after,
         operation_type=operation_type,
+        idempotency_key=idempotency_key,
+        note=reason,
+    )
+    db.add(row)
+    db.flush()
+    return row, True
+
+
+def reset_quota(
+    db: Session,
+    *,
+    actor: Admin,
+    target: Admin,
+    idempotency_key: str,
+    note: str | None,
+) -> tuple[AdminCreditTransfer, bool]:
+    if actor.id == target.id or (
+        not admin_hierarchy.is_owner(db, actor)
+        and not (
+            admin_hierarchy.can_manage_children(db, actor)
+            and admin_hierarchy.admin_in_scope(db, actor, target.id)
+        )
+    ):
+        raise admin_hierarchy.HierarchyError(
+            "trial_reset_forbidden", "Only an authorized parent can reset Trial quota"
+        )
+    reason = (note or "system:trial_quota_reset").strip()
+    existing = (
+        db.query(AdminCreditTransfer)
+        .filter(AdminCreditTransfer.idempotency_key == idempotency_key)
+        .with_for_update()
+        .one_or_none()
+    )
+    if existing is not None:
+        if (
+            existing.actor_admin_id != actor.id
+            or existing.adjusted_admin_id != target.id
+            or existing.operation_type != "trial_reset"
+            or existing.note != reason
+        ):
+            raise admin_hierarchy.HierarchyError(
+                "idempotency_conflict", "Idempotency key belongs to another Trial operation"
+            )
+        return existing, False
+    settings = (
+        db.query(MarzhelpAdminSettings)
+        .filter(MarzhelpAdminSettings.admin_id == target.id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if settings is None:
+        raise admin_hierarchy.HierarchyError("policy_missing", "Target policy is missing")
+    before = int(settings.trial_quota or 0)
+    after = int(settings.trial_quota_limit or 0)
+    if after <= 0:
+        raise admin_hierarchy.HierarchyError(
+            "trial_quota_unconfigured", "Trial quota limit is not configured"
+        )
+    settings.trial_quota = after
+    settings.trials_used = 0
+    row = AdminCreditTransfer(
+        from_admin_id=actor.id,
+        to_admin_id=target.id,
+        actor_admin_id=actor.id,
+        adjusted_admin_id=target.id,
+        resource="trial_quota",
+        # `amount` is the positive reset entitlement. `delta` records the
+        # actual balance change and may correctly be zero on an idempotent-like
+        # manual reset while the quota is already full.
+        amount=after,
+        delta=after - before,
+        balance_before=before,
+        balance_after=after,
+        operation_type="trial_reset",
         idempotency_key=idempotency_key,
         note=reason,
     )

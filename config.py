@@ -63,6 +63,9 @@ STAGE11_OUTBOX_MAX_ATTEMPTS = config("STAGE11_OUTBOX_MAX_ATTEMPTS", default=6, c
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = config("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", cast=int, default=1440)
 
 CUSTOM_TEMPLATES_DIRECTORY = config("CUSTOM_TEMPLATES_DIRECTORY", default=None)
+BRANDING_LOGO_DIRECTORY = config(
+    "BRANDING_LOGO_DIRECTORY", default="/var/lib/marzban/branding"
+)
 SUBSCRIPTION_PAGE_TEMPLATE = config("SUBSCRIPTION_PAGE_TEMPLATE", default="subscription/index.html")
 HOME_PAGE_TEMPLATE = config("HOME_PAGE_TEMPLATE", default="home/index.html")
 

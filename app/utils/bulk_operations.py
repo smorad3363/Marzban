@@ -18,6 +18,7 @@ from app.db.models import (
     AdminBulkJob,
     AdminBulkJobTarget,
     AdminHierarchy,
+    MarzhelpAdminSettings,
     User,
 )
 from app.models.bulk import (
@@ -319,13 +320,30 @@ def create_admin_job(
             f"Credit moves require direct-child targets: {invalid}",
             status_code=403,
         )
+    modes = {
+        row.billing_mode or "LEGACY_COMPAT"
+        for row in db.query(MarzhelpAdminSettings)
+        .filter(MarzhelpAdminSettings.admin_id.in_([item.id for item in admins]))
+        .all()
+    }
+    resources = {
+        "user" if mode == "USER_CREDIT" else "seat" if mode == "SEAT_CREDIT" else "traffic"
+        for mode in modes
+    }
+    if len(resources) != 1:
+        raise BulkOperationError(
+            "mixed_credit_resources",
+            "Bulk credit targets must use the same accounting unit",
+            status_code=409,
+        )
+    note = (values.note or "system:dashboard_bulk_credit").strip()
     payload = {
         "actor_admin_id": dbactor.id,
         "job_kind": "ADMIN_CREDIT",
         "operation": values.operation.value,
         "selected_admin_ids": values.selected_admin_ids,
         "amount": values.amount,
-        "note": values.note.strip(),
+        "note": note,
     }
     fingerprint = _fingerprint(payload)
     existing = _checked_replay(
@@ -347,7 +365,7 @@ def create_admin_job(
         payload_fingerprint=fingerprint,
         operation=values.operation.value,
         amount=values.amount,
-        note=values.note.strip(),
+        note=note,
         include_subtree=False,
         status="PENDING",
         total_count=len(admins),

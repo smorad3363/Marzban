@@ -10,6 +10,7 @@ class BillingMode(str, Enum):
     SEAT_CREDIT = "SEAT_CREDIT"
     USED_TRAFFIC = "USED_TRAFFIC"
     ALLOCATED_TRAFFIC = "ALLOCATED_TRAFFIC"
+    USER_CREDIT = "USER_CREDIT"
 
 
 class BillingModeError(ValueError):
@@ -122,6 +123,25 @@ class SeatCreditStrategy(BillingStrategy):
         return max(new_cost - old_cost, 0)
 
 
+class UserCreditStrategy(BillingStrategy):
+    """Unlimited traffic where each owned account costs one user credit."""
+
+    def create_capacity_charge(self, concurrent_user_limit: int | None) -> int:
+        # max_users is the canonical counter for this mode. Device capacity is
+        # intentionally untouched so device count never changes account cost.
+        return 0
+
+    def update_capacity_charge(
+        self,
+        old_concurrent_user_limit: int | None,
+        new_concurrent_user_limit: int | None,
+    ) -> int:
+        return 0
+
+    def delete_capacity_charge(self, concurrent_user_limit: int | None) -> int:
+        return 0
+
+
 class AllocatedTrafficStrategy(BillingStrategy):
     def allocated_charge(
         self,
@@ -141,6 +161,7 @@ STRATEGIES: dict[BillingMode, BillingStrategy] = {
     BillingMode.SEAT_CREDIT: SeatCreditStrategy(BillingMode.SEAT_CREDIT),
     BillingMode.USED_TRAFFIC: BillingStrategy(BillingMode.USED_TRAFFIC),
     BillingMode.ALLOCATED_TRAFFIC: AllocatedTrafficStrategy(BillingMode.ALLOCATED_TRAFFIC),
+    BillingMode.USER_CREDIT: UserCreditStrategy(BillingMode.USER_CREDIT),
 }
 
 

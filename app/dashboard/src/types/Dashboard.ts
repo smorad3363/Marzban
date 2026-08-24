@@ -1,4 +1,4 @@
-export type BillingMode = "LEGACY_COMPAT" | "SEAT_CREDIT" | "USED_TRAFFIC" | "ALLOCATED_TRAFFIC";
+export type BillingMode = "LEGACY_COMPAT" | "SEAT_CREDIT" | "USED_TRAFFIC" | "ALLOCATED_TRAFFIC" | "USER_CREDIT";
 
 export type DashboardOverview = {
   generated_at: string;

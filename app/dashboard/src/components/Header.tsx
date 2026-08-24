@@ -2,9 +2,11 @@ import {
   Box,
   Button,
   chakra,
+  Collapse,
   Flex,
   HStack,
   IconButton,
+  Image,
   SimpleGrid,
   Spacer,
   Stack,
@@ -22,15 +24,20 @@ import {
   UsersIcon,
   ShieldCheckIcon,
   RectangleStackIcon,
+  Bars3Icon,
+  XMarkIcon,
 } from "@heroicons/react/24/outline";
 import { resetDashboardState, useDashboard } from "contexts/DashboardContext";
 import useGetUser from "hooks/useGetUser";
-import { FC, ReactElement } from "react";
+import { FC, ReactElement, useEffect, useState } from "react";
+import { useQuery } from "react-query";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { fetch } from "service/http";
 import { removeAuthToken } from "utils/authStorage";
 import { BrandMark } from "./BrandMark";
+import { BrandingControls } from "./BrandingControls";
+import { AdminCapabilities } from "types/Admin";
 
 const iconProps = { baseStyle: { w: 4, h: 4, flexShrink: 0 } };
 const CoreSettingsIcon = chakra(Cog6ToothIcon, iconProps);
@@ -73,11 +80,21 @@ const ActionButton: FC<ActionButtonProps> = ({ icon, label, onClick, danger }) =
 export const Header: FC = () => {
   const { userData, getUserIsSuccess, getUserIsPending } = useGetUser();
   const isOwner = !getUserIsPending && getUserIsSuccess && (userData.is_sudo || userData.role === "OWNER");
-  const canManage = isOwner || userData.role === "SUPER_ADMIN";
+  const capabilities = useQuery<AdminCapabilities, Error>(
+    ["admin-capabilities", userData.username],
+    () => fetch("/admin/capabilities"),
+    { enabled: getUserIsSuccess }
+  );
+  const canManage = Boolean(capabilities.data?.can_manage_admins);
   const { onEditingHosts, onResetAllUsage, onEditingNodes, onShowingNodesUsage } = useDashboard();
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  useEffect(() => {
+    document.documentElement.dataset.panelTheme = userData.dashboard_theme || "heisenberg";
+  }, [userData.dashboard_theme]);
+  useEffect(() => { setMobileMenuOpen(false); }, [location.pathname]);
   const isAdminsPage = location.pathname.startsWith("/admins");
   const isAuditPage = location.pathname.startsWith("/audit-logs");
   const isDeviceLimitPage = location.pathname.startsWith("/device-limits");
@@ -103,30 +120,33 @@ export const Header: FC = () => {
       top="0"
       zIndex="sticky"
       direction="column"
-      bg="rgba(7, 19, 14, 0.97)"
+      bg="color-mix(in srgb, var(--panel-bg) 97%, transparent)"
       color="white"
       borderEndWidth={{ lg: "1px" }}
       borderBottomWidth={{ base: "1px", lg: "0" }}
-      borderColor="rgba(91, 132, 108, 0.32)"
+      borderColor="var(--panel-border)"
       backdropFilter="blur(16px)"
       px={{ base: 4, lg: 4 }}
       py={{ base: 3, lg: 5 }}
     >
       <HStack justify="space-between" align="center" gap={3}>
         <HStack spacing={3} minW={0}>
-          <BrandMark aria-hidden="true" boxSize={{ base: "38px", lg: "46px" }} filter="drop-shadow(0 8px 20px rgba(34, 197, 94, 0.22))" />
+          {userData.logo_url
+            ? <Image src={userData.logo_url} alt="لوگوی پنل" boxSize={{ base: "38px", lg: "46px" }} objectFit="contain" borderRadius="10px" />
+            : <BrandMark aria-hidden="true" boxSize={{ base: "38px", lg: "46px" }} filter="drop-shadow(0 8px 20px var(--panel-glow))" />}
           <Box minW={0}>
             <Text fontFamily="mono" fontSize="xs" fontWeight="700" letterSpacing="0.13em" color="primary.300" noOfLines={1}>HEISENBERG</Text>
             <Text fontSize="xs" color="gray.400" mt="1px" noOfLines={1}>آزمایشگاه کنترل</Text>
           </Box>
         </HStack>
         <HStack display={{ base: "flex", lg: "none" }} spacing={1} flexShrink={0}>
-          <IconButton onClick={logout} size="sm" variant="ghost" color="red.200" aria-label={t("header.logout")} icon={<LogoutIcon />} />
+          <IconButton onClick={() => setMobileMenuOpen((value) => !value)} size="sm" variant="outline" aria-label={mobileMenuOpen ? "بستن منو" : "بازکردن منو"} aria-expanded={mobileMenuOpen} icon={mobileMenuOpen ? <XMarkIcon width={20} /> : <Bars3Icon width={20} />} />
         </HStack>
       </HStack>
 
-      <Text display={{ base: "none", lg: "block" }} mt={8} mb={2} px={2} fontSize="xs" color="gray.500" fontFamily="mono" letterSpacing=".1em" textTransform="uppercase">Navigation</Text>
-      <SimpleGrid as="nav" aria-label="Primary navigation" columns={{ base: 2, sm: 4, lg: 1 }} spacing={2} mt={{ base: 4, lg: 0 }}>
+      <Text display={{ base: "none", lg: "block" }} mt={8} mb={2} px={2} fontSize="xs" color="gray.500">ناوبری</Text>
+      <Collapse in={mobileMenuOpen} animateOpacity style={{ overflow: "visible" }}>
+      <SimpleGrid as="nav" aria-label="ناوبری اصلی" display={{ base: "grid", lg: "none" }} columns={{ base: 2, sm: 4 }} spacing={2} mt={4}>
         <Button
           as={Link}
           to="/"
@@ -194,9 +214,18 @@ export const Header: FC = () => {
           >{t("audit.nav")}</Button>
         )}
       </SimpleGrid>
+      </Collapse>
+
+      <SimpleGrid as="nav" aria-label="ناوبری اصلی دسکتاپ" display={{ base: "none", lg: "grid" }} columns={1} spacing={2}>
+        <Button as={Link} to="/" size="md" variant={isUsersPage ? "solid" : "ghost"} colorScheme={isUsersPage ? "primary" : "gray"} color={isUsersPage ? "#07130e" : "gray.200"} leftIcon={<UsersNavIcon />} justifyContent="flex-start" aria-current={isUsersPage ? "page" : undefined}>{t("users")}</Button>
+        <Button as={Link} to="/plans/" size="md" variant={isPlansPage ? "solid" : "ghost"} colorScheme={isPlansPage ? "primary" : "gray"} color={isPlansPage ? "#07130e" : "gray.200"} leftIcon={<PlansNavIcon />} justifyContent="flex-start" aria-current={isPlansPage ? "page" : undefined}>پلن‌ها</Button>
+        {canManage && <Button as={Link} to="/admins/" size="md" variant={isAdminsPage ? "solid" : "ghost"} colorScheme={isAdminsPage ? "primary" : "gray"} color={isAdminsPage ? "#07130e" : "gray.200"} leftIcon={<AdminsNavIcon />} justifyContent="flex-start" aria-current={isAdminsPage ? "page" : undefined}>{t("admins.nav")}</Button>}
+        <Button as={Link} to="/device-limits/" size="md" variant={isDeviceLimitPage ? "solid" : "ghost"} colorScheme={isDeviceLimitPage ? "primary" : "gray"} color={isDeviceLimitPage ? "#07130e" : "gray.200"} leftIcon={<DeviceLimitNavIcon />} justifyContent="flex-start" aria-current={isDeviceLimitPage ? "page" : undefined}>{t("deviceLimit.nav")}</Button>
+        <Button as={Link} to="/audit-logs/" size="md" variant={isAuditPage ? "solid" : "ghost"} colorScheme={isAuditPage ? "cyan" : "gray"} color={isAuditPage ? "#06161a" : "gray.200"} leftIcon={<AuditNavIcon />} justifyContent="flex-start" aria-current={isAuditPage ? "page" : undefined}>{t("audit.nav")}</Button>
+      </SimpleGrid>
 
       {isOwner && (
-        <Box mt={{ base: 4, lg: 7 }} pt={{ base: 4, lg: 0 }} borderTopWidth={{ base: "1px", lg: "0" }} borderColor="whiteAlpha.200">
+        <Box display={{ base: mobileMenuOpen ? "block" : "none", lg: "block" }} mt={{ base: 4, lg: 7 }} pt={{ base: 4, lg: 0 }} borderTopWidth={{ base: "1px", lg: "0" }} borderColor="whiteAlpha.200">
           <Text mb={2} px={2} fontSize="xs" color="gray.500" fontFamily="mono" letterSpacing=".1em" textTransform="uppercase">{t("core.configuration")}</Text>
           <SimpleGrid columns={{ base: 2, sm: 3, lg: 1 }} spacing={1}>
             <ActionButton icon={<CoreSettingsIcon />} label={t("core.title")} onClick={() => useDashboard.setState({ isEditingCore: true })} />
@@ -208,9 +237,12 @@ export const Header: FC = () => {
         </Box>
       )}
 
+      <Button display={{ base: mobileMenuOpen ? "flex" : "none", lg: "none" }} mt={3} onClick={logout} size="sm" variant="ghost" color="red.200" leftIcon={<LogoutIcon />}>{t("header.logout")}</Button>
+
       <Spacer display={{ base: "none", lg: "block" }} />
       <Stack display={{ base: "none", lg: "flex" }} mt={6} pt={4} borderTopWidth="1px" borderColor="whiteAlpha.200" spacing={2}>
         <Text fontSize="xs" color="gray.400" px={2} noOfLines={1}>{userData?.username || "Administrator"}</Text>
+        <BrandingControls theme={userData.dashboard_theme || "heisenberg"} hasLogo={Boolean(userData.logo_url)} />
         <Button onClick={logout} size="sm" variant="ghost" color="red.200" leftIcon={<LogoutIcon />} justifyContent="flex-start" _hover={{ bg: "rgba(239, 68, 68, .14)", color: "red.100" }}>{t("header.logout")}</Button>
       </Stack>
     </Flex>

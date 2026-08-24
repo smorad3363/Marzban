@@ -31,7 +31,7 @@ class DashboardWeekTrend(BaseModel):
 
 class DashboardBillingModeMetric(BaseModel):
     billing_mode: Literal[
-        "LEGACY_COMPAT", "SEAT_CREDIT", "USED_TRAFFIC", "ALLOCATED_TRAFFIC"
+        "LEGACY_COMPAT", "SEAT_CREDIT", "USED_TRAFFIC", "ALLOCATED_TRAFFIC", "USER_CREDIT"
     ]
     admin_count: int = 0
     user_count: int = 0

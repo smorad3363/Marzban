@@ -19,6 +19,7 @@ from app import logger, xray
 from app.device_limit.constants import SubscriptionMode
 from app.db.models import (
     Admin,
+    AdminHierarchy,
     AdminHierarchySettings,
     MarzhelpAccountingTransaction,
     MarzhelpAdminSettings,
@@ -197,20 +198,23 @@ def _settings(db: Session, admin_id: int | None, lock: bool = False) -> Marzhelp
     if admin_id is None:
         return None
     admin = db.get(Admin, admin_id)
-    if admin is not None and admin.is_sudo:
+    if admin is not None:
         hierarchy_on = bool(
             db.query(AdminHierarchySettings.enabled)
             .filter(AdminHierarchySettings.id == 1)
             .scalar()
         )
-        if not hierarchy_on:
-            return None
-        owner_admin_id = (
+        real_owner_id = (
             db.query(SystemOwner.admin_id)
             .filter(SystemOwner.id == 1)
             .scalar()
+            if hierarchy_on
+            else None
         )
-        if owner_admin_id == admin.id:
+        if admin.role_id == 1 or real_owner_id == admin.id:
+            return None
+    if admin is not None and admin.is_sudo:
+        if not hierarchy_on:
             return None
     query = db.query(MarzhelpAdminSettings).filter(MarzhelpAdminSettings.admin_id == admin_id)
     if lock:
@@ -353,6 +357,9 @@ def _quota_summary_values(
     elif settings is not None and billing_mode == admin_billing.BillingMode.USED_TRAFFIC.value:
         used = int(current_usage) + int(reset_usage) + int(deleted_usage)
         configured_limit = settings.total_traffic
+    elif settings is not None and billing_mode == admin_billing.BillingMode.USER_CREDIT.value:
+        used = int(current_users)
+        configured_limit = settings.max_users
     else:
         used = (
             int(settings.used_traffic or 0)
@@ -461,14 +468,72 @@ def quota_summaries(
         .group_by(MarzhelpDeletedUser.admin_id)
         .all()
     }
+    subtree_current: dict[int, int] = {}
+    subtree_reset: dict[int, int] = {}
+    subtree_deleted: dict[int, int] = {}
+    used_mode_ids = [
+        admin_id
+        for admin_id in ids
+        if settings_by_admin.get(admin_id) is not None
+        and (
+            admin_billing.billing_mode(settings_by_admin[admin_id])
+            == admin_billing.BillingMode.USED_TRAFFIC
+            or (
+                admin_billing.billing_mode(settings_by_admin[admin_id])
+                == admin_billing.BillingMode.LEGACY_COMPAT
+                and (settings_by_admin[admin_id].calculate_volume or "used_traffic")
+                == "used_traffic"
+            )
+        )
+    ]
+    if zero_is_finite and used_mode_ids:
+        subtree_current = {
+            int(ancestor_id): int(used or 0)
+            for ancestor_id, used in db.query(
+                AdminHierarchy.ancestor_id,
+                func.coalesce(func.sum(func.coalesce(User.used_traffic, 0)), 0),
+            )
+            .join(User, User.admin_id == AdminHierarchy.descendant_id)
+            .filter(AdminHierarchy.ancestor_id.in_(used_mode_ids))
+            .group_by(AdminHierarchy.ancestor_id)
+            .all()
+        }
+        subtree_reset = {
+            int(ancestor_id): int(used or 0)
+            for ancestor_id, used in db.query(
+                AdminHierarchy.ancestor_id,
+                func.coalesce(func.sum(UserUsageResetLogs.used_traffic_at_reset), 0),
+            )
+            .join(User, User.admin_id == AdminHierarchy.descendant_id)
+            .join(UserUsageResetLogs, UserUsageResetLogs.user_id == User.id)
+            .filter(AdminHierarchy.ancestor_id.in_(used_mode_ids))
+            .group_by(AdminHierarchy.ancestor_id)
+            .all()
+        }
+        subtree_deleted = {
+            int(ancestor_id): int(used or 0)
+            for ancestor_id, used in db.query(
+                AdminHierarchy.ancestor_id,
+                func.coalesce(func.sum(MarzhelpDeletedUser.used_traffic_total), 0),
+            )
+            .join(
+                MarzhelpDeletedUser,
+                MarzhelpDeletedUser.admin_id == AdminHierarchy.descendant_id,
+            )
+            .filter(AdminHierarchy.ancestor_id.in_(used_mode_ids))
+            .group_by(AdminHierarchy.ancestor_id)
+            .all()
+        }
     return {
         admin_id: _quota_summary_values(
             settings_by_admin.get(admin_id),
             zero_is_finite=zero_is_finite,
             current_users=user_totals.get(admin_id, (0, 0))[0],
-            current_usage=user_totals.get(admin_id, (0, 0))[1],
-            reset_usage=reset_totals.get(admin_id, 0),
-            deleted_usage=deleted_totals.get(admin_id, 0),
+            current_usage=subtree_current.get(
+                admin_id, user_totals.get(admin_id, (0, 0))[1]
+            ),
+            reset_usage=subtree_reset.get(admin_id, reset_totals.get(admin_id, 0)),
+            deleted_usage=subtree_deleted.get(admin_id, deleted_totals.get(admin_id, 0)),
         )
         for admin_id in ids
     }
@@ -731,22 +796,32 @@ def _validate_expiration(
 
 
 def used_traffic_spend(db: Session, admin_id: int) -> int:
+    hierarchy_on = bool(
+        db.query(AdminHierarchySettings.enabled)
+        .filter(AdminHierarchySettings.id == 1)
+        .scalar()
+    )
+    scoped_admin_ids = (
+        db.query(AdminHierarchy.descendant_id).filter(AdminHierarchy.ancestor_id == admin_id)
+        if hierarchy_on
+        else [admin_id]
+    )
     current_usage = (
         db.query(func.coalesce(func.sum(User.used_traffic), 0))
-        .filter(User.admin_id == admin_id)
+        .filter(User.admin_id.in_(scoped_admin_ids))
         .scalar()
         or 0
     )
     reset_usage = (
         db.query(func.coalesce(func.sum(UserUsageResetLogs.used_traffic_at_reset), 0))
         .join(User, User.id == UserUsageResetLogs.user_id)
-        .filter(User.admin_id == admin_id)
+        .filter(User.admin_id.in_(scoped_admin_ids))
         .scalar()
         or 0
     )
     deleted = (
         db.query(func.coalesce(func.sum(MarzhelpDeletedUser.used_traffic_total), 0))
-        .filter(MarzhelpDeletedUser.admin_id == admin_id)
+        .filter(MarzhelpDeletedUser.admin_id.in_(scoped_admin_ids))
         .scalar()
         or 0
     )
@@ -776,6 +851,8 @@ def _validate_traffic_credit(
     billing_mode = admin_billing.billing_mode(settings)
     legacy_mode = settings.calculate_volume or "used_traffic"
     if billing_mode == admin_billing.BillingMode.SEAT_CREDIT:
+        return
+    if billing_mode == admin_billing.BillingMode.USER_CREDIT:
         return
     hierarchy_on = bool(
         db.query(AdminHierarchySettings.enabled)

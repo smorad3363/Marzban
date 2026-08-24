@@ -209,6 +209,48 @@ def test_trial_quota_exhaustion_and_retry_consumes_once(db):
     assert exc.value.code == "trial_quota_exhausted"
 
 
+def test_trial_quota_reset_is_valid_when_already_at_limit(db):
+    session, owner, _, _ = db
+    child = Admin(
+        username="trial-reset-child",
+        hashed_password="x",
+        is_sudo=False,
+        role_id=3,
+        parent_admin_id=owner.id,
+    )
+    session.add(child)
+    session.flush()
+    session.add_all(
+        [
+            AdminHierarchy(ancestor_id=child.id, descendant_id=child.id, depth=0),
+            AdminHierarchy(ancestor_id=owner.id, descendant_id=child.id, depth=1),
+            MarzhelpAdminSettings(
+                admin_id=child.id,
+                billing_mode="USER_CREDIT",
+                trial_quota=5,
+                trial_quota_limit=5,
+                trials_used=0,
+            ),
+        ]
+    )
+    session.commit()
+
+    transfer, created = trials.reset_quota(
+        session,
+        actor=owner,
+        target=child,
+        idempotency_key="trial-reset-at-limit",
+        note="بازنشانی سهمیه تست",
+    )
+    session.commit()
+
+    assert created is True
+    assert transfer.amount == 5
+    assert transfer.delta == 0
+    assert transfer.balance_before == 5
+    assert transfer.balance_after == 5
+
+
 def test_unlimited_allocated_trial_with_finite_credit_fails_closed(db):
     session, owner, tag, host = db
     child = Admin(

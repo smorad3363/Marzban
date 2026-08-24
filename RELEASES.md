@@ -66,6 +66,25 @@ Fresh-install this exact candidate from GitHub:
 sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.0.0-rc.3/scripts/marzban.sh)" @ install --version v5.0.0-rc.3 --database mysql
 ```
 
+## v5.0.0-rc.4 Admin workflow and regression repair candidate
+
+This candidate fixes Admin creation authorization, Plan-only user creation,
+Trial quota reset, required freeze reasons, Admin bulk actions, Persian audit logs,
+compact responsive forms, and the mobile Dashboard. It also adds the black-gold
+Dashboard theme and per-Admin branding controls.
+
+Update a staging server to this exact candidate:
+
+```bash
+marzban update --version v5.0.0-rc.4
+```
+
+Fresh-install this exact candidate from GitHub:
+
+```bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.0.0-rc.4/scripts/marzban.sh)" @ install --version v5.0.0-rc.4 --database mysql
+```
+
 ## Release process
 
 1. Update `VERSION` and `app.__version__`.

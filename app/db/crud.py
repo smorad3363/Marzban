@@ -20,7 +20,9 @@ from app.db.models import (
     TLS,
     Admin,
     AdminApiToken,
+    AdminAccountStatus,
     AdminHierarchy,
+    AdminRole,
     AdminUserPlanAccess,
     AdminUsageLogs,
     MarzhelpAdminSettings,
@@ -1466,6 +1468,9 @@ def get_admins_with_count(
     limit: int = 20,
     username: Optional[str] = None,
     scope_admin_id: Optional[int] = None,
+    role: Optional[str] = None,
+    billing_mode: Optional[str] = None,
+    account_status: Optional[str] = None,
 ) -> Tuple[List[Admin], int]:
     query = db.query(Admin)
     if scope_admin_id is not None:
@@ -1479,6 +1484,27 @@ def get_admins_with_count(
         )
     if username:
         query = query.filter(Admin.username.ilike(f"%{username}%"))
+    if role:
+        query = query.filter(Admin.role.has(AdminRole.code == role))
+    if billing_mode:
+        query = query.filter(
+            exists().where(
+                and_(
+                    MarzhelpAdminSettings.admin_id == Admin.id,
+                    MarzhelpAdminSettings.billing_mode == billing_mode,
+                )
+            )
+        )
+    if account_status:
+        query = query.filter(
+            exists().where(
+                and_(
+                    MarzhelpAdminSettings.admin_id == Admin.id,
+                    MarzhelpAdminSettings.account_status_id == AdminAccountStatus.id,
+                    AdminAccountStatus.code == account_status,
+                )
+            )
+        )
     total = query.count()
     admins = query.order_by(Admin.username.asc()).offset(offset).limit(limit).all()
     return admins, total

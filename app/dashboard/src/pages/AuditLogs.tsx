@@ -6,6 +6,7 @@ import {
   Button,
   Card,
   Code,
+  Collapse,
   Divider,
   FormControl,
   FormLabel,
@@ -36,7 +37,6 @@ import {
   useDisclosure,
 } from "@chakra-ui/react";
 import {
-  ArrowPathIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   ClockIcon,
@@ -56,8 +56,49 @@ import { AuditLog, AuditLogList, AuditLogOptions, AuditValue } from "types/Audit
 const SearchIcon = chakra(MagnifyingGlassIcon, { baseStyle: { w: 4, h: 4 } });
 const AuditIcon = chakra(DocumentMagnifyingGlassIcon, { baseStyle: { w: 5, h: 5 } });
 const FilterIcon = chakra(FunnelIcon, { baseStyle: { w: 4, h: 4 } });
-const RefreshIcon = chakra(ArrowPathIcon, { baseStyle: { w: 4, h: 4 } });
 const PAGE_SIZE = 25;
+
+const actionLabels: Record<string, string> = {
+  "auth.login": "ورود ادمین",
+  "auth.logout": "خروج ادمین",
+  "admin.create": "ساخت ادمین",
+  "admin.update": "ویرایش ادمین",
+  "admin.delete": "حذف ادمین",
+  "admin.owner_freeze": "فریز ادمین",
+  "admin.owner_unfreeze": "رفع فریز ادمین",
+  "admin.user_creation_mode_update": "تغییر روش ساخت کاربر",
+  "user.create": "ساخت کاربر",
+  "user.create_from_plan": "ساخت کاربر از پلن",
+  "user.update": "ویرایش کاربر",
+  "user.delete": "حذف کاربر",
+  "credit.grant": "افزایش اعتبار",
+  "credit.reclaim": "پس‌گرفتن اعتبار",
+  "trial_quota.reset": "بازنشانی سهمیه تست",
+  "device_limit.penalties_update": "ویرایش مراحل محدودیت دستگاه",
+};
+
+const localizeAction = (action: string) => actionLabels[action] || action.replaceAll(".", " / ");
+const localizeTarget = (type: string) => ({ admin: "ادمین", user: "کاربر", admin_credit: "اعتبار ادمین", admin_trial_quota: "سهمیه تست" }[type] || type);
+const localizeDescription = (log: AuditLog) => {
+  const actor = log.admin_username;
+  const target = log.target_name || log.target_id || "—";
+  const known: Record<string, string> = {
+    "auth.login": `${actor} وارد پنل شد.`,
+    "auth.logout": `${actor} از پنل خارج شد.`,
+    "admin.owner_freeze": `${actor} ادمین ${target} و زیرشاخه‌اش را فریز کرد.`,
+    "admin.owner_unfreeze": `${actor} فریز ادمین ${target} را برداشت.`,
+    "trial_quota.reset": `${actor} سهمیه تست ${target} را بازنشانی کرد.`,
+    "user.create": `${actor} کاربر ${target} را ساخت.`,
+    "user.create_from_plan": `${actor} کاربر ${target} را از پلن ساخت.`,
+    "user.update": `${actor} کاربر ${target} را ویرایش کرد.`,
+    "admin.create": `${actor} ادمین ${target} را ساخت.`,
+    "admin.update": `${actor} ادمین ${target} را ویرایش کرد.`,
+    "credit.grant": `${actor} اعتبار ${target} را افزایش داد.`,
+    "credit.reclaim": `${actor} از اعتبار ${target} پس گرفت.`,
+    "device_limit.penalties_update": `${actor} مراحل محدودیت دستگاه را ویرایش کرد.`,
+  };
+  return known[log.action] || `${localizeAction(log.action)} برای ${target}`;
+};
 
 const formatAuditDate = (value: string) => {
   const normalized = /(?:Z|[+-]\d\d:\d\d)$/.test(value) ? value : `${value}Z`;
@@ -90,7 +131,7 @@ const ActionBadge: FC<{ log: AuditLog }> = ({ log }) => {
   const tone = actionTone(log.action, log.status);
   return (
     <Badge px={2.5} py={1} borderRadius="full" textTransform="none" bg={tone.bg} color={tone.color} borderWidth="1px" borderColor={tone.border} fontFamily="mono" fontSize="10px">
-      {log.action}
+      {localizeAction(log.action)}
     </Badge>
   );
 };
@@ -110,7 +151,7 @@ const AuditDetails: FC<{ log: AuditLog | null; isOpen: boolean; onClose: () => v
   return (
     <Modal isOpen={isOpen} onClose={onClose} size="4xl" scrollBehavior="inside">
       <ModalOverlay bg="rgba(0,0,0,.76)" backdropFilter="blur(5px)" />
-      <ModalContent dir={i18n.dir()} mx={3} maxH="calc(100dvh - 24px)" bg="#111d17" color="gray.100" borderWidth="1px" borderColor="#355546" borderRadius="16px" boxShadow="0 28px 80px rgba(0,0,0,.55)">
+      <ModalContent dir={i18n.dir()} mx={3} my={3} maxH="calc(100dvh - 24px)" bg="#111d17" color="gray.100" borderWidth="1px" borderColor="#355546" borderRadius="16px" boxShadow="0 28px 80px rgba(0,0,0,.55)">
         <ModalHeader pe={14}>
           <HStack flexWrap="wrap"><ActionBadge log={log} /><Text fontSize="lg">{t("audit.detailsTitle")}</Text></HStack>
         </ModalHeader>
@@ -118,7 +159,7 @@ const AuditDetails: FC<{ log: AuditLog | null; isOpen: boolean; onClose: () => v
         <ModalBody pb={6}>
           <Stack spacing={4}>
             <Box p={4} bg="rgba(6,182,212,.06)" borderWidth="1px" borderColor="rgba(34,211,238,.2)" borderRadius="12px">
-              <Text fontWeight="700" lineHeight="1.8">{log.description}</Text>
+              <Text fontWeight="700" lineHeight="1.7">{localizeDescription(log)}</Text>
               <SimpleGrid columns={{ base: 1, sm: 2, lg: 4 }} gap={3} mt={3} fontSize="sm">
                 <Box><Text color="gray.400" fontSize="xs">{t("audit.admin")}</Text><Text mt={1}>{log.admin_username}</Text></Box>
                 <Box><Text color="gray.400" fontSize="xs">{t("audit.target")}</Text><Text mt={1}>{log.target_name || log.target_id || "—"}</Text></Box>
@@ -145,6 +186,7 @@ export const AuditLogs: FC = () => {
   const [selected, setSelected] = useState<AuditLog | null>(null);
   const [page, setPage] = useState(0);
   const [searchInput, setSearchInput] = useState("");
+  const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
   const [filters, setFilters] = useState({ search: "", admin: "", action: "", target: "", from: "", to: "", sort: "newest" });
 
   useEffect(() => {
@@ -174,6 +216,7 @@ export const AuditLogs: FC = () => {
   const setFilter = (key: keyof typeof filters, value: string) => { setFilters((current) => ({ ...current, [key]: value })); setPage(0); };
   const clearFilters = () => { setSearchInput(""); setFilters({ search: "", admin: "", action: "", target: "", from: "", to: "", sort: "newest" }); setPage(0); };
   const showDetails = (log: AuditLog) => { setSelected(log); details.onOpen(); };
+  const advancedFilterCount = [filters.admin, filters.action, filters.target, filters.from, filters.to, filters.sort !== "newest" ? filters.sort : ""].filter(Boolean).length;
 
   return (
     <AppShell>
@@ -190,14 +233,18 @@ export const AuditLogs: FC = () => {
 
       <Card bg="linear-gradient(145deg, rgba(17,29,23,.98), rgba(10,24,27,.96))" color="gray.100" borderWidth="1px" borderColor="#345346" borderRadius={{ base: "16px", md: "20px" }} boxShadow="panel" overflow="hidden">
         <Box p={{ base: 4, md: 5 }} borderBottomWidth="1px" borderColor="#2b4437">
-          <HStack mb={4} color="gray.200"><FilterIcon /><Text fontWeight="700">{t("audit.filters")}</Text><Text ms="auto" fontSize="xs" color="gray.400">{t("audit.resultCount", { count: total })}</Text></HStack>
-          <InputGroup mb={4}>
+          <HStack mb={3} color="gray.200"><FilterIcon /><Text fontWeight="700">{t("audit.filters")}</Text><Text ms="auto" fontSize="xs" color="gray.400">{t("audit.resultCount", { count: total })}</Text></HStack>
+          <HStack align="stretch" gap={2} flexWrap={{ base: "wrap", md: "nowrap" }}>
+          <InputGroup flex="1" minW={{ base: "100%", md: "260px" }}>
             <InputLeftElement pointerEvents="none" color="gray.400"><SearchIcon /></InputLeftElement>
             <Input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder={t("audit.searchPlaceholder")} minH="44px" />
           </InputGroup>
-          <SimpleGrid columns={{ base: 1, sm: 2, xl: 6 }} gap={3}>
+          <Button minH="44px" variant="outline" borderColor="var(--panel-border)" onClick={() => setAdvancedFiltersOpen((value) => !value)} aria-expanded={advancedFiltersOpen}>{advancedFiltersOpen ? "بستن فیلترها" : `فیلترهای بیشتر${advancedFilterCount ? ` (${advancedFilterCount})` : ""}`}</Button>
+          </HStack>
+          <Collapse in={advancedFiltersOpen} animateOpacity>
+          <SimpleGrid columns={{ base: 1, sm: 2, xl: 6 }} gap={3} mt={3}>
             <FormControl><FormLabel fontSize="xs">{t("audit.admin")}</FormLabel><Select value={filters.admin} onChange={(e) => setFilter("admin", e.target.value)}><option value="">{t("audit.allAdmins")}</option>{optionsQuery.data?.admins.map((item) => <option key={item} value={item}>{item}</option>)}</Select></FormControl>
-            <FormControl><FormLabel fontSize="xs">{t("audit.action")}</FormLabel><Select value={filters.action} onChange={(e) => setFilter("action", e.target.value)}><option value="">{t("audit.allActions")}</option>{optionsQuery.data?.actions.map((item) => <option key={item} value={item}>{item}</option>)}</Select></FormControl>
+            <FormControl><FormLabel fontSize="xs">{t("audit.action")}</FormLabel><Select value={filters.action} onChange={(e) => setFilter("action", e.target.value)}><option value="">{t("audit.allActions")}</option>{optionsQuery.data?.actions.map((item) => <option key={item} value={item}>{localizeAction(item)}</option>)}</Select></FormControl>
             <FormControl><FormLabel fontSize="xs">{t("audit.target")}</FormLabel><Input value={filters.target} onChange={(e) => setFilter("target", e.target.value)} placeholder={t("audit.targetPlaceholder")} /></FormControl>
             <FormControl><FormLabel fontSize="xs">{t("audit.fromDate")}</FormLabel><Input type="date" dir="ltr" value={filters.from} onChange={(e) => setFilter("from", e.target.value)} /></FormControl>
             <FormControl><FormLabel fontSize="xs">{t("audit.toDate")}</FormLabel><Input type="date" dir="ltr" value={filters.to} onChange={(e) => setFilter("to", e.target.value)} /></FormControl>
@@ -205,8 +252,8 @@ export const AuditLogs: FC = () => {
           </SimpleGrid>
           <HStack mt={4} justify="end" flexWrap="wrap">
             <Button size="sm" variant="ghost" onClick={clearFilters}>{t("audit.clear")}</Button>
-            <Button size="sm" variant="outline" borderColor="#476858" leftIcon={<RefreshIcon />} onClick={() => logsQuery.refetch()} isLoading={logsQuery.isFetching}>{t("refresh")}</Button>
           </HStack>
+          </Collapse>
         </Box>
 
         {logsQuery.isError && <Alert status="error" m={4} w="auto"><AlertIcon />{t("audit.loadFailed")}<Button size="sm" ms="auto" onClick={() => logsQuery.refetch()}>{t("retry")}</Button></Alert>}
@@ -221,8 +268,8 @@ export const AuditLogs: FC = () => {
                 <Tbody>{logs.map((log) => <Tr key={log.id} _hover={{ bg: "rgba(6,182,212,.035)" }}>
                   <Td><Text color="white" fontWeight="700">{log.admin_username}</Text><Text color="gray.500" fontSize="xs" dir="ltr">{log.ip_address || "—"}</Text></Td>
                   <Td><ActionBadge log={log} /></Td>
-                  <Td><Text maxW="170px" noOfLines={1}>{log.target_name || log.target_id || "—"}</Text><Text color="gray.500" fontSize="xs">{log.target_type}</Text></Td>
-                  <Td maxW="430px"><Text noOfLines={2} lineHeight="1.7">{log.description}</Text></Td>
+                  <Td py={2}><Text maxW="170px" noOfLines={1}>{log.target_name || log.target_id || "—"}</Text><Text color="gray.500" fontSize="xs">{localizeTarget(log.target_type)}</Text></Td>
+                  <Td py={2} maxW="430px"><Text noOfLines={1} lineHeight="1.6">{localizeDescription(log)}</Text></Td>
                   <Td whiteSpace="nowrap"><HStack spacing={1.5}><ClockIcon width={15} color="#67e8f9" aria-hidden="true" /><Text dir="ltr" fontSize="xs">{formatAuditDate(log.created_at)}</Text></HStack></Td>
                   <Td textAlign="end"><Button size="xs" variant="outline" borderColor="#476858" onClick={() => showDetails(log)}>{t("audit.details")}</Button></Td>
                 </Tr>)}</Tbody>
@@ -230,9 +277,9 @@ export const AuditLogs: FC = () => {
             </TableContainer>
 
             <Stack display={{ base: "flex", lg: "none" }} divider={<Divider borderColor="#2b4437" />} spacing={0}>
-              {logs.map((log) => <Box key={log.id} p={4} role="group">
+              {logs.map((log) => <Box key={log.id} p={3} role="group">
                 <HStack justify="space-between" align="start" gap={3}><Box minW={0}><Text color="white" fontWeight="750" noOfLines={1}>{log.admin_username}</Text><Text color="gray.400" fontSize="xs" mt={1} noOfLines={1}>{log.target_name || log.target_id || log.target_type}</Text></Box><ActionBadge log={log} /></HStack>
-                <Text my={3} lineHeight="1.8" fontSize="sm">{log.description}</Text>
+                <Text my={2} lineHeight="1.6" fontSize="sm">{localizeDescription(log)}</Text>
                 <HStack justify="space-between" align="center" gap={3}><Text dir="ltr" color="gray.400" fontSize="xs">{formatAuditDate(log.created_at)}</Text><Button size="sm" minH="40px" variant="outline" borderColor="#476858" onClick={() => showDetails(log)}>{t("audit.details")}</Button></HStack>
               </Box>)}
             </Stack>

@@ -27,7 +27,7 @@ from app.db.models import (
     MarzhelpAdminSettings,
     User,
 )
-from app.models.admin import Admin, AdminCreate
+from app.models.admin import Admin, AdminCreate, MarzhelpAdminPolicy
 from app.models.admin_hierarchy import (
     AccountSummary,
     ApiTokenCreate,
@@ -64,6 +64,7 @@ from app.models.admin_hierarchy import (
     TrialCleanupRequest,
     TrialCleanupResponse,
     TrialQuotaAdjustmentRequest,
+    TrialQuotaResetRequest,
     UserCreationModeUpdate,
 )
 from app.models.user import UserResponse
@@ -305,6 +306,8 @@ def _node_response(
     preloaded: bool = False,
     referral: AdminReferralAttribution | None = None,
     active_owner_freeze_event_id: int | None = None,
+    quota_summary: dict | None = None,
+    owner_row: bool = False,
 ) -> HierarchyAdminNode:
     if settings is None and not preloaded:
         settings = db.get(MarzhelpAdminSettings, row.id)
@@ -312,7 +315,34 @@ def _node_response(
         status = db.query(AdminAccountStatus.code).filter(
             AdminAccountStatus.id == settings.account_status_id
         ).scalar()
-    spend = admin_hierarchy.own_credit_spend(db, settings) if settings else 0
+    spend = (
+        int(quota_summary.get("credit_used", 0))
+        if quota_summary is not None
+        else admin_hierarchy.own_credit_spend(db, settings) if settings else 0
+    )
+    available = None
+    if settings is not None and not owner_row:
+        if quota_summary is not None:
+            remaining = quota_summary.get("credit_remaining")
+            available = (
+                None
+                if remaining is None
+                else max(int(remaining) - int(settings.delegated_traffic or 0), 0)
+            )
+        else:
+            available = admin_hierarchy.available_credit(db, settings)
+    creation_remaining = None if owner_row else 0
+    if settings is not None and not owner_row and settings.can_create_admins:
+        creation_remaining = (
+            None
+            if settings.admin_creation_limit is None
+            else max(
+                int(settings.admin_creation_limit)
+                - int(settings.admin_creations_used or 0)
+                - int(settings.delegated_admin_creation_limit or 0),
+                0,
+            )
+        )
     return HierarchyAdminNode(
         id=row.id,
         username=row.username,
@@ -324,7 +354,7 @@ def _node_response(
         total_traffic=settings.total_traffic if settings else None,
         delegated_traffic=int(settings.delegated_traffic or 0) if settings else 0,
         own_spend=spend,
-        available_traffic=admin_hierarchy.available_credit(db, settings) if settings else None,
+        available_traffic=available,
         renewal_enabled=bool(settings.renewal_enabled) if settings else True,
         renewal_remaining=settings.renewal_remaining if settings else None,
         trial_quota=int(settings.trial_quota or 0) if settings else 0,
@@ -332,6 +362,20 @@ def _node_response(
         referral_referrer_admin_id=referral.referrer_admin_id if referral else None,
         referral_rate_bps=referral.rate_bps if referral else None,
         active_owner_freeze_event_id=active_owner_freeze_event_id,
+        billing_mode=admin_billing.billing_mode(settings) if settings else admin_billing.BillingMode.LEGACY_COMPAT,
+        can_create_admins=bool(settings.can_create_admins) if settings else False,
+        can_delegate_admin_creation=(
+            bool(settings.can_delegate_admin_creation) if settings else False
+        ),
+        can_create_allocated_children=(
+            bool(settings.can_create_allocated_children) if settings else True
+        ),
+        admin_creation_limit=settings.admin_creation_limit if settings else 0,
+        admin_creations_used=int(settings.admin_creations_used or 0) if settings else 0,
+        delegated_admin_creation_limit=(
+            int(settings.delegated_admin_creation_limit or 0) if settings else 0
+        ),
+        admin_creation_remaining=creation_remaining,
     )
 
 
@@ -380,7 +424,13 @@ def get_admin_tree(
             .order_by(AdminHierarchy.depth, DBAdmin.username)
             .all()
         )
-        owner_view = bool(actor.is_sudo)
+        owner_view = admin_hierarchy.can_manage_children(db, actor)
+        settings_map = {row.id: settings for row, _, settings, *_ in rows if settings is not None}
+        quota_map = marzhelp_policy.quota_summaries(
+            db,
+            [row.id for row, *_ in rows],
+            settings_map,
+        )
         nodes = [
             _node_response(
                 db,
@@ -392,6 +442,8 @@ def get_admin_tree(
                 preloaded=True,
                 referral=referral if owner_view else None,
                 active_owner_freeze_event_id=freeze_event_id if owner_view else None,
+                quota_summary=quota_map.get(row.id),
+                owner_row=role == admin_hierarchy.OWNER,
             )
             for row, depth, settings, status, role, referral, freeze_event_id in rows
         ]
@@ -426,13 +478,66 @@ def create_child(
             ),
             commit=False,
         )
+        if values.billing_mode == admin_billing.BillingMode.LEGACY_COMPAT:
+            raise admin_hierarchy.HierarchyError(
+                "billing_mode_required", "Select a commercial billing mode"
+            )
+        if values.billing_mode == admin_billing.BillingMode.USER_CREDIT and not values.initial_credit:
+            raise admin_hierarchy.HierarchyError(
+                "user_credit_limit_required",
+                "Unlimited traffic Admin requires a positive account limit",
+            )
+        policy = MarzhelpAdminPolicy(
+            billing_mode=values.billing_mode,
+            total_traffic=0,
+            max_users=0 if values.billing_mode == admin_billing.BillingMode.USER_CREDIT else None,
+            device_capacity_limit=(
+                0 if values.billing_mode == admin_billing.BillingMode.SEAT_CREDIT else None
+            ),
+        )
+        settings = crud.upsert_marzhelp_admin_policy(db, child.id, policy, commit=False)
+        admin_hierarchy.configure_new_child_admin_creation(
+            db,
+            actor=actor,
+            parent=parent,
+            child=child,
+            child_settings=settings,
+            child_role=values.role,
+            child_billing_mode=values.billing_mode,
+            can_create_admins=values.can_create_admins,
+            can_delegate_admin_creation=values.can_delegate_admin_creation,
+            can_create_allocated_children=values.can_create_allocated_children,
+            admin_creation_limit=values.admin_creation_limit,
+        )
         admin_hierarchy.attach_new_child(
             db,
             actor=actor,
             parent=parent,
             child=child,
             child_role=values.role,
+            commit=False,
         )
+        admin_hierarchy.configure_child_user_creation_access(
+            db,
+            actor=actor,
+            parent=parent,
+            child_settings=settings,
+            mode=values.user_creation_mode,
+            can_manage_plans=values.can_manage_plans,
+        )
+        if values.initial_credit:
+            admin_hierarchy.transfer_credit(
+                db,
+                actor=actor,
+                source=parent,
+                target=child,
+                amount=int(values.initial_credit),
+                operation_type="grant",
+                idempotency_key=f"child-create-{child.id}-credit",
+                note="system:initial_child_credit",
+                commit=False,
+            )
+        db.commit()
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="Admin already exists")
@@ -447,7 +552,11 @@ def create_child(
         f"Admin {actor.username} created {values.role} {child.username}",
         target_id=child.id,
         target_name=child.username,
-        details={"parent_admin_id": parent.id, "role": values.role},
+        details={
+            "parent_admin_id": parent.id,
+            "role": values.role,
+            "billing_mode": values.billing_mode.value,
+        },
         request=request,
     )
     return _node_response(db, child, 1)
@@ -643,6 +752,50 @@ def reclaim_trial_quota(
     admin: Admin = Depends(Admin.get_current),
 ):
     return _trial_quota_adjustment(username, values, "reclaim", request, db, admin)
+
+
+@router.post(
+    "/admin-management/{username}/trial-quota/reset",
+    response_model=CreditTransferResponse,
+)
+def reset_trial_quota(
+    username: str,
+    values: TrialQuotaResetRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
+    actor = _db_actor(db, admin)
+    target = _target(db, username)
+    try:
+        row, created = trials.reset_quota(
+            db,
+            actor=actor,
+            target=target,
+            idempotency_key=values.idempotency_key,
+            note=values.note,
+        )
+        if created:
+            AuditLogService.log(
+                db,
+                actor,
+                "trial_quota.reset",
+                "admin_trial_quota",
+                f"Admin {actor.username} reset Trial quota for {target.username}",
+                target_id=target.id,
+                target_name=target.username,
+                previous_value={"trial_quota": row.balance_before},
+                new_value={"trial_quota": row.balance_after},
+                details={"idempotency_key": row.idempotency_key, "reason": row.note},
+                request=request,
+                commit=False,
+            )
+        db.commit()
+        db.refresh(row)
+        return row
+    except Exception as exc:
+        db.rollback()
+        _raise_domain(exc)
 
 
 @router.get("/admin-management/{username}/credit/ledger", response_model=list[CreditTransferResponse])
@@ -870,8 +1023,18 @@ def update_user_creation_mode(
         "user_creation_mode_id": settings.user_creation_mode_id,
         "can_manage_plans": settings.can_manage_plans,
     }
-    settings.user_creation_mode_id = admin_hierarchy.USER_CREATION_MODE_IDS[values.mode]
-    settings.can_manage_plans = values.can_manage_plans
+    try:
+        admin_hierarchy.configure_child_user_creation_access(
+            db,
+            actor=actor,
+            parent=actor,
+            child_settings=settings,
+            mode=values.mode,
+            can_manage_plans=values.can_manage_plans,
+        )
+    except admin_hierarchy.HierarchyError as exc:
+        db.rollback()
+        _raise_domain(exc)
     db.commit()
     AuditLogService.log(
         db,
@@ -1227,6 +1390,15 @@ def account_summary(
         if settings and settings.suspended_reason_id
         else None
     )
+    if settings and settings.suspension_event_id:
+        freeze_event = db.get(AdminSuspensionEvent, settings.suspension_event_id)
+        freeze_note = (
+            (freeze_event.limits_snapshot or {}).get("note")
+            if freeze_event is not None
+            else None
+        )
+        if freeze_note:
+            reason = str(freeze_note)
     own_users = db.query(func.count(User.id)).filter(User.admin_id == actor.id).scalar() or 0
     subtree_users = (
         db.query(func.count(User.id))
@@ -1270,6 +1442,23 @@ def account_summary(
         can_manage_plans=bool(settings.can_manage_plans) if settings else False,
         trial_quota=int(settings.trial_quota or 0) if settings else 0,
         trials_used=int(settings.trials_used or 0) if settings else 0,
+        can_create_admins=bool(settings.can_create_admins) if settings else False,
+        can_delegate_admin_creation=(
+            bool(settings.can_delegate_admin_creation) if settings else False
+        ),
+        can_create_allocated_children=(
+            bool(settings.can_create_allocated_children) if settings else True
+        ),
+        admin_creation_limit=settings.admin_creation_limit if settings else 0,
+        admin_creations_used=int(settings.admin_creations_used or 0) if settings else 0,
+        delegated_admin_creation_limit=(
+            int(settings.delegated_admin_creation_limit or 0) if settings else 0
+        ),
+        admin_creation_remaining=(
+            admin_hierarchy.admin_creation_remaining(db, actor, settings)
+            if settings is not None
+            else 0
+        ),
     )
 
 

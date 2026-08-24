@@ -35,6 +35,7 @@ from app.models.admin_hierarchy import (
     PlanCreate,
     PlanVersionInput,
 )
+from pydantic import ValidationError
 from app.models.admin import Admin as APIAdmin
 from app.models.user import UserStatus
 from app.routers.admin_hierarchy import (
@@ -42,7 +43,7 @@ from app.routers.admin_hierarchy import (
     get_admin_tree,
     unfreeze_admin as unfreeze_admin_route,
 )
-from app.utils import admin_hierarchy, admin_plans, marzhelp_policy
+from app.utils import admin_billing, admin_hierarchy, admin_plans, marzhelp_policy
 
 
 @pytest.fixture()
@@ -122,6 +123,88 @@ def test_set_owner_backfills_without_deleting_ids_or_users(db):
     assert db.get(User, unowned.id).admin_id == owner.id
     assert admin_hierarchy.hierarchy_enabled(db)
     assert report["closure_rows"] == 5
+
+
+def test_used_traffic_parent_selects_child_mode_and_delegates_bounded_creation(db):
+    owner, parent, _, _, _ = _legacy_tree(db)
+    parent_settings = db.get(MarzhelpAdminSettings, parent.id)
+    parent_settings.billing_mode = "USED_TRAFFIC"
+    parent_settings.can_create_admins = True
+    parent_settings.can_delegate_admin_creation = True
+    parent_settings.can_create_allocated_children = True
+    parent_settings.admin_creation_limit = 5
+    child = Admin(username="delegated-child", hashed_password="x")
+    db.add(child)
+    db.flush()
+    child_settings = MarzhelpAdminSettings(admin_id=child.id, billing_mode="USED_TRAFFIC")
+    db.add(child_settings)
+
+    assert admin_hierarchy.allowed_child_billing_modes(db, parent, parent_settings) == [
+        admin_billing.BillingMode.USED_TRAFFIC,
+        admin_billing.BillingMode.ALLOCATED_TRAFFIC,
+    ]
+    admin_hierarchy.configure_new_child_admin_creation(
+        db,
+        actor=parent,
+        parent=parent,
+        child=child,
+        child_settings=child_settings,
+        child_role=admin_hierarchy.ADMIN,
+        child_billing_mode=admin_billing.BillingMode.USED_TRAFFIC,
+        can_create_admins=True,
+        can_delegate_admin_creation=False,
+        can_create_allocated_children=True,
+        admin_creation_limit=2,
+    )
+    admin_hierarchy.attach_new_child(
+        db,
+        actor=parent,
+        parent=parent,
+        child=child,
+        child_role=admin_hierarchy.ADMIN,
+        commit=False,
+    )
+    db.flush()
+
+    assert parent_settings.admin_creations_used == 1
+    assert parent_settings.delegated_admin_creation_limit == 2
+    assert admin_hierarchy.admin_creation_remaining(db, parent, parent_settings) == 2
+    assert child_settings.admin_creation_limit == 2
+    assert child_settings.can_create_admins is True
+    assert child_settings.user_creation_mode_id == admin_hierarchy.USER_CREATION_MODE_IDS[admin_hierarchy.PLAN_ONLY]
+
+    parent_settings.user_creation_mode_id = admin_hierarchy.USER_CREATION_MODE_IDS[admin_hierarchy.PLAN_ONLY]
+    with pytest.raises(admin_hierarchy.HierarchyError) as forbidden:
+        admin_hierarchy.configure_child_user_creation_access(
+            db,
+            actor=parent,
+            parent=parent,
+            child_settings=child_settings,
+            mode=admin_hierarchy.FREE_FORM,
+            can_manage_plans=False,
+        )
+    assert forbidden.value.code == "child_creation_mode_too_powerful"
+
+    parent_settings.user_creation_mode_id = admin_hierarchy.USER_CREATION_MODE_IDS[admin_hierarchy.FREE_FORM]
+    parent_settings.can_manage_plans = True
+    admin_hierarchy.configure_child_user_creation_access(
+        db,
+        actor=parent,
+        parent=parent,
+        child_settings=child_settings,
+        mode=admin_hierarchy.FREE_FORM,
+        can_manage_plans=True,
+    )
+    assert child_settings.user_creation_mode_id == admin_hierarchy.USER_CREATION_MODE_IDS[admin_hierarchy.FREE_FORM]
+    assert child_settings.can_manage_plans is True
+
+
+def test_manual_freeze_request_requires_human_reason():
+    with pytest.raises(ValidationError):
+        OwnerFreezeRequest(
+            reason_id=1,
+            idempotency_key="freeze-without-reason",
+        )
 
 
 def test_owner_credit_is_unlimited_for_plan_validation(db, monkeypatch):
@@ -243,7 +326,8 @@ def test_admin_tree_uses_constant_query_count(db):
     assert len(tree) == 1
     assert tree[0].username == owner.username
     assert len(tree[0].children) == 2
-    assert len(statements) <= 4
+    # The count is fixed: one tree query plus bounded batch quota aggregates.
+    assert len(statements) <= 12
 
 
 def test_credit_transfer_is_idempotent_and_reclaim_is_bounded(db):
@@ -275,7 +359,8 @@ def test_credit_transfer_is_idempotent_and_reclaim_is_bounded(db):
     db.refresh(owner_wallet)
     db.refresh(child_wallet)
     assert duplicate.id == first.id
-    assert owner_wallet.delegated_traffic == 300
+    # Owner is unrestricted and USED_TRAFFIC parents are charged by actual subtree use.
+    assert owner_wallet.delegated_traffic == 0
     assert child_wallet.total_traffic == 300
 
     with pytest.raises(admin_hierarchy.HierarchyError) as conflict:
@@ -487,7 +572,7 @@ def test_stage7_owner_freeze_cascades_and_restores_only_freeze_owned_state(db):
             reason_id=1,
             idempotency_key="freeze-forbidden-0001",
         )
-    assert forbidden.value.code == "owner_required"
+    assert forbidden.value.code == "freeze_forbidden"
 
     event, created = admin_hierarchy.freeze_admin(
         db,

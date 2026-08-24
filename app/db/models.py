@@ -72,6 +72,8 @@ class Admin(Base):
     # Nullable for current-schema upgrade and old bootstrap compatibility. New
     # dashboard/API-created Admins require a non-empty value at validation time.
     phone = Column(String(32), nullable=True, default=None)
+    dashboard_theme = Column(String(32), nullable=False, default="heisenberg")
+    logo_filename = Column(String(255), nullable=True, default=None)
     discord_webhook = Column(String(1024), nullable=True, default=None)
     users_usage = Column(BigInteger, nullable=False, default=0)
     usage_logs = relationship("AdminUsageLogs", back_populates="admin")
@@ -104,6 +106,10 @@ class Admin(Base):
         foreign_keys=[parent_admin_id],
         back_populates="parent",
     )
+
+    @property
+    def logo_url(self) -> str | None:
+        return f"/api/branding/logo/{self.id}" if self.logo_filename else None
 
 
 class AdminHierarchySettings(Base):
@@ -730,6 +736,10 @@ class MarzhelpAdminSettings(Base):
     """Canonical Marzhelp policy and admin-accounting settings."""
 
     __tablename__ = "marzhelp_admin_settings"
+    __table_args__ = (
+        Index("ix_marzhelp_admin_settings_billing_admin", "billing_mode", "admin_id"),
+        Index("ix_marzhelp_admin_settings_status_admin", "account_status_id", "admin_id"),
+    )
 
     admin_id = Column(Integer, ForeignKey("admins.id"), primary_key=True)
     # Existing rows are deliberately kept in compatibility mode. Only Owner may
@@ -757,7 +767,17 @@ class MarzhelpAdminSettings(Base):
     # Remaining independently granted Trial creations. Existing accounts start
     # fail-closed at zero; Owner adjustments are recorded in the resource ledger.
     trial_quota = Column(BigInteger, nullable=False, default=0)
+    trial_quota_limit = Column(BigInteger, nullable=False, default=0)
     trials_used = Column(BigInteger, nullable=False, default=0)
+    # Delegated child-admin creation is separate from the fixed role preset.
+    # A finite limit is a budget: own creations and finite child allocations
+    # both consume it. Owner bypasses these commercial counters.
+    can_create_admins = Column(Boolean, nullable=False, default=False)
+    can_delegate_admin_creation = Column(Boolean, nullable=False, default=False)
+    can_create_allocated_children = Column(Boolean, nullable=False, default=True)
+    admin_creation_limit = Column(BigInteger, nullable=True)
+    admin_creations_used = Column(BigInteger, nullable=False, default=0)
+    delegated_admin_creation_limit = Column(BigInteger, nullable=False, default=0)
     user_creation_mode_id = Column(
         SmallInteger,
         ForeignKey("admin_user_creation_modes.id"),

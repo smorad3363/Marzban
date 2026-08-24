@@ -16,6 +16,7 @@ from app.db.models import (
     AdminReferralEvent,
     AdminSuspensionAdmin,
     AdminSuspensionEvent,
+    AdminUserCreationMode,
     AdminUserPlan,
     AdminUserPlanVersion,
     MarzhelpAccountingTransaction,
@@ -62,12 +63,21 @@ def managed_admin_response(
     capacity_used: int = 0,
     quota: AdminQuotaSummary | None = None,
     plan_category_ids: list[int] | None = None,
+    parent_username: str | None = None,
 ) -> ManagedAdmin:
     policy = (
         MarzhelpAdminPolicy.model_validate(settings)
         if settings is not None
         else MarzhelpAdminPolicy()
     )
+    creation_mode = "PLAN_ONLY"
+    if settings is not None:
+        creation_mode = (
+            db.query(AdminUserCreationMode.code)
+            .filter(AdminUserCreationMode.id == settings.user_creation_mode_id)
+            .scalar()
+            or "PLAN_ONLY"
+        )
     return ManagedAdmin(
         id=dbadmin.id,
         username=dbadmin.username,
@@ -77,6 +87,21 @@ def managed_admin_response(
         external_api_enabled=bool(dbadmin.external_api_enabled),
         telegram_id=dbadmin.telegram_id,
         phone=dbadmin.phone,
+        dashboard_theme=dbadmin.dashboard_theme or "heisenberg",
+        logo_url=dbadmin.logo_url,
+        account_status=(
+            {value: code for code, value in admin_hierarchy.ACCOUNT_STATUS_IDS.items()}.get(
+                settings.account_status_id if settings is not None else 1,
+                admin_hierarchy.ACTIVE,
+            )
+        ),
+        parent_username=parent_username,
+        active_owner_freeze_event_id=(
+            settings.suspension_event_id if settings is not None else None
+        ),
+        trial_quota=int(settings.trial_quota or 0) if settings else 0,
+        trial_quota_limit=int(settings.trial_quota_limit or 0) if settings else 0,
+        trials_used=int(settings.trials_used or 0) if settings else 0,
         discord_webhook=dbadmin.discord_webhook,
         users_usage=dbadmin.users_usage,
         user_count=user_count,
@@ -90,6 +115,25 @@ def managed_admin_response(
             admin_plans.admin_category_ids(db, dbadmin.id)
             if plan_category_ids is None
             else plan_category_ids
+        ),
+        user_creation_mode=creation_mode,
+        can_manage_plans=bool(settings.can_manage_plans) if settings else False,
+        can_create_admins=bool(settings.can_create_admins) if settings else False,
+        can_delegate_admin_creation=(
+            bool(settings.can_delegate_admin_creation) if settings else False
+        ),
+        can_create_allocated_children=(
+            bool(settings.can_create_allocated_children) if settings else True
+        ),
+        admin_creation_limit=settings.admin_creation_limit if settings else 0,
+        admin_creations_used=int(settings.admin_creations_used or 0) if settings else 0,
+        delegated_admin_creation_limit=(
+            int(settings.delegated_admin_creation_limit or 0) if settings else 0
+        ),
+        admin_creation_remaining=(
+            admin_hierarchy.admin_creation_remaining(db, dbadmin, settings)
+            if settings is not None
+            else 0
         ),
     )
 
@@ -175,11 +219,6 @@ def create_admin(
     admin: Admin = Depends(Admin.check_sudo_admin),
 ):
     """Create a new admin if the current admin has sudo privileges."""
-    if not new_admin.phone:
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "admin_phone_required", "message": "Phone is required for new Admins"},
-        )
     if new_admin.is_sudo:
         raise HTTPException(
             status_code=403,
@@ -361,10 +400,18 @@ def get_admin_capabilities(
     """Return effective inbound, device-limit, and weighted-capacity rules."""
 
     dbadmin = crud.get_admin(db, admin.username)
-    if admin.is_sudo or dbadmin is None:
+    if admin.is_sudo or (dbadmin is not None and admin_hierarchy.is_owner(db, dbadmin)):
         return AdminCapabilities(
             allowed_subscription_modes=list(SubscriptionMode),
             view_full_client_ip=True,
+            can_manage_admins=True,
+            can_create_admins=True,
+            can_delegate_admin_creation=True,
+            admin_creation_remaining=None,
+            allowed_child_roles=[admin_hierarchy.SUPER_ADMIN, admin_hierarchy.ADMIN],
+            allowed_child_billing_modes=admin_hierarchy.allowed_child_billing_modes(db, dbadmin),
+            allowed_child_user_creation_modes=[admin_hierarchy.PLAN_ONLY, admin_hierarchy.FREE_FORM],
+            can_delegate_plan_management=True,
         )
     settings = db.get(MarzhelpAdminSettings, dbadmin.id)
     if settings is None:
@@ -384,6 +431,24 @@ def get_admin_capabilities(
         quota=AdminQuotaSummary.model_validate(
             marzhelp_policy.quota_summary(db, dbadmin.id)
         ),
+        can_manage_admins=admin_hierarchy.can_manage_children(db, dbadmin),
+        can_create_admins=bool(settings.can_create_admins),
+        can_delegate_admin_creation=bool(settings.can_delegate_admin_creation),
+        can_create_allocated_children=bool(settings.can_create_allocated_children),
+        admin_creation_limit=settings.admin_creation_limit,
+        admin_creations_used=int(settings.admin_creations_used or 0),
+        delegated_admin_creation_limit=int(settings.delegated_admin_creation_limit or 0),
+        admin_creation_remaining=admin_hierarchy.admin_creation_remaining(db, dbadmin, settings),
+        allowed_child_roles=admin_hierarchy.allowed_child_roles(dbadmin),
+        allowed_child_billing_modes=admin_hierarchy.allowed_child_billing_modes(
+            db, dbadmin, settings
+        ),
+        allowed_child_user_creation_modes=(
+            [admin_hierarchy.PLAN_ONLY, admin_hierarchy.FREE_FORM]
+            if settings.user_creation_mode_id == admin_hierarchy.USER_CREATION_MODE_IDS[admin_hierarchy.FREE_FORM]
+            else [admin_hierarchy.PLAN_ONLY]
+        ),
+        can_delegate_plan_management=bool(settings.can_manage_plans),
     )
 
 
@@ -420,6 +485,9 @@ def get_managed_admins(
     offset: int = 0,
     limit: int = 20,
     username: Optional[str] = None,
+    role: Optional[str] = None,
+    billing_mode: Optional[BillingMode] = None,
+    account_status: Optional[str] = None,
     db: Session = Depends(get_db),
     admin: Admin = Depends(Admin.check_admin_manager),
 ):
@@ -435,7 +503,14 @@ def get_managed_admins(
         else None
     )
     dbadmins, total = crud.get_admins_with_count(
-        db, offset, limit, username, scope_admin_id=scope_admin_id
+        db,
+        offset,
+        limit,
+        username,
+        scope_admin_id=scope_admin_id,
+        role=role,
+        billing_mode=billing_mode.value if billing_mode else None,
+        account_status=account_status,
     )
     settings_by_admin = (
         {
@@ -474,6 +549,12 @@ def get_managed_admins(
         db,
         [item.id for item in dbadmins],
     )
+    parent_ids = {item.parent_admin_id for item in dbadmins if item.parent_admin_id is not None}
+    parent_names = (
+        dict(db.query(DBAdmin.id, DBAdmin.username).filter(DBAdmin.id.in_(parent_ids)).all())
+        if parent_ids
+        else {}
+    )
     return ManagedAdminList(
         admins=[
             managed_admin_response(
@@ -484,6 +565,7 @@ def get_managed_admins(
                 int(capacity_usage.get(item.id, 0)),
                 quota_by_admin[item.id],
                 category_ids_by_admin[item.id],
+                parent_names.get(item.parent_admin_id),
             )
             for item in dbadmins
         ],
@@ -548,36 +630,74 @@ def create_managed_admin(
         )
     actor = crud.get_admin(db, admin.username)
     requested_mode = new_admin.policy.billing_mode
-    if (
-        actor is not None
-        and admin_hierarchy.hierarchy_enabled(db)
-        and requested_mode != BillingMode.LEGACY_COMPAT
-        and not admin_hierarchy.is_owner(db, actor)
-    ):
+    hierarchy_on = actor is not None and admin_hierarchy.hierarchy_enabled(db)
+    if hierarchy_on and requested_mode == BillingMode.LEGACY_COMPAT:
         raise HTTPException(
-            status_code=403,
-            detail={"code": "owner_required", "message": "Only Owner can assign billing modes"},
+            status_code=400,
+            detail={
+                "code": "billing_mode_required",
+                "message": "Select a commercial billing mode for the new Admin",
+            },
         )
     try:
         dbadmin = crud.create_admin(db, new_admin, commit=False)
-        hierarchy_on = actor is not None and admin_hierarchy.hierarchy_enabled(db)
         policy = new_admin.policy
         initial_credit = (
             policy.device_capacity_limit
             if requested_mode == BillingMode.SEAT_CREDIT
+            else policy.max_users
+            if requested_mode == BillingMode.USER_CREDIT
             else policy.total_traffic
         ) if hierarchy_on else None
+        if hierarchy_on and requested_mode == BillingMode.USER_CREDIT and not initial_credit:
+            raise admin_hierarchy.HierarchyError(
+                "user_credit_limit_required",
+                "Unlimited traffic Admin requires a positive account limit",
+            )
+        if hierarchy_on and actor is not None and not admin_hierarchy.is_owner(db, actor):
+            parent_settings = db.get(MarzhelpAdminSettings, actor.id)
+            parent_available = (
+                admin_hierarchy.available_credit(db, parent_settings)
+                if parent_settings is not None
+                else 0
+            )
+            if initial_credit is None and parent_available is not None:
+                raise admin_hierarchy.HierarchyError(
+                    "unlimited_child_credit_forbidden",
+                    "A finite parent cannot create an unlimited-credit child",
+                )
         initial_transfer = None
         if hierarchy_on:
             policy = policy.model_copy(update={
-                "total_traffic": 0 if requested_mode != BillingMode.SEAT_CREDIT else policy.total_traffic,
-                "device_capacity_limit": 0 if requested_mode == BillingMode.SEAT_CREDIT else policy.device_capacity_limit,
+                "total_traffic": (
+                    0
+                    if requested_mode in {BillingMode.USED_TRAFFIC, BillingMode.ALLOCATED_TRAFFIC}
+                    else policy.total_traffic
+                ),
+                "device_capacity_limit": (
+                    0 if requested_mode == BillingMode.SEAT_CREDIT else policy.device_capacity_limit
+                ),
+                "max_users": 0 if requested_mode == BillingMode.USER_CREDIT else policy.max_users,
             })
         settings = crud.upsert_marzhelp_admin_policy(
             db, dbadmin.id, policy, commit=False
         )
-        settings.billing_mode = requested_mode.value
+        if not hierarchy_on:
+            settings.billing_mode = requested_mode.value
         if hierarchy_on:
+            admin_hierarchy.configure_new_child_admin_creation(
+                db,
+                actor=actor,
+                parent=actor,
+                child=dbadmin,
+                child_settings=settings,
+                child_role=new_admin.role or admin_hierarchy.ADMIN,
+                child_billing_mode=requested_mode,
+                can_create_admins=new_admin.can_create_admins,
+                can_delegate_admin_creation=new_admin.can_delegate_admin_creation,
+                can_create_allocated_children=new_admin.can_create_allocated_children,
+                admin_creation_limit=new_admin.admin_creation_limit,
+            )
             admin_hierarchy.attach_new_child(
                 db,
                 actor=actor,
@@ -585,6 +705,14 @@ def create_managed_admin(
                 child=dbadmin,
                 child_role=new_admin.role or admin_hierarchy.ADMIN,
                 commit=False,
+            )
+            admin_hierarchy.configure_child_user_creation_access(
+                db,
+                actor=actor,
+                parent=actor,
+                child_settings=settings,
+                mode=new_admin.user_creation_mode,
+                can_manage_plans=new_admin.can_manage_plans,
             )
             admin_plans.replace_admin_categories(
                 db,
@@ -718,12 +846,117 @@ def modify_managed_admin(
     dbadmin = crud.update_admin(db, dbadmin, modified_admin, commit=False)
     policy = modified_admin.policy
     if admin_hierarchy.hierarchy_enabled(db) and current_settings is not None:
+        current_mode = BillingMode(current_settings.billing_mode or BillingMode.LEGACY_COMPAT.value)
         policy = policy.model_copy(
             update={
                 "total_traffic": current_settings.total_traffic,
+                "billing_mode": current_mode,
+                "device_capacity_limit": (
+                    current_settings.device_capacity_limit
+                    if current_mode == BillingMode.SEAT_CREDIT
+                    else policy.device_capacity_limit
+                ),
+                "max_users": (
+                    current_settings.max_users
+                    if current_mode == BillingMode.USER_CREDIT
+                    else policy.max_users
+                ),
             }
         )
     settings = crud.upsert_marzhelp_admin_policy(db, dbadmin.id, policy, commit=False)
+    if (
+        actor is not None
+        and admin_hierarchy.hierarchy_enabled(db)
+        and (
+            modified_admin.user_creation_mode is not None
+            or modified_admin.can_manage_plans is not None
+        )
+    ):
+        requested_mode = modified_admin.user_creation_mode or (
+            db.query(AdminUserCreationMode.code)
+            .filter(AdminUserCreationMode.id == settings.user_creation_mode_id)
+            .scalar()
+            or admin_hierarchy.PLAN_ONLY
+        )
+        requested_plan_management = (
+            bool(modified_admin.can_manage_plans)
+            if modified_admin.can_manage_plans is not None
+            else bool(settings.can_manage_plans)
+        )
+        current_mode = (
+            db.query(AdminUserCreationMode.code)
+            .filter(AdminUserCreationMode.id == current_settings.user_creation_mode_id)
+            .scalar()
+            if current_settings is not None
+            else admin_hierarchy.PLAN_ONLY
+        )
+        if actor.id == dbadmin.id and not admin_hierarchy.is_owner(db, actor):
+            if requested_mode != current_mode or requested_plan_management != bool(current_settings.can_manage_plans):
+                db.rollback()
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "self_user_creation_access_forbidden",
+                        "message": "User creation access is controlled by the parent",
+                    },
+                )
+        else:
+            try:
+                admin_hierarchy.configure_child_user_creation_access(
+                    db,
+                    actor=actor,
+                    parent=actor,
+                    child_settings=settings,
+                    mode=requested_mode,
+                    can_manage_plans=requested_plan_management,
+                )
+            except admin_hierarchy.HierarchyError as exc:
+                db.rollback()
+                raise HTTPException(status_code=400, detail={"code": exc.code, "message": str(exc)})
+    if (
+        actor is not None
+        and admin_hierarchy.hierarchy_enabled(db)
+        and not admin_hierarchy.is_owner(db, dbadmin)
+    ):
+        requested_creation_policy = (
+            bool(modified_admin.can_create_admins),
+            bool(modified_admin.can_delegate_admin_creation),
+            bool(modified_admin.can_create_allocated_children),
+            modified_admin.admin_creation_limit,
+        )
+        current_creation_policy = (
+            bool(current_settings.can_create_admins),
+            bool(current_settings.can_delegate_admin_creation),
+            bool(current_settings.can_create_allocated_children),
+            current_settings.admin_creation_limit,
+        ) if current_settings is not None else (False, False, True, 0)
+        if actor.id == dbadmin.id and not admin_hierarchy.is_owner(db, actor):
+            if requested_creation_policy != current_creation_policy:
+                db.rollback()
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "self_permission_change_forbidden",
+                        "message": "Admin creation permissions are controlled by the parent",
+                    },
+                )
+        else:
+            try:
+                settings = admin_hierarchy.update_child_admin_creation(
+                    db,
+                    actor=actor,
+                    child=dbadmin,
+                    can_create_admins=modified_admin.can_create_admins,
+                    can_delegate_admin_creation=modified_admin.can_delegate_admin_creation,
+                    can_create_allocated_children=modified_admin.can_create_allocated_children,
+                    admin_creation_limit=modified_admin.admin_creation_limit,
+                )
+            except admin_hierarchy.HierarchyError as exc:
+                db.rollback()
+                raise HTTPException(
+                    status_code=400,
+                    detail={"code": exc.code, "message": str(exc)},
+                )
     if (
         previous_calculation_mode is not None
         and previous_calculation_mode != policy.calculate_volume

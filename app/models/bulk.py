@@ -79,7 +79,7 @@ class BulkAdminJobCreateRequest(BulkAdminPreviewRequest):
     operation_id: str = Field(min_length=8, max_length=96)
     operation: BulkAdminOperation
     amount: int = Field(ge=1)
-    note: str = Field(min_length=1, max_length=512)
+    note: Optional[str] = Field(default=None, max_length=512)
 
 
 class BulkJobExecuteRequest(BaseModel):

@@ -5,7 +5,7 @@ export type SubscriptionMode =
   | "unlimited_traffic_unlimited_devices";
 
 export type AdminPolicy = {
-  billing_mode: "LEGACY_COMPAT" | "SEAT_CREDIT" | "USED_TRAFFIC" | "ALLOCATED_TRAFFIC";
+  billing_mode: "LEGACY_COMPAT" | "SEAT_CREDIT" | "USED_TRAFFIC" | "ALLOCATED_TRAFFIC" | "USER_CREDIT";
   total_traffic: number | null;
   expiry_date: string | null;
   user_limit: number | null;
@@ -44,6 +44,23 @@ export type ManagedAdmin = {
   policy: AdminPolicy;
   quota: AdminQuotaSummary;
   plan_category_ids: number[];
+  user_creation_mode: "FREE_FORM" | "PLAN_ONLY";
+  can_manage_plans: boolean;
+  dashboard_theme: "heisenberg" | "black_gold";
+  logo_url: string | null;
+  account_status: "ACTIVE" | "SUSPENDED" | "DISABLED";
+  parent_username: string | null;
+  active_owner_freeze_event_id: number | null;
+  trial_quota: number;
+  trial_quota_limit: number;
+  trials_used: number;
+  can_create_admins: boolean;
+  can_delegate_admin_creation: boolean;
+  can_create_allocated_children: boolean;
+  admin_creation_limit: number | null;
+  admin_creations_used: number;
+  delegated_admin_creation_limit: number;
+  admin_creation_remaining: number | null;
 };
 
 export type AdminQuotaSummary = {
@@ -71,7 +88,9 @@ export type ManagedAdminList = {
 
 export type ManagedAdminPayload = Omit<
   ManagedAdmin,
-  "id" | "parent_admin_id" | "external_api_enabled" | "users_usage" | "user_count" | "capacity_used" | "quota"
+  "id" | "parent_admin_id" | "external_api_enabled" | "users_usage" | "user_count" | "capacity_used" | "quota" |
+  "dashboard_theme" | "logo_url" | "admin_creations_used" | "delegated_admin_creation_limit" | "admin_creation_remaining"
+  | "account_status" | "parent_username" | "active_owner_freeze_event_id" | "trial_quota" | "trial_quota_limit" | "trials_used"
 > & {
   password?: string;
 };
@@ -95,6 +114,14 @@ export type HierarchyAdminNode = {
   referral_referrer_admin_id: number | null;
   referral_rate_bps: number | null;
   active_owner_freeze_event_id: number | null;
+  billing_mode: AdminPolicy["billing_mode"];
+  can_create_admins: boolean;
+  can_delegate_admin_creation: boolean;
+  can_create_allocated_children: boolean;
+  admin_creation_limit: number | null;
+  admin_creations_used: number;
+  delegated_admin_creation_limit: number;
+  admin_creation_remaining: number | null;
   children: HierarchyAdminNode[];
 };
 
@@ -113,11 +140,18 @@ export type AccountSummary = {
   available_traffic: number | null;
   renewal_enabled: boolean;
   renewal_remaining: number | null;
-  billing_mode: "LEGACY_COMPAT" | "SEAT_CREDIT" | "USED_TRAFFIC" | "ALLOCATED_TRAFFIC";
+  billing_mode: "LEGACY_COMPAT" | "SEAT_CREDIT" | "USED_TRAFFIC" | "ALLOCATED_TRAFFIC" | "USER_CREDIT";
   user_creation_mode: "FREE_FORM" | "PLAN_ONLY";
   can_manage_plans: boolean;
   trial_quota: number;
   trials_used: number;
+  can_create_admins: boolean;
+  can_delegate_admin_creation: boolean;
+  can_create_allocated_children: boolean;
+  admin_creation_limit: number | null;
+  admin_creations_used: number;
+  delegated_admin_creation_limit: number;
+  admin_creation_remaining: number | null;
 };
 
 export type UserPlanVersion = {
@@ -181,4 +215,21 @@ export type AdminCapabilities = {
   capacity_limit: number | null;
   capacity_remaining: number | null;
   quota: AdminQuotaSummary;
+  can_manage_admins: boolean;
+  can_create_admins: boolean;
+  can_delegate_admin_creation: boolean;
+  can_create_allocated_children: boolean;
+  admin_creation_limit: number | null;
+  admin_creations_used: number;
+  delegated_admin_creation_limit: number;
+  admin_creation_remaining: number | null;
+  allowed_child_roles: Array<"SUPER_ADMIN" | "ADMIN">;
+  allowed_child_billing_modes: AdminPolicy["billing_mode"][];
+  allowed_child_user_creation_modes: Array<"FREE_FORM" | "PLAN_ONLY">;
+  can_delegate_plan_management: boolean;
+};
+
+export type BrandingResponse = {
+  dashboard_theme: "heisenberg" | "black_gold";
+  logo_url: string | null;
 };

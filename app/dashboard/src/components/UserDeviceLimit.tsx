@@ -131,7 +131,7 @@ export const UserDeviceLimit: FC<{ user: User }> = ({ user }) => {
 
       <Modal isOpen={disclosure.isOpen} onClose={disclosure.onClose} size="4xl" scrollBehavior="inside">
         <ModalOverlay bg="rgba(0,0,0,.76)" backdropFilter="blur(5px)" />
-        <ModalContent mx={3} maxH="calc(100dvh - 24px)" dir={i18n.dir()} bg="#0c1712" color="gray.100" borderWidth="1px" borderColor="#345346" borderRadius={{ base: "14px", md: "18px" }} boxShadow="0 24px 70px rgba(0,0,0,.58)">
+        <ModalContent mx={3} my={3} maxH="calc(100dvh - 24px)" dir={i18n.dir()} bg="#0c1712" color="gray.100" borderWidth="1px" borderColor="#345346" borderRadius={{ base: "14px", md: "18px" }} boxShadow="0 24px 70px rgba(0,0,0,.58)">
           <ModalHeader pe={14}>
             <HStack align="start">
               <Box p={2.5} borderRadius="11px" bg={hasPenalty ? "rgba(234,179,8,.12)" : "rgba(34,197,94,.1)"} color={hasPenalty ? "yellow.200" : "green.200"}>{hasPenalty ? <WarningIcon /> : <SafeIcon />}</Box>

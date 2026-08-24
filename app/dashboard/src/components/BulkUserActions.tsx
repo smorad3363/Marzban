@@ -606,7 +606,7 @@ const ExpiredCleanupDialog: FC<ExpiredCleanupDialogProps> = ({
     >
       <ModalOverlay bg="blackAlpha.700" backdropFilter="blur(5px)" />
       <ModalContent dir={i18n.dir()} mx={3} maxW="500px">
-        <ModalHeader pe={12}>{trialOnly ? "پاک‌سازی Trialهای منقضی" : t("usersTable.cleanupExpired")}</ModalHeader>
+        <ModalHeader pe={12}>{trialOnly ? "پاک‌سازی اکانت‌های تست منقضی" : t("usersTable.cleanupExpired")}</ModalHeader>
         <ModalCloseButton isDisabled={isDeleting} />
         <ModalBody>
           <Stack spacing={4}>
@@ -734,7 +734,7 @@ export const BulkUserActions: FC<BulkUserActionsProps> = ({
             leftIcon={<TrashIcon width="17px" aria-hidden="true" />}
             onClick={trialCleanupDialog.onOpen}
           >
-            پاک‌سازی Trial
+            پاک‌سازی اکانت تست
           </Button>
           {userData.is_sudo && (
             <Button

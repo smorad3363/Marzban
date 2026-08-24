@@ -1,25 +1,24 @@
 import {
   Alert, AlertDialog, AlertDialogBody, AlertDialogContent, AlertDialogFooter,
   AlertDialogHeader, AlertDialogOverlay, AlertIcon, Badge, Box, Button, Card,
-  Divider, FormControl, FormHelperText, FormLabel, HStack, IconButton, Input,
+  Checkbox, Collapse, Divider, FormControl, FormHelperText, FormLabel, HStack, IconButton, Input,
   InputGroup, InputLeftElement, Select, SimpleGrid, Skeleton, Stack, Table,
-  TableContainer, Tbody, Td, Text, Th, Thead, Tr, VStack, chakra,
+  TableContainer, Tbody, Td, Text, Textarea, Th, Thead, Tr, VStack, chakra,
   useDisclosure, useToast,
 } from "@chakra-ui/react";
 import {
-  MagnifyingGlassIcon, PencilSquareIcon, PlusIcon, ShieldCheckIcon,
+  FunnelIcon, MagnifyingGlassIcon, PencilSquareIcon, PlusIcon,
   TrashIcon, UserGroupIcon,
 } from "@heroicons/react/24/outline";
 import { AdminFormDrawer } from "components/AdminFormDrawer";
-import { AdminHierarchyPanel } from "components/AdminHierarchyPanel";
 import { AppShell } from "components/AppShell";
 import useGetUser from "hooks/useGetUser";
 import { FC, Fragment, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "react-query";
-import { Navigate } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { fetch } from "service/http";
-import { ManagedAdmin, ManagedAdminList } from "types/Admin";
+import { AdminCapabilities, ManagedAdmin, ManagedAdminList } from "types/Admin";
 import { localizedApiError } from "utils/apiError";
 import { formatBytes } from "utils/formatByte";
 
@@ -28,15 +27,21 @@ const AddIcon = chakra(PlusIcon, { baseStyle: { w: 4, h: 4 } });
 const EditIcon = chakra(PencilSquareIcon, { baseStyle: { w: 4, h: 4 } });
 const RemoveIcon = chakra(TrashIcon, { baseStyle: { w: 4, h: 4 } });
 const AdminsIcon = chakra(UserGroupIcon, { baseStyle: { w: 5, h: 5 } });
-const SudoIcon = chakra(ShieldCheckIcon, { baseStyle: { w: 5, h: 5 } });
+const FilterIcon = chakra(FunnelIcon, { baseStyle: { w: 4, h: 4 } });
 const PAGE_SIZE = 20;
+const GIB = 1024 ** 3;
 
 const billingModeLabels: Record<string, string> = {
-  LEGACY_COMPAT: "حالت قدیمی",
-  SEAT_CREDIT: "اعتبار دستگاه",
+  LEGACY_COMPAT: "قدیمی (فقط مهاجرت)",
+  SEAT_CREDIT: "ظرفیت دستگاه قدیمی",
   USED_TRAFFIC: "مصرف واقعی",
-  ALLOCATED_TRAFFIC: "حجم اختصاصی",
+  ALLOCATED_TRAFFIC: "حجم ساخته‌شده",
+  USER_CREDIT: "حجم نامحدود · سقف اکانت",
 };
+
+const creditResource = (mode: string) => mode === "USER_CREDIT" ? "user" : mode === "SEAT_CREDIT" ? "seat" : "traffic";
+const creditUnit = (mode: string) => mode === "USER_CREDIT" ? "اکانت" : mode === "SEAT_CREDIT" ? "دستگاه" : "گیگابایت";
+const apiCreditAmount = (mode: string, value: number) => creditResource(mode) === "traffic" ? Math.round(value * GIB) : Math.round(value);
 
 const CreditRemaining: FC<{ admin: ManagedAdmin }> = ({ admin }) => {
   const { t } = useTranslation();
@@ -48,6 +53,8 @@ const CreditRemaining: FC<{ admin: ManagedAdmin }> = ({ admin }) => {
           ? t("unlimited")
           : admin.policy.billing_mode === "SEAT_CREDIT"
             ? `${quota.credit_remaining} دستگاه`
+            : admin.policy.billing_mode === "USER_CREDIT"
+              ? `${quota.credit_remaining} اکانت`
             : formatBytes(quota.credit_remaining)}
       </Text>
       {quota.credit_usage_percent !== null && (
@@ -64,17 +71,42 @@ export const Admins: FC = () => {
   const { t } = useTranslation();
   const toast = useToast();
   const queryClient = useQueryClient();
-  const { userData, getUserIsPending } = useGetUser();
+  const { userData, getUserIsPending, getUserIsSuccess } = useGetUser();
   const formDisclosure = useDisclosure();
   const deleteDisclosure = useDisclosure();
+  const filtersDisclosure = useDisclosure();
+  const freezeDisclosure = useDisclosure();
   const cancelRef = useRef<HTMLButtonElement>(null);
   const [selected, setSelected] = useState<ManagedAdmin | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
+  const [roleFilter, setRoleFilter] = useState("");
+  const [billingFilter, setBillingFilter] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
   const [expandedUsername, setExpandedUsername] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [bulkAmount, setBulkAmount] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [freezeTarget, setFreezeTarget] = useState<ManagedAdmin | null>(null);
+  const [freezeReason, setFreezeReason] = useState("");
   const [deleteStrategy, setDeleteStrategy] = useState<"delete_users" | "disable_users" | "keep_users">("keep_users");
-  const canManage = userData.is_sudo || userData.role === "OWNER" || userData.role === "SUPER_ADMIN";
+  const capabilities = useQuery<AdminCapabilities, Error>(
+    ["admin-capabilities", userData.username],
+    () => fetch("/admin/capabilities"),
+    { enabled: getUserIsSuccess }
+  );
+  const canManage = Boolean(capabilities.data?.can_manage_admins);
+  const canCreate = Boolean(capabilities.data?.can_create_admins);
+
+  useEffect(() => {
+    if (canCreate && searchParams.get("create") === "1") {
+      setSelected(null);
+      formDisclosure.onOpen();
+      setSearchParams({}, { replace: true });
+    }
+  }, [canCreate, formDisclosure, searchParams, setSearchParams]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -85,8 +117,18 @@ export const Admins: FC = () => {
   }, [searchInput]);
 
   const query = useQuery<ManagedAdminList, Error>(
-    ["admin-management", page, search],
-    () => fetch(`/admin-management?offset=${page * PAGE_SIZE}&limit=${PAGE_SIZE}&username=${encodeURIComponent(search)}`),
+    ["admin-management", page, search, roleFilter, billingFilter, statusFilter],
+    () => {
+      const params = new URLSearchParams({
+        offset: String(page * PAGE_SIZE),
+        limit: String(PAGE_SIZE),
+        username: search,
+      });
+      if (roleFilter) params.set("role", roleFilter);
+      if (billingFilter) params.set("billing_mode", billingFilter);
+      if (statusFilter) params.set("account_status", statusFilter);
+      return fetch(`/admin-management?${params.toString()}`);
+    },
     { keepPreviousData: true, enabled: canManage, refetchInterval: 15000 }
   );
 
@@ -105,16 +147,75 @@ export const Admins: FC = () => {
     }
   );
 
-  if (!getUserIsPending && !canManage) return <Navigate to="/" replace />;
+  const refreshAdminData = () => {
+    queryClient.invalidateQueries("admin-management");
+    queryClient.invalidateQueries("admin-hierarchy-tree");
+    queryClient.invalidateQueries("account-summary");
+  };
+
+  const quickAction = useMutation(
+    ({ item, operation, reason }: { item: ManagedAdmin; operation: "freeze" | "unfreeze" | "trial-reset"; reason?: string }) => {
+      if (operation === "trial-reset") {
+        return fetch(`/admin-management/${item.username}/trial-quota/reset`, {
+          method: "POST",
+          body: { idempotency_key: `trial-reset-${item.id}-${crypto.randomUUID()}`, note: "بازنشانی سهمیه تست توسط ادمین بالاسری" },
+        });
+      }
+      return fetch(`/admin-management/${item.username}/${operation}`, {
+        method: "POST",
+        body: operation === "freeze"
+          ? { reason_id: 1, idempotency_key: `freeze-${item.id}-${crypto.randomUUID()}`, note: reason }
+          : { idempotency_key: `unfreeze-${item.id}-${crypto.randomUUID()}` },
+      });
+    },
+    {
+      onSuccess: () => {
+        refreshAdminData();
+        freezeDisclosure.onClose();
+        setFreezeReason("");
+        setFreezeTarget(null);
+        toast({ title: "عملیات انجام شد", status: "success", duration: 2500 });
+      },
+      onError: (error) => { toast({ title: "عملیات انجام نشد", description: localizedApiError(error), status: "error", duration: 5000 }); },
+    }
+  );
+
+  if (!getUserIsPending && !capabilities.isLoading && !canManage) return <Navigate to="/" replace />;
 
   const admins = query.data?.admins || [];
   const total = query.data?.total || 0;
-  const managerCount = admins.filter((item) => item.role === "OWNER" || item.role === "SUPER_ADMIN").length;
-  const restrictedCount = admins.filter((item) => Object.entries(item.policy).some(([key, value]) => key.startsWith("prevent_") && value)).length;
+  const selectedAdmins = admins.filter((item) => selectedIds.includes(item.id));
+  const selectedResource = selectedAdmins[0] ? creditResource(selectedAdmins[0].policy.billing_mode) : null;
+  const mixedSelection = selectedAdmins.some((item) => creditResource(item.policy.billing_mode) !== selectedResource);
+  const activeFilterCount = [roleFilter, billingFilter, statusFilter].filter(Boolean).length;
   const canEdit = (item: ManagedAdmin) => item.role !== "OWNER" || item.username === userData.username;
+  const canAct = (item: ManagedAdmin) => item.role !== "OWNER" && item.username !== userData.username;
   const openCreate = () => { setSelected(null); formDisclosure.onOpen(); };
   const openEdit = (item: ManagedAdmin) => { setSelected(item); formDisclosure.onOpen(); };
   const openDelete = (item: ManagedAdmin) => { setSelected(item); setDeleteStrategy("keep_users"); deleteDisclosure.onOpen(); };
+  const openFreeze = (item: ManagedAdmin) => { setFreezeTarget(item); setFreezeReason(""); freezeDisclosure.onOpen(); };
+  const clearFilters = () => { setRoleFilter(""); setBillingFilter(""); setStatusFilter(""); setPage(0); };
+  const runBulk = async (operation: "grant_credit" | "reclaim_credit") => {
+    const numeric = Number(bulkAmount);
+    if (!selectedAdmins.length || mixedSelection || !Number.isFinite(numeric) || numeric <= 0) return;
+    setBulkBusy(true);
+    try {
+      const operationId = `bulk-admin-${crypto.randomUUID()}`;
+      await fetch("/admin-management/bulk-credit/jobs", {
+        method: "POST",
+        body: { operation_id: operationId, operation, selected_admin_ids: selectedIds, amount: apiCreditAmount(selectedAdmins[0].policy.billing_mode, numeric) },
+      });
+      let result = await fetch<{ has_more: boolean; success: number; failed: number; skipped: number }>(`/admin-management/bulk-credit/jobs/${operationId}/execute`, { method: "POST", body: { chunk_size: 100 } });
+      while (result.has_more) result = await fetch(`/admin-management/bulk-credit/jobs/${operationId}/execute`, { method: "POST", body: { chunk_size: 100 } });
+      refreshAdminData();
+      setBulkAmount("");
+      toast({ title: `${result.success} انجام شد · ${result.failed + result.skipped} انجام نشد`, status: result.failed ? "warning" : "success" });
+    } catch (error) {
+      toast({ title: "عملیات گروهی انجام نشد", description: localizedApiError(error), status: "error" });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
 
   return (
     <AppShell>
@@ -123,43 +224,43 @@ export const Admins: FC = () => {
           <Text as="h1" fontSize={{ base: "2xl", md: "3xl" }} fontWeight="800" letterSpacing="-0.035em">{t("admins.title")}</Text>
           <Text color="gray.300" mt={1} maxW="650px">{t("admins.subtitle")}</Text>
         </Box>
-        <Button minH="44px" flexShrink={0} colorScheme="primary" color="#07130e" leftIcon={<AddIcon />} onClick={openCreate}>{t("admins.create")}</Button>
+        {canCreate && <Button minH="40px" flexShrink={0} colorScheme="primary" color="#07130e" leftIcon={<AddIcon />} onClick={openCreate}>{t("admins.create")}</Button>}
       </Stack>
 
-      <Card mb={5} p={{ base: 3, md: 4 }} bg="#111d17" color="gray.100" borderWidth="1px" borderColor="#33483b" borderRadius="16px" boxShadow="panel">
-        <SimpleGrid columns={{ base: 1, sm: 3 }} gap={{ base: 2, sm: 0 }}>
-          {[
-            [t("admins.totalAdmins"), total, <AdminsIcon key="admins" />],
-            [t("admins.managerAdmins"), managerCount, <SudoIcon key="managers" />],
-            [t("admins.restrictedAdmins"), restrictedCount, <ShieldCheckIcon key="restricted" width={20} />],
-          ].map(([label, value, icon], index) => (
-            <HStack key={String(label)} px={{ base: 2, sm: 4 }} py={2} borderInlineStartWidth={{ base: 0, sm: index ? "1px" : 0 }} borderColor="#33483b">
-              <Box color="primary.300" p={2} bg="rgba(72, 213, 139, .10)" borderRadius="10px">{icon}</Box>
-              <Box>
-                <Text color="gray.400" fontSize="xs" fontWeight="650">{label}</Text>
-                <Text color="white" mt={0.5} fontSize="xl" fontWeight="800">{value}</Text>
-              </Box>
-            </HStack>
-          ))}
-        </SimpleGrid>
-      </Card>
-
-      <AdminHierarchyPanel />
-
       <Card variant="outline" bg="#111d17" color="gray.100" borderRadius={{ base: "16px", md: "20px" }} borderColor="#33483b" boxShadow="panel" overflow="hidden">
-        <Stack direction={{ base: "column", md: "row" }} p={4} justify="space-between" align={{ md: "center" }} borderBottomWidth="1px" borderColor="#33483b" gap={3}>
+        <Stack direction={{ base: "column", md: "row" }} p={{ base: 3, md: 4 }} justify="space-between" align={{ md: "center" }} borderBottomWidth="1px" borderColor="#33483b" gap={3}>
           <Box>
             <Text as="h2" fontWeight="800">فهرست ادمین‌ها</Text>
             <Text mt={1} fontSize="xs" color="gray.400">اطلاعات اصلی هر ادمین را می‌بینید. برای بقیه موارد، جزئیات را باز کنید.</Text>
           </Box>
-          <HStack w={{ base: "full", md: "auto" }} flexWrap="wrap">
+          <HStack w={{ base: "full", md: "auto" }}>
             <InputGroup flex="1" minW={{ base: "full", md: "260px" }} maxW={{ md: "360px" }}>
               <InputLeftElement pointerEvents="none" color="gray.400"><SearchIcon /></InputLeftElement>
               <Input value={searchInput} onChange={(e) => setSearchInput(e.target.value)} placeholder={t("admins.search")} />
             </InputGroup>
-            <Button size="sm" minH="40px" variant="outline" color="gray.200" borderColor="#475f50" _hover={{ bg: "whiteAlpha.100", borderColor: "primary.400" }} onClick={() => query.refetch()} isLoading={query.isFetching}>{t("refresh")}</Button>
+            <Button minH="40px" variant="outline" leftIcon={<FilterIcon />} onClick={filtersDisclosure.onToggle} aria-expanded={filtersDisclosure.isOpen}>فیلترها{activeFilterCount ? ` (${activeFilterCount})` : ""}</Button>
           </HStack>
         </Stack>
+
+        <Collapse in={filtersDisclosure.isOpen} animateOpacity>
+          <SimpleGrid columns={{ base: 1, sm: 3 }} gap={2} p={3} bg="var(--panel-nested)" borderBottomWidth="1px" borderColor="var(--panel-border)">
+            <Select aria-label="فیلتر نقش" value={roleFilter} size="sm" onChange={(event) => { setRoleFilter(event.target.value); setPage(0); }}><option value="">همه نقش‌ها</option><option value="SUPER_ADMIN">سوپر ادمین</option><option value="ADMIN">ادمین</option></Select>
+            <Select aria-label="فیلتر نوع اعتبار" value={billingFilter} size="sm" onChange={(event) => { setBillingFilter(event.target.value); setPage(0); }}><option value="">همه اعتبارها</option><option value="USED_TRAFFIC">مصرف واقعی</option><option value="ALLOCATED_TRAFFIC">حجم ساخته‌شده</option><option value="USER_CREDIT">نامحدود با سقف اکانت</option></Select>
+            <HStack><Select aria-label="فیلتر وضعیت" value={statusFilter} size="sm" onChange={(event) => { setStatusFilter(event.target.value); setPage(0); }}><option value="">همه وضعیت‌ها</option><option value="ACTIVE">فعال</option><option value="SUSPENDED">فریز</option><option value="DISABLED">غیرفعال</option></Select>{activeFilterCount > 0 && <Button size="sm" variant="ghost" onClick={clearFilters}>پاک‌کردن</Button>}</HStack>
+          </SimpleGrid>
+        </Collapse>
+
+        {selectedAdmins.length > 0 && (
+          <HStack p={3} bg="rgba(212,175,55,.08)" borderBottomWidth="1px" borderColor="var(--panel-border)" flexWrap="wrap">
+            <Badge colorScheme={mixedSelection ? "red" : "yellow"}>{selectedAdmins.length} انتخاب</Badge>
+            {mixedSelection ? <Text fontSize="xs" color="red.200">برای عملیات گروهی، واحد اعتبار باید یکسان باشد.</Text> : <>
+              <Input type="number" min={1} step={selectedResource === "traffic" ? 0.1 : 1} value={bulkAmount} onChange={(event) => setBulkAmount(event.target.value)} placeholder={`مقدار (${creditUnit(selectedAdmins[0].policy.billing_mode)})`} maxW="180px" size="sm" />
+              <Button size="sm" colorScheme="primary" isLoading={bulkBusy} isDisabled={Number(bulkAmount) <= 0} onClick={() => runBulk("grant_credit")}>افزودن</Button>
+              <Button size="sm" variant="outline" isLoading={bulkBusy} isDisabled={Number(bulkAmount) <= 0} onClick={() => runBulk("reclaim_credit")}>پس‌گرفتن</Button>
+            </>}
+            <Button size="xs" ms="auto" variant="ghost" onClick={() => setSelectedIds([])}>لغو انتخاب</Button>
+          </HStack>
+        )}
 
         {query.isError && <Alert status="error" m={4} w="auto"><AlertIcon />{t("admins.loadFailed")}<Button ms="auto" size="sm" onClick={() => query.refetch()}>{t("retry")}</Button></Alert>}
 
@@ -179,13 +280,16 @@ export const Admins: FC = () => {
                 <Tbody>{admins.map((item) => (
                   <Fragment key={item.username}>
                     <Tr bg={expandedUsername === item.username ? "whiteAlpha.50" : undefined}>
-                      <Td><Text color="white" fontWeight="650" dir="ltr">{item.username}</Text><Text fontSize="xs" color="gray.400" dir="ltr">{item.phone || t("admins.noContact")}</Text></Td>
-                      <Td><Stack align="start" spacing={1}><Badge colorScheme={item.role === "OWNER" ? "purple" : item.role === "SUPER_ADMIN" ? "cyan" : "gray"}>{t(`admins.role.${item.role}`)}</Badge><Badge variant="outline">{billingModeLabels[item.policy.billing_mode] || item.policy.billing_mode}</Badge></Stack></Td>
+                      <Td><HStack align="start" spacing={2}>{canAct(item) && <Checkbox mt={1} aria-label={`انتخاب ${item.username}`} isChecked={selectedIds.includes(item.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...new Set([...current, item.id])] : current.filter((id) => id !== item.id))} />}<Box><HStack spacing={2}><Text color="white" fontWeight="700" dir="ltr">{item.username}</Text><Badge colorScheme={item.account_status === "ACTIVE" ? "green" : item.account_status === "SUSPENDED" ? "orange" : "red"}>{item.account_status === "ACTIVE" ? "فعال" : item.account_status === "SUSPENDED" ? "فریز" : "غیرفعال"}</Badge></HStack><Text fontSize="xs" color="gray.400">والد: <Text as="span" dir="ltr">{item.parent_username || "—"}</Text></Text></Box></HStack></Td>
+                      <Td><Stack align="start" spacing={1}><HStack><Badge colorScheme={item.role === "OWNER" ? "purple" : item.role === "SUPER_ADMIN" ? "cyan" : "gray"}>{t(`admins.role.${item.role}`)}</Badge><Badge variant="outline">{billingModeLabels[item.policy.billing_mode] || item.policy.billing_mode}</Badge></HStack><Text fontSize="xs" color="gray.400">{item.user_creation_mode === "PLAN_ONLY" ? "فقط پلن" : "ساخت سفارشی"}</Text></Stack></Td>
                       <Td>{item.quota.current_users} / {item.quota.max_users ?? t("unlimited")}</Td>
                       <Td><CreditRemaining admin={item} /></Td>
                       <Td>
                         <HStack justify="end">
                           <Button size="sm" variant="ghost" minH="36px" aria-expanded={expandedUsername === item.username} onClick={() => setExpandedUsername((current) => current === item.username ? null : item.username)}>{expandedUsername === item.username ? "بستن" : "جزئیات"}</Button>
+                          {canAct(item) && item.trial_quota_limit > 0 && <Button size="xs" variant="ghost" isLoading={quickAction.isLoading} onClick={() => window.confirm(`تعداد تست قابل ساخت ${item.username} به ${item.trial_quota_limit} برگردد؟`) && quickAction.mutate({ item, operation: "trial-reset" })}>ریست تست</Button>}
+                          {canAct(item) && item.active_owner_freeze_event_id && <Button size="xs" variant="ghost" colorScheme="orange" isLoading={quickAction.isLoading} onClick={() => quickAction.mutate({ item, operation: "unfreeze" })}>رفع فریز</Button>}
+                          {canAct(item) && !item.active_owner_freeze_event_id && item.account_status === "ACTIVE" && <Button size="xs" variant="ghost" colorScheme="orange" isLoading={quickAction.isLoading} onClick={() => openFreeze(item)}>فریز</Button>}
                           <IconButton aria-label={t("edit")} size="sm" variant="ghost" icon={<EditIcon />} isDisabled={!canEdit(item)} onClick={() => openEdit(item)} />
                           <IconButton aria-label={t("delete")} size="sm" variant="ghost" colorScheme="red" icon={<RemoveIcon />} isDisabled={item.role === "OWNER"} onClick={() => openDelete(item)} />
                         </HStack>
@@ -212,7 +316,7 @@ export const Admins: FC = () => {
               {admins.map((item) => (
                 <Box key={item.username} p={4}>
                   <HStack justify="space-between" align="start">
-                    <Box><Text color="white" fontWeight="700" dir="ltr">{item.username}</Text><Badge mt={1} colorScheme={item.role === "OWNER" ? "purple" : item.role === "SUPER_ADMIN" ? "cyan" : "gray"}>{t(`admins.role.${item.role}`)}</Badge></Box>
+                    <HStack align="start">{canAct(item) && <Checkbox mt={1} aria-label={`انتخاب ${item.username}`} isChecked={selectedIds.includes(item.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...new Set([...current, item.id])] : current.filter((id) => id !== item.id))} />}<Box><HStack spacing={2}><Text color="white" fontWeight="700" dir="ltr">{item.username}</Text><Badge colorScheme={item.account_status === "ACTIVE" ? "green" : item.account_status === "SUSPENDED" ? "orange" : "red"}>{item.account_status === "ACTIVE" ? "فعال" : item.account_status === "SUSPENDED" ? "فریز" : "غیرفعال"}</Badge></HStack><HStack mt={1}><Badge colorScheme={item.role === "OWNER" ? "purple" : item.role === "SUPER_ADMIN" ? "cyan" : "gray"}>{t(`admins.role.${item.role}`)}</Badge><Text fontSize="xs" color="gray.400">والد: {item.parent_username || "—"}</Text></HStack></Box></HStack>
                     <HStack><IconButton aria-label={t("edit")} size="sm" variant="ghost" icon={<EditIcon />} isDisabled={!canEdit(item)} onClick={() => openEdit(item)} /><IconButton aria-label={t("delete")} size="sm" variant="ghost" colorScheme="red" icon={<RemoveIcon />} isDisabled={item.role === "OWNER"} onClick={() => openDelete(item)} /></HStack>
                   </HStack>
                   <SimpleGrid columns={2} gap={3} mt={4} fontSize="sm">
@@ -221,6 +325,7 @@ export const Admins: FC = () => {
                     <Box><Text color="gray.400" fontSize="xs">{t("admins.operationRemaining")}</Text><Text color="gray.100" mt={1}>{item.quota.operation_allowance_remaining ?? t("unlimited")}</Text></Box>
                     <Box><Text color="gray.400" fontSize="xs">{t("admins.maxDuration")}</Text><Text color="gray.100" mt={1}>{item.policy.max_user_duration_days ? `${item.policy.max_user_duration_days} ${t("days")}` : t("unlimited")}</Text></Box>
                   </SimpleGrid>
+                  {canAct(item) && <HStack mt={3} spacing={2}><Button size="sm" variant="outline" flex={1} isDisabled={item.trial_quota_limit <= 0} onClick={() => item.trial_quota_limit > 0 && window.confirm(`تعداد تست قابل ساخت ${item.username} به ${item.trial_quota_limit} برگردد؟`) && quickAction.mutate({ item, operation: "trial-reset" })}>ریست تست</Button>{item.active_owner_freeze_event_id ? <Button size="sm" variant="outline" colorScheme="orange" flex={1} onClick={() => quickAction.mutate({ item, operation: "unfreeze" })}>رفع فریز</Button> : item.account_status === "ACTIVE" ? <Button size="sm" variant="outline" colorScheme="orange" flex={1} onClick={() => openFreeze(item)}>فریز</Button> : null}</HStack>}
                   <Button mt={3} w="full" minH="40px" size="sm" variant="ghost" aria-expanded={expandedUsername === item.username} onClick={() => setExpandedUsername((current) => current === item.username ? null : item.username)}>{expandedUsername === item.username ? "بستن جزئیات" : "نمایش جزئیات بیشتر"}</Button>
                   {expandedUsername === item.username && (
                     <SimpleGrid columns={2} gap={3} mt={3} pt={3} borderTopWidth="1px" borderColor="#33483b" fontSize="sm">
@@ -262,6 +367,24 @@ export const Admins: FC = () => {
             <AlertDialogFooter borderTopWidth="1px" borderColor="#33483b" gap={3}>
               <Button ref={cancelRef} variant="ghost" onClick={deleteDisclosure.onClose}>{t("cancel")}</Button>
               <Button colorScheme="red" isLoading={removeMutation.isLoading} onClick={() => selected && removeMutation.mutate({ username: selected.username, strategy: deleteStrategy })}>{t("delete")}</Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialogOverlay>
+      </AlertDialog>
+      <AlertDialog isOpen={freezeDisclosure.isOpen} leastDestructiveRef={cancelRef} onClose={freezeDisclosure.onClose}>
+        <AlertDialogOverlay bg="rgba(0, 0, 0, .76)">
+          <AlertDialogContent bg="var(--panel-surface)" color="gray.100" borderWidth="1px" borderColor="var(--panel-border)" borderRadius="12px">
+            <AlertDialogHeader>فریز {freezeTarget?.username}</AlertDialogHeader>
+            <AlertDialogBody>
+              <FormControl isRequired>
+                <FormLabel>دلیل فریز</FormLabel>
+                <Textarea autoFocus maxLength={512} value={freezeReason} onChange={(event) => setFreezeReason(event.target.value)} placeholder="دلیل قابل نمایش برای این ادمین را بنویسید" />
+                <FormHelperText>این متن در حساب ادمین و گزارش فعالیت ثبت می‌شود.</FormHelperText>
+              </FormControl>
+            </AlertDialogBody>
+            <AlertDialogFooter gap={3} borderTopWidth="1px" borderColor="var(--panel-border)">
+              <Button ref={cancelRef} variant="ghost" onClick={freezeDisclosure.onClose}>انصراف</Button>
+              <Button colorScheme="orange" isLoading={quickAction.isLoading} isDisabled={!freezeReason.trim()} onClick={() => freezeTarget && quickAction.mutate({ item: freezeTarget, operation: "freeze", reason: freezeReason.trim() })}>فریز ادمین و زیرشاخه</Button>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialogOverlay>

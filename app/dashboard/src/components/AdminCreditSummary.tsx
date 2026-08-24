@@ -20,7 +20,7 @@ import { formatBytes } from "utils/formatByte";
 
 const roleLabels: Record<string, string> = {
   OWNER: "مالک",
-  SUPER_ADMIN: "ادمین ارشد",
+  SUPER_ADMIN: "سوپر ادمین",
   ADMIN: "ادمین",
 };
 const accountStatusLabels: Record<string, string> = {
@@ -29,6 +29,7 @@ const accountStatusLabels: Record<string, string> = {
   FROZEN: "مسدود",
 };
 const creationModeLabels: Record<string, string> = {
+  FREE_FORM: "ساخت آزاد",
   PLAN_ONLY: "فقط با پلن",
   LEGACY_COMPAT: "حالت قدیمی",
 };
@@ -45,12 +46,15 @@ export const AdminCreditSummary: FC = () => {
 
   const account = query.data;
   const seatMode = account.billing_mode === "SEAT_CREDIT";
+  const userMode = account.billing_mode === "USER_CREDIT";
   const creditValue = (value: number | null) => value === null
     ? "نامحدود"
-    : seatMode ? `${value} دستگاه` : String(formatBytes(value));
+    : seatMode ? `${value} دستگاه` : userMode ? `${value} اکانت` : String(formatBytes(value));
   const used = account.own_spend + account.delegated_traffic;
-  const percent = account.total_traffic && account.total_traffic > 0
-    ? Math.min(100, Math.round((used / account.total_traffic) * 100))
+  const inferredLimit = account.available_traffic === null ? null : account.available_traffic + used;
+  const configuredLimit = userMode || seatMode ? inferredLimit : account.total_traffic;
+  const percent = configuredLimit && configuredLimit > 0
+    ? Math.min(100, Math.round((used / configuredLimit) * 100))
     : null;
 
   return (
@@ -60,7 +64,7 @@ export const AdminCreditSummary: FC = () => {
           <AlertIcon />این حساب فقط قابل مشاهده است. دلیل: {account.suspended_reason || account.account_status}
         </Alert>
       )}
-      <Card bg="#111d17" color="gray.100" borderWidth="1px" borderColor="#33483b" borderRadius="16px" boxShadow="panel" overflow="hidden">
+      <Card bg="var(--panel-surface)" color="gray.100" borderWidth="1px" borderColor="var(--panel-border)" borderRadius="16px" boxShadow="panel" overflow="hidden">
         <HStack px={{ base: 4, md: 5 }} py={3} spacing={2} flexWrap="wrap" borderBottomWidth="1px" borderColor="#33483b">
           <Text fontSize="sm" fontWeight="750" me={1}>وضعیت حساب</Text>
           <Badge colorScheme={account.role === "OWNER" ? "purple" : account.role === "SUPER_ADMIN" ? "cyan" : "gray"}>{roleLabels[account.role] || account.role}</Badge>
@@ -80,7 +84,7 @@ export const AdminCreditSummary: FC = () => {
             <Text color="gray.400" fontSize="xs" mt={2}>{account.own_users} مستقیم · {account.subtree_users} با زیرمجموعه‌ها</Text>
           </Box>
           <Box p={{ base: 4, md: 5 }} borderTopWidth={{ base: "1px", md: 0 }} borderColor="#33483b">
-            <Text color="gray.400" fontSize="xs" fontWeight="650">دفعات تمدید باقی‌مانده</Text>
+            <Text color="gray.400" fontSize="xs" fontWeight="650">اعتبار تمدید باقی‌مانده</Text>
             <Text color="white" fontSize="2xl" fontWeight="800" mt={2}>{account.renewal_remaining === null ? "نامحدود" : String(account.renewal_remaining)}</Text>
             <Text color="gray.400" fontSize="xs" mt={2}>{account.renewal_enabled ? "تمدید فعال است" : "تمدید بسته است"}</Text>
           </Box>

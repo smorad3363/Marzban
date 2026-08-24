@@ -1,465 +1,130 @@
 import {
-  Accordion,
-  AccordionButton,
-  AccordionIcon,
-  AccordionItem,
-  AccordionPanel,
-  Alert,
-  AlertIcon,
-  Badge,
-  Box,
-  Button,
-  Card,
-  Checkbox,
-  FormControl,
-  FormHelperText,
-  FormLabel,
-  HStack,
-  Input,
-  Select,
-  SimpleGrid,
-  Skeleton,
-  Stack,
-  Text,
-  useToast,
+  Alert, AlertIcon, Badge, Box, Button, Card, Checkbox, HStack, Input, Select,
+  SimpleGrid, Skeleton, Stack, Text, useToast,
 } from "@chakra-ui/react";
 import useGetUser from "hooks/useGetUser";
-import { FC, useEffect, useMemo, useState } from "react";
+import { FC, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 import { fetch } from "service/http";
 import { HierarchyAdminNode } from "types/Admin";
-import { BulkJobResponse, BulkPreviewResponse } from "types/User";
+import { BulkJobResponse } from "types/User";
 import { formatBytes } from "utils/formatByte";
 import { localizedApiError } from "utils/apiError";
 import { canManageHierarchyNode } from "utils/adminHierarchyAuthorization";
 
 const GIB = 1024 ** 3;
-
-const roleLabels: Record<string, string> = {
-  OWNER: "مالک",
-  SUPER_ADMIN: "ادمین ارشد",
-  ADMIN: "ادمین",
+const billingLabels: Record<string, string> = {
+  USED_TRAFFIC: "مصرف واقعی", ALLOCATED_TRAFFIC: "حجم ساخته‌شده",
+  USER_CREDIT: "حجم نامحدود · سقف اکانت", SEAT_CREDIT: "ظرفیت دستگاه قدیمی",
+  LEGACY_COMPAT: "قدیمی (فقط مهاجرت)",
 };
-const accountStatusLabels: Record<string, string> = {
-  ACTIVE: "فعال",
-  SUSPENDED: "متوقف",
-  FROZEN: "مسدود",
-};
-const jobStatusLabels: Record<string, string> = {
-  PENDING: "در انتظار",
-  RUNNING: "در حال انجام",
-  COMPLETED: "تمام‌شده",
-  COMPLETED_WITH_ERRORS: "تمام‌شده با خطا",
-  FAILED: "ناموفق",
-};
-
+const roleLabels: Record<string, string> = { OWNER: "مالک", SUPER_ADMIN: "سوپر ادمین", ADMIN: "ادمین" };
 type FlatNode = HierarchyAdminNode & { visualDepth: number };
-
-const flatten = (nodes: HierarchyAdminNode[], visualDepth = 0): FlatNode[] =>
-  nodes.flatMap((node) => [
-    { ...node, visualDepth },
-    ...flatten(node.children || [], visualDepth + 1),
-  ]);
-
-const errorText = localizedApiError;
+const flatten = (nodes: HierarchyAdminNode[], depth = 0): FlatNode[] => nodes.flatMap((node) => [{ ...node, visualDepth: depth }, ...flatten(node.children || [], depth + 1)]);
+const resource = (mode: string) => mode === "USER_CREDIT" ? "user" : mode === "SEAT_CREDIT" ? "seat" : "traffic";
+const unitLabel = (mode: string) => mode === "USER_CREDIT" ? "اکانت" : mode === "SEAT_CREDIT" ? "دستگاه" : "گیگابایت";
+const toApiAmount = (mode: string, amount: number) => resource(mode) === "traffic" ? Math.round(amount * GIB) : Math.round(amount);
+const creditText = (node: FlatNode) => node.available_traffic === null ? "نامحدود" : resource(node.billing_mode) === "traffic" ? String(formatBytes(node.available_traffic)) : `${node.available_traffic} ${unitLabel(node.billing_mode)}`;
 
 export const AdminHierarchyPanel: FC = () => {
+  const { userData } = useGetUser();
   const toast = useToast();
   const queryClient = useQueryClient();
-  const { userData } = useGetUser();
-  const [amounts, setAmounts] = useState<Record<number, string>>({});
-  const [reasons, setReasons] = useState<Record<number, string>>({});
-  const [trialAmounts, setTrialAmounts] = useState<Record<number, string>>({});
-  const [trialReasons, setTrialReasons] = useState<Record<number, string>>({});
-  const [renewalEnabled, setRenewalEnabled] = useState<Record<number, boolean>>({});
-  const [renewalRemaining, setRenewalRemaining] = useState<Record<number, string>>({});
-  const [referrers, setReferrers] = useState<Record<number, string>>({});
-  const [referralRates, setReferralRates] = useState<Record<number, string>>({});
-  const [referralNotes, setReferralNotes] = useState<Record<number, string>>({});
-  const [bulkAdminIds, setBulkAdminIds] = useState<number[]>([]);
-  const [bulkAmount, setBulkAmount] = useState("");
-  const [bulkReason, setBulkReason] = useState("");
-  const [bulkPreview, setBulkPreview] = useState<BulkPreviewResponse | null>(null);
-  const [bulkResult, setBulkResult] = useState<BulkJobResponse | null>(null);
-  const [bulkBusy, setBulkBusy] = useState(false);
-  const [expandedAdminId, setExpandedAdminId] = useState<number | null>(null);
-  const query = useQuery<HierarchyAdminNode[], Error>(
-    "admin-hierarchy-tree",
-    () => fetch("/admin-management/tree"),
-    { refetchInterval: 15000 }
-  );
-  const nodes = useMemo(() => flatten(query.data || []), [query.data]);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [amount, setAmount] = useState("");
+  const [modeFilter, setModeFilter] = useState("");
+  const [busy, setBusy] = useState(false);
+  const query = useQuery<HierarchyAdminNode[], Error>("admin-hierarchy-tree", () => fetch("/admin-management/tree"), { refetchInterval: 15000 });
+  const allNodes = useMemo(() => flatten(query.data || []), [query.data]);
+  const nodes = modeFilter ? allNodes.filter((node) => node.billing_mode === modeFilter) : allNodes;
+  const selected = allNodes.filter((node) => selectedIds.includes(node.id));
+  const selectedResource = selected[0] ? resource(selected[0].billing_mode) : null;
+  const mixed = selected.some((node) => resource(node.billing_mode) !== selectedResource);
 
-  useEffect(() => {
-    if (bulkAdminIds.length === 0) {
-      setBulkPreview(null);
-      return;
-    }
-    const controller = new AbortController();
-    const timer = window.setTimeout(async () => {
-      try {
-        const preview = await fetch<BulkPreviewResponse>(
-          "/admin-management/bulk-credit/preview",
-          {
-            method: "POST",
-            body: { selected_admin_ids: bulkAdminIds },
-            signal: controller.signal,
-          }
-        );
-        setBulkPreview(preview);
-      } catch (error) {
-        if (!controller.signal.aborted) {
-          setBulkPreview(null);
-          toast({ title: "فهرست ادمین‌های انتخابی آماده نشد", description: errorText(error), status: "error" });
-        }
-      }
-    }, 300);
-    return () => {
-      window.clearTimeout(timer);
-      controller.abort();
-    };
-  }, [bulkAdminIds, toast]);
-
-  const runBulkCredit = async (
-    operation: "grant_credit" | "reclaim_credit",
-    retryOperationId?: string
-  ) => {
-    const amount = Number(bulkAmount);
-    if (!retryOperationId && (!bulkPreview || !Number.isFinite(amount) || amount <= 0 || !bulkReason.trim())) return;
-    setBulkBusy(true);
-    try {
-      const operationId = retryOperationId || `bulk-admin-${crypto.randomUUID()}`;
-      if (!retryOperationId) {
-        await fetch<BulkJobResponse>("/admin-management/bulk-credit/jobs", {
-          method: "POST",
-          body: {
-            operation_id: operationId,
-            operation,
-            selected_admin_ids: bulkAdminIds,
-            amount: Math.round(amount * GIB),
-            note: bulkReason.trim(),
-          },
-        });
-      }
-      let current = await fetch<BulkJobResponse>(
-        `/admin-management/bulk-credit/jobs/${operationId}/execute`,
-        {
-          method: "POST",
-          body: { chunk_size: 100, retry_failed: Boolean(retryOperationId) },
-        }
-      );
-      while (current.has_more) {
-        current = await fetch<BulkJobResponse>(
-          `/admin-management/bulk-credit/jobs/${operationId}/execute`,
-          {
-            method: "POST",
-            body: { chunk_size: 100, retry_failed: Boolean(retryOperationId) },
-          }
-        );
-      }
-      setBulkResult(current);
-      queryClient.invalidateQueries("admin-hierarchy-tree");
-      queryClient.invalidateQueries("account-summary");
-      toast({
-        title: `انجام‌شده ${current.success} · خطا ${current.failed} · ردشده ${current.skipped}`,
-        status: current.failed ? "warning" : "success",
-      });
-    } catch (error) {
-      toast({ title: "تغییر گروهی اعتبار انجام نشد", description: errorText(error), status: "error" });
-    } finally {
-      setBulkBusy(false);
-    }
+  const refresh = () => {
+    queryClient.invalidateQueries("admin-hierarchy-tree");
+    queryClient.invalidateQueries("admin-management");
+    queryClient.invalidateQueries("account-summary");
   };
 
-  const action = useMutation(
-    ({ node, operation, amount, reason, enabled, remaining, referrer, rateBps }: {
-      node: FlatNode;
-      operation: "grant" | "reclaim" | "trial-grant" | "trial-reclaim" | "renewal" | "suspend" | "resume" | "freeze" | "unfreeze" | "referral-set" | "referral-remove";
-      amount?: number;
-      reason?: string;
-      enabled?: boolean;
-      remaining?: number | null;
-      referrer?: string;
-      rateBps?: number;
-    }) => {
-      if (operation === "grant" || operation === "reclaim") {
-        return fetch(`/admin-management/${node.username}/credit/${operation}`, {
-          method: "POST",
-          body: {
-            amount,
-            idempotency_key: `${operation}-${node.id}-${crypto.randomUUID()}`,
-            note: reason,
-          },
-        });
-      }
-      if (operation === "trial-grant" || operation === "trial-reclaim") {
-        const adjustment = operation === "trial-grant" ? "grant" : "reclaim";
-        return fetch(`/admin-management/${node.username}/trial-quota/${adjustment}`, {
-          method: "POST",
-          body: {
-            amount,
-            idempotency_key: `${operation}-${node.id}-${crypto.randomUUID()}`,
-            note: reason,
-          },
-        });
-      }
-      if (operation === "renewal") {
-        return fetch(`/admin-management/${node.username}/renewal-policy`, {
-          method: "PUT",
-          body: { enabled, remaining },
-        });
-      }
-      if (operation === "referral-set" || operation === "referral-remove") {
-        return fetch(`/admin-management/${node.username}/referral`, {
-          method: operation === "referral-set" ? "PUT" : "DELETE",
-          body: operation === "referral-set"
-            ? { referrer_username: referrer, rate_bps: rateBps, note: reason, idempotency_key: `${operation}-${node.id}-${crypto.randomUUID()}` }
-            : { note: reason, idempotency_key: `${operation}-${node.id}-${crypto.randomUUID()}` },
-        });
-      }
+  const singleAction = useMutation(
+    ({ node, operation }: { node: FlatNode; operation: "freeze" | "unfreeze" | "trial-reset" }) => {
+      if (operation === "trial-reset") return fetch(`/admin-management/${node.username}/trial-quota/reset`, { method: "POST", body: { idempotency_key: `trial-reset-${node.id}-${crypto.randomUUID()}` } });
       return fetch(`/admin-management/${node.username}/${operation}`, {
         method: "POST",
         body: operation === "freeze"
-          ? { reason_id: 1, note: reason, idempotency_key: `${operation}-${node.id}-${crypto.randomUUID()}` }
-          : operation === "unfreeze"
-            ? { idempotency_key: `${operation}-${node.id}-${crypto.randomUUID()}` }
-            : operation === "suspend"
-              ? { reason_id: 1, include_subtree: true }
-              : undefined,
+          ? { reason_id: 1, idempotency_key: `freeze-${node.id}-${crypto.randomUUID()}` }
+          : { idempotency_key: `unfreeze-${node.id}-${crypto.randomUUID()}` },
       });
     },
-    {
-      onSuccess: (_data, variables) => {
-        queryClient.invalidateQueries("admin-hierarchy-tree");
-        queryClient.invalidateQueries("admin-management");
-        queryClient.invalidateQueries("account-summary");
-        if (variables.operation === "grant" || variables.operation === "reclaim") {
-          setAmounts((current) => ({ ...current, [variables.node.id]: "" }));
-          setReasons((current) => ({ ...current, [variables.node.id]: "" }));
-        }
-        if (variables.operation === "trial-grant" || variables.operation === "trial-reclaim") {
-          setTrialAmounts((current) => ({ ...current, [variables.node.id]: "" }));
-          setTrialReasons((current) => ({ ...current, [variables.node.id]: "" }));
-        }
-        toast({ title: "تغییر با موفقیت ذخیره شد", status: "success", duration: 3000 });
-      },
-      onError: (error) => { toast({ title: "تغییر ذخیره نشد", description: errorText(error), status: "error", duration: 5000 }); },
-    }
+    { onSuccess: () => { refresh(); toast({ title: "عملیات انجام شد", status: "success" }); }, onError: (error) => { toast({ title: "عملیات انجام نشد", description: localizedApiError(error), status: "error" }); } }
   );
 
-  if (query.isLoading) return <Skeleton h="190px" borderRadius="18px" mb={5} />;
-  if (query.isError) return <Alert status="error" mb={5}><AlertIcon />فهرست ادمین‌ها بارگذاری نشد.</Alert>;
+  const runBulk = async (operation: "grant_credit" | "reclaim_credit") => {
+    const numeric = Number(amount);
+    if (!selected.length || mixed || !Number.isFinite(numeric) || numeric <= 0) return;
+    setBusy(true);
+    try {
+      const operationId = `bulk-admin-${crypto.randomUUID()}`;
+      await fetch<BulkJobResponse>("/admin-management/bulk-credit/jobs", {
+        method: "POST",
+        body: { operation_id: operationId, operation, selected_admin_ids: selectedIds, amount: toApiAmount(selected[0].billing_mode, numeric) },
+      });
+      let result = await fetch<BulkJobResponse>(`/admin-management/bulk-credit/jobs/${operationId}/execute`, { method: "POST", body: { chunk_size: 100 } });
+      while (result.has_more) result = await fetch<BulkJobResponse>(`/admin-management/bulk-credit/jobs/${operationId}/execute`, { method: "POST", body: { chunk_size: 100 } });
+      refresh();
+      setAmount("");
+      toast({ title: `${result.success} انجام شد · ${result.failed + result.skipped} انجام نشد`, status: result.failed ? "warning" : "success" });
+    } catch (error) {
+      toast({ title: "عملیات گروهی انجام نشد", description: localizedApiError(error), status: "error" });
+    } finally { setBusy(false); }
+  };
 
+  if (query.isLoading) return <Skeleton h="180px" borderRadius="14px" mb={4} />;
+  if (query.isError) return <Alert status="error" mb={4}><AlertIcon />ساختار زیرمجموعه بارگذاری نشد.</Alert>;
   return (
-    <Card mb={5} p={{ base: 4, md: 5 }} bg="#111d17" color="gray.100" borderWidth="1px" borderColor="#33483b" borderRadius="18px" boxShadow="panel">
-      <Box mb={4}>
-        <Text as="h2" fontSize="lg" fontWeight="800">ادمین‌های زیرمجموعه</Text>
-        <Text color="gray.400" fontSize="sm" mt={1}>وضعیت و اعتبار ادمین‌های زیرمجموعه را اینجا می‌بینید.</Text>
-      </Box>
-      <Accordion allowToggle mb={4} reduceMotion>
-        <AccordionItem border="none">
-          <AccordionButton
-            minH="58px"
-            px={4}
-            bg="blackAlpha.300"
-            borderWidth="1px"
-            borderColor="whiteAlpha.200"
-            borderRadius="12px"
-            _expanded={{ borderEndRadius: 0, borderBottomColor: "transparent" }}
-          >
-            <Box flex="1" textAlign="start">
-              <HStack spacing={2} flexWrap="wrap">
-                <Text fontWeight="800">اعتبار گروهی</Text>
-                <Badge colorScheme={bulkAdminIds.length ? "green" : "gray"}>{bulkAdminIds.length} انتخاب</Badge>
-              </HStack>
-              <Text fontSize="xs" color="gray.400" mt={1}>ادمین‌ها را انتخاب کنید، تعداد را بررسی کنید، سپس اعتبار بدهید یا پس بگیرید.</Text>
-            </Box>
-            <AccordionIcon />
-          </AccordionButton>
-          <AccordionPanel p={4} bg="blackAlpha.300" borderWidth="1px" borderTopWidth={0} borderColor="whiteAlpha.200" borderBottomRadius="12px">
-            <Stack spacing={3}>
-              <Alert status={bulkPreview ? "info" : "warning"} borderRadius="10px">
-                <AlertIcon />
-                {bulkPreview
-                  ? `${bulkPreview.resolved_target_count} ادمین انتخاب شده است.`
-                  : "از فهرست زیر حداقل یک ادمین مجاز انتخاب کنید."}
-              </Alert>
-              <SimpleGrid columns={{ base: 1, md: 2 }} gap={3}>
-                <FormControl isRequired>
-                  <FormLabel fontSize="xs">مقدار برای هر ادمین (گیگابایت)</FormLabel>
-                  <Input minH="44px" type="number" min={0.01} step={0.01} dir="ltr" value={bulkAmount} onChange={(event) => setBulkAmount(event.target.value)} />
-                </FormControl>
-                <FormControl isRequired>
-                  <FormLabel fontSize="xs">دلیل تغییر</FormLabel>
-                  <Input minH="44px" maxLength={512} value={bulkReason} onChange={(event) => setBulkReason(event.target.value)} />
-                </FormControl>
-              </SimpleGrid>
-              <HStack justify="end" flexWrap="wrap">
-                <Button minH="44px" colorScheme="green" isLoading={bulkBusy} isDisabled={!bulkPreview || !bulkReason.trim() || Number(bulkAmount) <= 0} onClick={() => runBulkCredit("grant_credit")}>واگذاری گروهی</Button>
-                <Button minH="44px" variant="outline" isLoading={bulkBusy} isDisabled={!bulkPreview || !bulkReason.trim() || Number(bulkAmount) <= 0} onClick={() => runBulkCredit("reclaim_credit")}>بازپس‌گیری گروهی</Button>
-              </HStack>
-              {bulkResult && (
-                <Box p={3} borderWidth="1px" borderColor="whiteAlpha.200" borderRadius="10px" fontSize="sm" aria-live="polite">
-                  <Text fontWeight="700">وضعیت: {jobStatusLabels[bulkResult.status] || bulkResult.status} · کل {bulkResult.total} · انجام‌شده {bulkResult.success} · خطا {bulkResult.failed} · ردشده {bulkResult.skipped}</Text>
-                  {bulkResult.failed > 0 && (
-                    <Button mt={2} minH="44px" size="sm" variant="outline" isLoading={bulkBusy} onClick={() => runBulkCredit(bulkResult.operation as "grant_credit" | "reclaim_credit", bulkResult.operation_id)}>
-                      تلاش دوباره برای خطاها
-                    </Button>
-                  )}
-                </Box>
-              )}
-            </Stack>
-          </AccordionPanel>
-        </AccordionItem>
-      </Accordion>
-      <Stack spacing={2}>
+    <Card mb={4} bg="var(--panel-surface)" borderWidth="1px" borderColor="var(--panel-border)" borderRadius="14px" overflow="hidden">
+      <HStack p={3} justify="space-between" align={{ base: "start", md: "center" }} flexWrap="wrap" borderBottomWidth="1px" borderColor="var(--panel-border)">
+        <Box><Text fontWeight="800">زیرمجموعه‌ها</Text><Text mt={0.5} color="gray.400" fontSize="xs">انتخاب، اعتبار، فریز و ریست تست؛ بدون بازکردن فرم‌های بزرگ.</Text></Box>
+        <Select aria-label="دسته‌بندی نوع اعتبار" value={modeFilter} maxW={{ base: "full", md: "230px" }} size="sm" onChange={(event) => { setModeFilter(event.target.value); setSelectedIds([]); }}>
+          <option value="">همه نوع‌های اعتبار</option><option value="USED_TRAFFIC">مصرف واقعی</option><option value="ALLOCATED_TRAFFIC">حجم ساخته‌شده</option><option value="USER_CREDIT">نامحدود با سقف اکانت</option>
+        </Select>
+      </HStack>
+
+      {selected.length > 0 && (
+        <HStack position="sticky" top={0} zIndex={1} p={3} bg="var(--panel-nested)" borderBottomWidth="1px" borderColor="var(--panel-border)" flexWrap="wrap">
+          <Badge colorScheme={mixed ? "red" : "yellow"}>{selected.length} انتخاب</Badge>
+          {mixed ? <Text fontSize="xs" color="red.200">برای عملیات گروهی، نوع واحد اعتبار باید یکسان باشد.</Text> : <>
+            <Input aria-label="مقدار عملیات گروهی" type="number" min={1} step={resource(selected[0].billing_mode) === "traffic" ? 0.1 : 1} value={amount} onChange={(event) => setAmount(event.target.value)} placeholder={`مقدار (${unitLabel(selected[0].billing_mode)})`} maxW="190px" size="sm" />
+            <Button size="sm" colorScheme="primary" isLoading={busy} isDisabled={Number(amount) <= 0} onClick={() => runBulk("grant_credit")}>افزودن اعتبار</Button>
+            <Button size="sm" variant="outline" isLoading={busy} isDisabled={Number(amount) <= 0} onClick={() => runBulk("reclaim_credit")}>پس‌گرفتن</Button>
+          </>}
+          <Button size="xs" ms="auto" variant="ghost" onClick={() => setSelectedIds([])}>پاک‌کردن انتخاب</Button>
+        </HStack>
+      )}
+
+      <Stack p={3} spacing={2}>
         {nodes.map((node) => {
-          const canAct = canManageHierarchyNode(userData, node);
-          const amount = Number(amounts[node.id] || 0);
-          const reason = reasons[node.id] || "";
-          const trialAmount = Number(trialAmounts[node.id] || 0);
-          const trialReason = trialReasons[node.id] || "";
-          const enabled = renewalEnabled[node.id] ?? node.renewal_enabled;
-          const remainingText = renewalRemaining[node.id] ?? (node.renewal_remaining === null ? "" : String(node.renewal_remaining));
-          const remaining = remainingText === "" ? null : Number(remainingText);
-          const isOwner = userData.role === "OWNER" || userData.is_sudo;
-          const currentReferrer = nodes.find((candidate) => candidate.id === node.referral_referrer_admin_id)?.username || "";
-          const referrer = referrers[node.id] ?? currentReferrer;
-          const referralRateText = referralRates[node.id] ?? (node.referral_rate_bps === null ? "" : String(node.referral_rate_bps));
-          const referralRate = Number(referralRateText);
-          const referralNote = referralNotes[node.id] || "";
-          return (
-            <Box
-              key={node.id}
-              p={3}
-              ps={{ base: 3, md: `${12 + node.visualDepth * 24}px` }}
-              bg={expandedAdminId === node.id ? "rgba(72, 213, 139, .055)" : "rgba(255,255,255,.025)"}
-              borderWidth="1px"
-              borderColor={expandedAdminId === node.id ? "rgba(72, 213, 139, .38)" : "whiteAlpha.200"}
-              borderRadius="12px"
-            >
-              <SimpleGrid columns={{ base: 1, xl: 2 }} gap={3} alignItems="center">
-                <Box minW={0}>
-                  <HStack flexWrap="wrap">
-                    {canAct && node.parent_admin_id !== null && (
-                      <Checkbox
-                        minW="44px"
-                        minH="44px"
-                        aria-label={`انتخاب ${node.username} برای عملیات گروهی اعتبار`}
-                        isChecked={bulkAdminIds.includes(node.id)}
-                        onChange={(event) =>
-                          setBulkAdminIds((current) =>
-                            event.target.checked
-                              ? [...current, node.id].sort((a, b) => a - b)
-                              : current.filter((id) => id !== node.id)
-                          )
-                        }
-                      />
-                    )}
-                    <Text fontWeight="750" dir="ltr" overflowWrap="anywhere">{node.username}</Text>
-                    <Badge colorScheme={node.role === "OWNER" ? "purple" : node.role === "SUPER_ADMIN" ? "cyan" : "gray"}>{roleLabels[node.role] || node.role}</Badge>
-                    <Badge colorScheme={node.account_status === "ACTIVE" ? "green" : "orange"}>{accountStatusLabels[node.account_status] || node.account_status}</Badge>
-                  </HStack>
-                  <Text mt={1} color="gray.400" fontSize="xs">سطح {node.visualDepth} · اعتبار: {node.available_traffic === null ? "نامحدود" : String(formatBytes(node.available_traffic))} · اشتراک آزمایشی: {node.trial_quota}</Text>
-                </Box>
-                <HStack spacing={3} justify={{ xl: "end" }} fontSize="xs" color="gray.300" flexWrap="wrap">
-                  <Text>مصرف: {formatBytes(node.own_spend)}</Text>
-                  <Text>واگذارشده: {formatBytes(node.delegated_traffic)}</Text>
-                  <Text>دسترسی API: {node.external_api_enabled ? "فعال" : "خاموش"}</Text>
-                  {canAct && (
-                    <Button
-                      minH="40px"
-                      size="sm"
-                      variant={expandedAdminId === node.id ? "solid" : "outline"}
-                      colorScheme="green"
-                      aria-expanded={expandedAdminId === node.id}
-                      onClick={() => setExpandedAdminId((current) => current === node.id ? null : node.id)}
-                    >
-                      {expandedAdminId === node.id ? "بستن مدیریت" : "مدیریت"}
-                    </Button>
-                  )}
-                </HStack>
-              </SimpleGrid>
-              {canAct && expandedAdminId === node.id && (
-                <SimpleGrid columns={{ base: 1, xl: 2 }} gap={3} mt={3}>
-                  <Stack direction={{ base: "column", md: "row" }} align={{ md: "end" }} spacing={2} p={3} bg="blackAlpha.200" borderRadius="10px">
-                    <FormControl maxW={{ md: "145px" }}>
-                      <FormLabel fontSize="xs" mb={1}>اعتبار (گیگابایت)</FormLabel>
-                      <Input minH="44px" type="number" min={0.01} step={0.01} dir="ltr" value={amounts[node.id] || ""} onChange={(event) => setAmounts((current) => ({ ...current, [node.id]: event.target.value }))} />
-                    </FormControl>
-                    <FormControl flex="1">
-                      <FormLabel fontSize="xs" mb={1}>دلیل تغییر</FormLabel>
-                      <Input minH="44px" maxLength={512} value={reason} onChange={(event) => setReasons((current) => ({ ...current, [node.id]: event.target.value }))} />
-                    </FormControl>
-                    <Button minH="44px" size="sm" colorScheme="green" isDisabled={!Number.isFinite(amount) || amount <= 0 || !reason.trim()} isLoading={action.isLoading} onClick={() => action.mutate({ node, operation: "grant", amount: Math.round(amount * GIB), reason: reason.trim() })}>واگذاری</Button>
-                    <Button minH="44px" size="sm" variant="outline" isDisabled={!Number.isFinite(amount) || amount <= 0 || !reason.trim()} isLoading={action.isLoading} onClick={() => action.mutate({ node, operation: "reclaim", amount: Math.round(amount * GIB), reason: reason.trim() })}>بازپس‌گیری</Button>
-                  </Stack>
-                  <Stack direction={{ base: "column", md: "row" }} align={{ md: "end" }} spacing={2} p={3} bg="blackAlpha.200" borderRadius="10px">
-                    <FormControl maxW={{ md: "150px" }}>
-                      <FormLabel fontSize="xs" mb={1}>اجازه تمدید</FormLabel>
-                      <Select minH="44px" value={enabled ? "enabled" : "disabled"} onChange={(event) => setRenewalEnabled((current) => ({ ...current, [node.id]: event.target.value === "enabled" }))}>
-                        <option value="enabled">فعال</option>
-                        <option value="disabled">غیرفعال</option>
-                      </Select>
-                    </FormControl>
-                    <FormControl maxW={{ md: "170px" }}>
-                      <FormLabel fontSize="xs" mb={1}>سهمیه تمدید</FormLabel>
-                      <Input minH="44px" type="number" min={0} step={1} dir="ltr" value={remainingText} onChange={(event) => setRenewalRemaining((current) => ({ ...current, [node.id]: event.target.value }))} />
-                      <FormHelperText fontSize="xs">خالی یعنی نامحدود؛ فقط تمدید واقعی مصرف می‌کند.</FormHelperText>
-                    </FormControl>
-                    <Button minH="44px" size="sm" colorScheme="green" variant="outline" isDisabled={remaining !== null && (!Number.isInteger(remaining) || remaining < 0)} isLoading={action.isLoading} onClick={() => action.mutate({ node, operation: "renewal", enabled, remaining })}>ذخیره تنظیم تمدید</Button>
-                    {isOwner && node.role !== "OWNER" && (
-                      <Button minH="44px" size="sm" colorScheme={node.active_owner_freeze_event_id === null ? "orange" : "green"} variant="ghost" isLoading={action.isLoading} onClick={() => {
-                        const operation = node.active_owner_freeze_event_id === null ? "freeze" : "unfreeze";
-                        const warning = operation === "freeze" ? `تمام زیرشاخه ${node.username} مسدود شود؟` : `مسدودی مالک برای ${node.username} رفع شود؟`;
-                        if (window.confirm(warning)) action.mutate({ node, operation, reason: "Owner dashboard operation" });
-                      }}>{node.active_owner_freeze_event_id === null ? "مسدودکردن این شاخه" : "بازکردن این شاخه"}</Button>
-                    )}
-                    {!isOwner && node.account_status === "ACTIVE" && (
-                      <Button minH="44px" size="sm" colorScheme="orange" variant="ghost" isLoading={action.isLoading} onClick={() => window.confirm(`فعالیت شاخه ${node.username} متوقف شود؟`) && action.mutate({ node, operation: "suspend" })}>توقف این شاخه</Button>
-                    )}
-                    {node.account_status !== "ACTIVE" && node.active_owner_freeze_event_id === null && (
-                      <Button minH="44px" size="sm" colorScheme="green" variant="ghost" isLoading={action.isLoading} onClick={() => action.mutate({ node, operation: "resume" })}>فعال‌کردن دوباره</Button>
-                    )}
-                  </Stack>
-                </SimpleGrid>
-              )}
-              {canAct && expandedAdminId === node.id && (userData.role === "OWNER" || userData.is_sudo) && (
-                <Stack direction={{ base: "column", md: "row" }} align={{ md: "end" }} spacing={2} p={3} mt={3} bg="blackAlpha.200" borderRadius="10px">
-                  <FormControl maxW={{ md: "145px" }}>
-                    <FormLabel fontSize="xs" mb={1}>تعداد اشتراک آزمایشی</FormLabel>
-                    <Input minH="44px" type="number" min={1} step={1} dir="ltr" value={trialAmounts[node.id] || ""} onChange={(event) => setTrialAmounts((current) => ({ ...current, [node.id]: event.target.value }))} />
-                  </FormControl>
-                  <FormControl flex="1">
-                    <FormLabel fontSize="xs" mb={1}>دلیل تغییر</FormLabel>
-                    <Input minH="44px" maxLength={512} value={trialReason} onChange={(event) => setTrialReasons((current) => ({ ...current, [node.id]: event.target.value }))} />
-                  </FormControl>
-                  <Button minH="44px" size="sm" colorScheme="orange" isDisabled={!Number.isInteger(trialAmount) || trialAmount <= 0 || !trialReason.trim()} isLoading={action.isLoading} onClick={() => action.mutate({ node, operation: "trial-grant", amount: trialAmount, reason: trialReason.trim() })}>افزایش سهمیه آزمایشی</Button>
-                  <Button minH="44px" size="sm" variant="outline" colorScheme="orange" isDisabled={!Number.isInteger(trialAmount) || trialAmount <= 0 || !trialReason.trim()} isLoading={action.isLoading} onClick={() => window.confirm(`${trialAmount} سهمیه آزمایشی از ${node.username} پس گرفته شود؟`) && action.mutate({ node, operation: "trial-reclaim", amount: trialAmount, reason: trialReason.trim() })}>پس‌گرفتن سهمیه آزمایشی</Button>
-                </Stack>
-              )}
-              {expandedAdminId === node.id && isOwner && node.role !== "OWNER" && (
-                <Stack direction={{ base: "column", md: "row" }} align={{ md: "end" }} spacing={2} p={3} mt={3} bg="blackAlpha.200" borderRadius="10px">
-                  <FormControl maxW={{ md: "180px" }}>
-                    <FormLabel fontSize="xs" mb={1}>نام کاربری معرف</FormLabel>
-                    <Input minH="44px" dir="ltr" value={referrer} onChange={(event) => setReferrers((current) => ({ ...current, [node.id]: event.target.value }))} />
-                  </FormControl>
-                  <FormControl maxW={{ md: "145px" }}>
-                    <FormLabel fontSize="xs" mb={1}>نرخ معرف (از ۱۰٬۰۰۰)</FormLabel>
-                    <Input minH="44px" type="number" min={0} max={10000} step={1} dir="ltr" value={referralRateText} onChange={(event) => setReferralRates((current) => ({ ...current, [node.id]: event.target.value }))} />
-                  </FormControl>
-                  <FormControl flex="1">
-                    <FormLabel fontSize="xs" mb={1}>توضیح</FormLabel>
-                    <Input minH="44px" maxLength={512} value={referralNote} onChange={(event) => setReferralNotes((current) => ({ ...current, [node.id]: event.target.value }))} />
-                    <FormHelperText fontSize="xs">این بخش فقط معرف را ثبت می‌کند و اعتبار خودکار نمی‌دهد.</FormHelperText>
-                  </FormControl>
-                  <Button minH="44px" size="sm" colorScheme="purple" isDisabled={!referrer.trim() || !Number.isInteger(referralRate) || referralRate < 0 || referralRate > 10000} isLoading={action.isLoading} onClick={() => action.mutate({ node, operation: "referral-set", referrer: referrer.trim(), rateBps: referralRate, reason: referralNote.trim() || undefined })}>ذخیره معرف</Button>
-                  <Button minH="44px" size="sm" variant="outline" colorScheme="purple" isDisabled={node.referral_referrer_admin_id === null} isLoading={action.isLoading} onClick={() => window.confirm(`معرف ${node.username} حذف شود؟`) && action.mutate({ node, operation: "referral-remove", reason: referralNote.trim() || undefined })}>حذف معرف</Button>
-                </Stack>
-              )}
-            </Box>
-          );
+          const canAct = canManageHierarchyNode(userData, node) && node.role !== "OWNER";
+          const frozen = node.active_owner_freeze_event_id !== null;
+          return <Box key={node.id} p={3} ps={{ base: 3, md: `${12 + node.visualDepth * 18}px` }} bg="var(--panel-nested)" borderWidth="1px" borderColor="var(--panel-border)" borderRadius="10px">
+            <SimpleGrid columns={{ base: 1, lg: 2 }} gap={2} alignItems="center">
+              <HStack minW={0} flexWrap="wrap">
+                {canAct && <Checkbox aria-label={`انتخاب ${node.username}`} isChecked={selectedIds.includes(node.id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...new Set([...current, node.id])] : current.filter((id) => id !== node.id))} />}
+                <Text dir="ltr" fontWeight="750">{node.username}</Text>
+                <Badge>{roleLabels[node.role] || node.role}</Badge>
+                <Badge variant="outline" colorScheme={node.billing_mode === "USER_CREDIT" ? "purple" : "yellow"}>{billingLabels[node.billing_mode] || node.billing_mode}</Badge>
+                {frozen && <Badge colorScheme="orange">فریز</Badge>}
+              </HStack>
+              <HStack justify={{ lg: "end" }} flexWrap="wrap" spacing={2}>
+                <Text color="gray.400" fontSize="xs">اعتبار: {creditText(node)} · تست قابل ساخت: {node.trial_quota}</Text>
+                {canAct && <Button size="xs" variant="ghost" colorScheme="orange" isLoading={singleAction.isLoading} onClick={() => window.confirm(frozen ? `فریز ${node.username} باز شود؟` : `${node.username} و زیرشاخه‌اش فریز شوند؟`) && singleAction.mutate({ node, operation: frozen ? "unfreeze" : "freeze" })}>{frozen ? "رفع فریز" : "فریز"}</Button>}
+                {canAct && <Button size="xs" variant="ghost" isLoading={singleAction.isLoading} onClick={() => window.confirm(`تعداد تست قابل ساخت ${node.username} به سقفش برگردد؟`) && singleAction.mutate({ node, operation: "trial-reset" })}>ریست تست</Button>}
+              </HStack>
+            </SimpleGrid>
+          </Box>;
         })}
+        {nodes.length === 0 && <Text py={6} textAlign="center" color="gray.400">زیرمجموعه‌ای در این دسته نیست.</Text>}
       </Stack>
     </Card>
   );

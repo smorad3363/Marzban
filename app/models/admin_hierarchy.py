@@ -28,14 +28,30 @@ class HierarchyAdminNode(BaseModel):
     referral_referrer_admin_id: Optional[int] = None
     referral_rate_bps: Optional[int] = None
     active_owner_freeze_event_id: Optional[int] = None
+    billing_mode: BillingMode = BillingMode.LEGACY_COMPAT
+    can_create_admins: bool = False
+    can_delegate_admin_creation: bool = False
+    can_create_allocated_children: bool = True
+    admin_creation_limit: Optional[int] = None
+    admin_creations_used: int = 0
+    delegated_admin_creation_limit: int = 0
+    admin_creation_remaining: Optional[int] = None
     children: list["HierarchyAdminNode"] = Field(default_factory=list)
 
 
 class HierarchyChildCreate(BaseModel):
     username: str = Field(min_length=3, max_length=34)
     password: str = Field(min_length=6, max_length=128)
-    phone: str = Field(min_length=1, max_length=32)
+    phone: Optional[str] = Field(default=None, max_length=32)
     role: Literal["SUPER_ADMIN", "ADMIN"] = "ADMIN"
+    billing_mode: BillingMode
+    initial_credit: Optional[int] = Field(default=None, ge=1)
+    user_creation_mode: Literal["FREE_FORM", "PLAN_ONLY"] = "PLAN_ONLY"
+    can_manage_plans: bool = False
+    can_create_admins: bool = False
+    can_delegate_admin_creation: bool = False
+    can_create_allocated_children: bool = True
+    admin_creation_limit: Optional[int] = Field(default=0, ge=0)
 
 
 class ReparentRequest(BaseModel):
@@ -45,7 +61,7 @@ class ReparentRequest(BaseModel):
 class CreditTransferRequest(BaseModel):
     amount: int = Field(gt=0)
     idempotency_key: str = Field(min_length=8, max_length=128)
-    note: str = Field(min_length=1, max_length=512)
+    note: Optional[str] = Field(default=None, max_length=512)
 
 
 class CreditTransferResponse(BaseModel):
@@ -179,7 +195,15 @@ class SuspendRequest(BaseModel):
 class OwnerFreezeRequest(BaseModel):
     reason_id: int = Field(default=1, ge=1)
     idempotency_key: str = Field(min_length=8, max_length=128)
-    note: Optional[str] = Field(default=None, max_length=512)
+    note: str = Field(min_length=1, max_length=512)
+
+    @field_validator("note")
+    @classmethod
+    def normalize_freeze_note(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Freeze reason is required")
+        return value
 
 
 class OwnerUnfreezeRequest(BaseModel):
@@ -234,6 +258,13 @@ class AccountSummary(BaseModel):
     can_manage_plans: bool = False
     trial_quota: int = 0
     trials_used: int = 0
+    can_create_admins: bool = False
+    can_delegate_admin_creation: bool = False
+    can_create_allocated_children: bool = True
+    admin_creation_limit: Optional[int] = None
+    admin_creations_used: int = 0
+    delegated_admin_creation_limit: int = 0
+    admin_creation_remaining: Optional[int] = None
 
 
 class PlanCategoryCreate(BaseModel):
@@ -364,7 +395,12 @@ class PlanRenewRequest(BaseModel):
 class TrialQuotaAdjustmentRequest(BaseModel):
     amount: int = Field(gt=0)
     idempotency_key: str = Field(min_length=8, max_length=128)
-    note: str = Field(min_length=1, max_length=512)
+    note: Optional[str] = Field(default=None, max_length=512)
+
+
+class TrialQuotaResetRequest(BaseModel):
+    idempotency_key: str = Field(min_length=8, max_length=128)
+    note: Optional[str] = Field(default=None, max_length=512)
 
 
 class TrialCleanupRequest(BaseModel):

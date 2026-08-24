@@ -113,8 +113,8 @@ def test_grant_and_reclaim_record_exact_balances_and_one_audit(db):
     assert grant.resource == "traffic_credit"
     assert grant.delta == 30 * GIB
     assert (grant.balance_before, grant.balance_after) == (0, 30 * GIB)
-    assert (grant.source_delegated_before, grant.source_delegated_after) == (0, 30 * GIB)
-    assert owner_wallet.delegated_traffic == 30 * GIB
+    assert (grant.source_delegated_before, grant.source_delegated_after) == (0, 0)
+    assert owner_wallet.delegated_traffic == 0
     assert child_wallet.total_traffic == 30 * GIB
     assert db.query(AdminAuditLog).filter_by(
         action="credit.grant", target_id=str(child.id)
@@ -136,7 +136,7 @@ def test_grant_and_reclaim_record_exact_balances_and_one_audit(db):
     assert db.query(AdminAuditLog).filter_by(action="credit.grant").count() == 1
     db.refresh(owner_wallet)
     db.refresh(child_wallet)
-    assert owner_wallet.delegated_traffic == 30 * GIB
+    assert owner_wallet.delegated_traffic == 0
     assert child_wallet.total_traffic == 30 * GIB
 
     reclaimed = reclaim_credit(
@@ -238,9 +238,12 @@ def test_new_admin_initial_credit_uses_parent_funded_ledger(db):
         ManagedAdminCreate(
             username="new-child",
             password="secret-password",
-            phone="+982100000000",
+            phone="09395253363",
             role="ADMIN",
-            policy=MarzhelpAdminPolicy(total_traffic=30 * GIB),
+            policy=MarzhelpAdminPolicy(
+                billing_mode="ALLOCATED_TRAFFIC",
+                total_traffic=30 * GIB,
+            ),
         ),
         db,
         APIAdmin.model_validate(owner),
@@ -253,7 +256,7 @@ def test_new_admin_initial_credit_uses_parent_funded_ledger(db):
     assert transfer.idempotency_key == f"admin-create-{child.id}-traffic-credit"
     assert transfer.delta == 30 * GIB
     assert transfer.note == "Initial admin traffic credit"
-    assert owner_wallet.delegated_traffic == 30 * GIB
+    assert owner_wallet.delegated_traffic == 0
     assert child_wallet.total_traffic == 30 * GIB
     assert db.query(AdminAuditLog).filter_by(
         action="credit.grant", target_id=str(child.id)
@@ -336,7 +339,7 @@ def test_concurrent_reclaims_never_create_negative_or_unfunded_balance(tmp_path)
         successful_reclaims = verify.query(AdminCreditTransfer).filter_by(operation_type="reclaim").count()
         assert successful_reclaims == 1
         assert child_wallet.total_traffic == 20 * GIB
-        assert owner_wallet.delegated_traffic == 20 * GIB
+        assert owner_wallet.delegated_traffic == 0
         assert any(isinstance(outcome, str) for outcome in outcomes)
         assert child_wallet.total_traffic >= 0
         assert owner_wallet.delegated_traffic >= 0

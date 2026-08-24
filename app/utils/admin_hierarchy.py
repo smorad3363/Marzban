@@ -28,6 +28,7 @@ from app.db.models import (
     AdminSuspensionEvent,
     AdminSuspensionReason,
     AdminSuspensionUser,
+    AdminUserCreationMode,
     MarzhelpAdminSettings,
     SystemOwner,
     User,
@@ -110,7 +111,276 @@ def is_owner(db: Session, admin: Admin | object) -> bool:
 def can_manage_children(db: Session, admin: Admin | object) -> bool:
     if not hierarchy_enabled(db):
         return bool(getattr(admin, "is_sudo", False))
-    return role_code(admin) in {OWNER, SUPER_ADMIN}
+    if is_owner(db, admin):
+        return True
+    admin_id = getattr(admin, "id", None)
+    if admin_id is None:
+        return False
+    return bool(
+        db.query(MarzhelpAdminSettings.can_create_admins)
+        .filter(MarzhelpAdminSettings.admin_id == int(admin_id))
+        .scalar()
+    )
+
+
+def admin_creation_remaining(
+    db: Session,
+    admin: Admin | object,
+    settings: MarzhelpAdminSettings | None = None,
+) -> int | None:
+    if is_owner(db, admin):
+        return None
+    admin_id = getattr(admin, "id", None)
+    if admin_id is None:
+        return 0
+    settings = settings or db.get(MarzhelpAdminSettings, int(admin_id))
+    if settings is None or not settings.can_create_admins:
+        return 0
+    if settings.admin_creation_limit is None:
+        return None
+    return max(
+        int(settings.admin_creation_limit)
+        - int(settings.admin_creations_used or 0)
+        - int(settings.delegated_admin_creation_limit or 0),
+        0,
+    )
+
+
+def allowed_child_roles(parent: Admin | object) -> list[str]:
+    parent_role = role_code(parent)
+    if parent_role == OWNER:
+        return [SUPER_ADMIN, ADMIN]
+    if parent_role == SUPER_ADMIN:
+        return [SUPER_ADMIN, ADMIN]
+    return [ADMIN]
+
+
+def allowed_child_billing_modes(
+    db: Session,
+    parent: Admin | object,
+    settings: MarzhelpAdminSettings | None = None,
+) -> list[admin_billing.BillingMode]:
+    if is_owner(db, parent):
+        return [
+            admin_billing.BillingMode.USED_TRAFFIC,
+            admin_billing.BillingMode.ALLOCATED_TRAFFIC,
+            admin_billing.BillingMode.USER_CREDIT,
+        ]
+    parent_id = getattr(parent, "id", None)
+    settings = settings or (
+        db.get(MarzhelpAdminSettings, int(parent_id)) if parent_id is not None else None
+    )
+    mode = admin_billing.billing_mode(settings)
+    if mode == admin_billing.BillingMode.USED_TRAFFIC:
+        modes = [admin_billing.BillingMode.USED_TRAFFIC]
+        if settings is not None and settings.can_create_allocated_children:
+            modes.append(admin_billing.BillingMode.ALLOCATED_TRAFFIC)
+        return modes
+    if mode == admin_billing.BillingMode.ALLOCATED_TRAFFIC:
+        return [admin_billing.BillingMode.ALLOCATED_TRAFFIC]
+    if mode == admin_billing.BillingMode.USER_CREDIT:
+        return [admin_billing.BillingMode.USER_CREDIT]
+    if mode == admin_billing.BillingMode.SEAT_CREDIT:
+        return [admin_billing.BillingMode.SEAT_CREDIT]
+    return [admin_billing.BillingMode.LEGACY_COMPAT]
+
+
+def configure_new_child_admin_creation(
+    db: Session,
+    *,
+    actor: Admin,
+    parent: Admin,
+    child: Admin,
+    child_settings: MarzhelpAdminSettings,
+    child_role: str,
+    child_billing_mode: admin_billing.BillingMode,
+    can_create_admins: bool,
+    can_delegate_admin_creation: bool,
+    can_create_allocated_children: bool,
+    admin_creation_limit: int | None,
+) -> None:
+    parent_settings = (
+        db.query(MarzhelpAdminSettings)
+        .filter(MarzhelpAdminSettings.admin_id == parent.id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if parent_settings is None:
+        raise HierarchyError("policy_missing", "Parent policy is missing")
+    if not admin_in_scope(db, actor, parent.id):
+        raise HierarchyError("admin_scope_forbidden", "Parent is outside actor scope")
+    if not is_owner(db, parent) and not parent_settings.can_create_admins:
+        raise HierarchyError("admin_create_forbidden", "Parent cannot create administrators")
+    if child_role not in allowed_child_roles(parent):
+        raise HierarchyError("child_role_too_powerful", "Child cannot be more powerful than parent")
+    if child_billing_mode not in allowed_child_billing_modes(db, parent, parent_settings):
+        raise HierarchyError(
+            "child_billing_mode_forbidden",
+            "Child billing mode must follow the parent billing contract",
+        )
+    if can_delegate_admin_creation and not can_create_admins:
+        raise HierarchyError(
+            "delegation_requires_creation",
+            "Delegating Admin creation requires Admin creation permission",
+        )
+    if can_create_admins and not is_owner(db, parent) and not parent_settings.can_delegate_admin_creation:
+        raise HierarchyError(
+            "admin_creation_delegation_forbidden",
+            "Parent cannot delegate Admin creation permission",
+        )
+    if can_delegate_admin_creation and not is_owner(db, parent) and not parent_settings.can_delegate_admin_creation:
+        raise HierarchyError(
+            "admin_creation_delegation_forbidden",
+            "Parent cannot delegate Admin creation permission",
+        )
+    if can_create_allocated_children and child_billing_mode != admin_billing.BillingMode.USED_TRAFFIC:
+        can_create_allocated_children = False
+    if (
+        can_create_allocated_children
+        and not is_owner(db, parent)
+        and not parent_settings.can_create_allocated_children
+    ):
+        raise HierarchyError(
+            "allocated_child_delegation_forbidden",
+            "Parent cannot delegate Allocated Traffic child creation",
+        )
+
+    child_limit = admin_creation_limit if can_create_admins else 0
+    if child_limit is not None:
+        child_limit = int(child_limit)
+        if child_limit < 0:
+            raise HierarchyError("invalid_admin_creation_limit", "Admin creation limit cannot be negative")
+    remaining = admin_creation_remaining(db, parent, parent_settings)
+    delegated_cost = int(child_limit or 0)
+    required = 1 + delegated_cost
+    if child_limit is None and remaining is not None:
+        raise HierarchyError(
+            "unlimited_admin_creation_forbidden",
+            "A finite parent cannot delegate unlimited Admin creation",
+        )
+    if remaining is not None and required > remaining:
+        raise HierarchyError(
+            "admin_creation_quota_exhausted",
+            "Parent has insufficient Admin creation quota",
+        )
+
+    if not is_owner(db, parent):
+        parent_settings.admin_creations_used = int(parent_settings.admin_creations_used or 0) + 1
+        parent_settings.delegated_admin_creation_limit = (
+            int(parent_settings.delegated_admin_creation_limit or 0) + delegated_cost
+        )
+    child_settings.can_create_admins = bool(can_create_admins)
+    child_settings.can_delegate_admin_creation = bool(can_delegate_admin_creation)
+    child_settings.can_create_allocated_children = bool(can_create_allocated_children)
+    child_settings.admin_creation_limit = child_limit
+    child_settings.admin_creations_used = 0
+    child_settings.delegated_admin_creation_limit = 0
+    child_settings.billing_mode = child_billing_mode.value
+
+
+def update_child_admin_creation(
+    db: Session,
+    *,
+    actor: Admin,
+    child: Admin,
+    can_create_admins: bool,
+    can_delegate_admin_creation: bool,
+    can_create_allocated_children: bool,
+    admin_creation_limit: int | None,
+) -> MarzhelpAdminSettings:
+    if child.parent_admin_id is None or child.id == owner_id(db):
+        raise HierarchyError("owner_policy_immutable", "Owner creation policy is unrestricted")
+    if not admin_in_scope(db, actor, child.id):
+        raise HierarchyError("admin_scope_forbidden", "Admin is outside actor scope")
+    ids = sorted({child.id, int(child.parent_admin_id)})
+    locked = {
+        row.admin_id: row
+        for row in db.query(MarzhelpAdminSettings)
+        .filter(MarzhelpAdminSettings.admin_id.in_(ids))
+        .order_by(MarzhelpAdminSettings.admin_id)
+        .with_for_update()
+        .all()
+    }
+    if set(locked) != set(ids):
+        raise HierarchyError("policy_missing", "Parent and child policies are required")
+    parent = db.get(Admin, int(child.parent_admin_id))
+    parent_settings = locked[int(child.parent_admin_id)]
+    child_settings = locked[child.id]
+    if parent is None:
+        raise HierarchyError("parent_missing", "Parent administrator does not exist")
+    if role_code(child) not in allowed_child_roles(parent):
+        raise HierarchyError("child_role_too_powerful", "Child cannot be more powerful than parent")
+    if can_delegate_admin_creation and not can_create_admins:
+        raise HierarchyError(
+            "delegation_requires_creation",
+            "Delegating Admin creation requires Admin creation permission",
+        )
+    if can_create_admins and not is_owner(db, parent) and not parent_settings.can_delegate_admin_creation:
+        raise HierarchyError(
+            "admin_creation_delegation_forbidden",
+            "Parent cannot delegate Admin creation permission",
+        )
+    if can_create_allocated_children and admin_billing.billing_mode(child_settings) != admin_billing.BillingMode.USED_TRAFFIC:
+        can_create_allocated_children = False
+    if (
+        can_create_allocated_children
+        and not is_owner(db, parent)
+        and not parent_settings.can_create_allocated_children
+    ):
+        raise HierarchyError(
+            "allocated_child_delegation_forbidden",
+            "Parent cannot delegate Allocated Traffic child creation",
+        )
+
+    minimum_limit = int(child_settings.admin_creations_used or 0) + int(
+        child_settings.delegated_admin_creation_limit or 0
+    )
+    new_limit = admin_creation_limit if can_create_admins else minimum_limit
+    if new_limit is not None:
+        new_limit = int(new_limit)
+        if new_limit < minimum_limit:
+            raise HierarchyError(
+                "admin_creation_limit_below_committed",
+                "Admin creation limit cannot be below used and delegated quota",
+            )
+    if not can_create_admins:
+        can_delegate_admin_creation = False
+        can_create_allocated_children = False
+
+    old_limit = child_settings.admin_creation_limit
+    old_reserved = int(old_limit or 0)
+    new_reserved = int(new_limit or 0)
+    if not is_owner(db, parent):
+        parent_remaining = admin_creation_remaining(db, parent, parent_settings)
+        available_with_current_reservation = (
+            None if parent_remaining is None else parent_remaining + old_reserved
+        )
+        if new_limit is None and available_with_current_reservation is not None:
+            raise HierarchyError(
+                "unlimited_admin_creation_forbidden",
+                "A finite parent cannot delegate unlimited Admin creation",
+            )
+        if (
+            available_with_current_reservation is not None
+            and new_reserved > available_with_current_reservation
+        ):
+            raise HierarchyError(
+                "admin_creation_quota_exhausted",
+                "Parent has insufficient Admin creation quota",
+            )
+        parent_settings.delegated_admin_creation_limit = max(
+            int(parent_settings.delegated_admin_creation_limit or 0)
+            - old_reserved
+            + new_reserved,
+            0,
+        )
+
+    child_settings.can_create_admins = bool(can_create_admins)
+    child_settings.can_delegate_admin_creation = bool(can_delegate_admin_creation)
+    child_settings.can_create_allocated_children = bool(can_create_allocated_children)
+    child_settings.admin_creation_limit = new_limit
+    db.flush()
+    return child_settings
 
 
 def account_status_code(db: Session, admin_id: int) -> str:
@@ -363,8 +633,10 @@ def reparent_subtree(db: Session, actor: Admin, target: Admin, new_parent: Admin
         raise HierarchyError("owner_required", "Only Owner can reparent a subtree")
     if target.id == actor.id or target.id == new_parent.id:
         raise HierarchyError("invalid_parent", "Owner/self reparent is not allowed")
-    if role_code(new_parent) == ADMIN:
-        raise HierarchyError("invalid_parent_role", "An Admin cannot have child administrators")
+    if not can_manage_children(db, new_parent):
+        raise HierarchyError("invalid_parent_permission", "New parent cannot manage child administrators")
+    if role_code(target) not in allowed_child_roles(new_parent):
+        raise HierarchyError("child_role_too_powerful", "Child cannot be more powerful than parent")
     if db.query(AdminHierarchy).filter(
         AdminHierarchy.ancestor_id == target.id,
         AdminHierarchy.descendant_id == new_parent.id,
@@ -388,10 +660,8 @@ def attach_new_child(
 ) -> None:
     if not can_manage_children(db, actor) or not admin_in_scope(db, actor, parent.id):
         raise HierarchyError("admin_create_forbidden", "Parent administrator is outside actor scope")
-    if role_code(parent) == ADMIN:
-        raise HierarchyError("invalid_parent_role", "An Admin cannot have child administrators")
-    if child_role not in {SUPER_ADMIN, ADMIN}:
-        raise HierarchyError("invalid_role", "Only Super Admin or Admin children can be created")
+    if child_role not in allowed_child_roles(parent):
+        raise HierarchyError("child_role_too_powerful", "Child cannot be more powerful than parent")
     child.role_id = ROLE_IDS[child_role]
     child.parent_admin_id = parent.id
     child.is_sudo = False
@@ -399,7 +669,9 @@ def attach_new_child(
     policy = db.get(MarzhelpAdminSettings, child.id)
     if policy is not None:
         policy.renewal_enabled = True
-        policy.user_creation_mode_id = USER_CREATION_MODE_IDS[FREE_FORM]
+        # New descendants are Plan-only unless their parent explicitly grants
+        # free-form creation. This keeps the raw endpoint fail-closed.
+        policy.user_creation_mode_id = USER_CREATION_MODE_IDS[PLAN_ONLY]
         policy.account_status_id = ACCOUNT_STATUS_IDS[ACTIVE]
     admins = db.query(Admin).order_by(Admin.id).with_for_update().all()
     settings = hierarchy_settings(db, lock=True)
@@ -410,6 +682,41 @@ def attach_new_child(
         db.flush()
 
 
+def configure_child_user_creation_access(
+    db: Session,
+    *,
+    actor: Admin,
+    parent: Admin,
+    child_settings: MarzhelpAdminSettings,
+    mode: str,
+    can_manage_plans: bool,
+) -> None:
+    if mode not in USER_CREATION_MODE_IDS:
+        raise HierarchyError("invalid_creation_mode", "Unknown user creation mode")
+    if not is_owner(db, actor):
+        parent_settings = db.get(MarzhelpAdminSettings, parent.id)
+        if parent_settings is None:
+            raise HierarchyError("parent_policy_missing", "Parent policy is missing")
+        parent_mode = (
+            db.query(AdminUserCreationMode.code)
+            .filter(AdminUserCreationMode.id == parent_settings.user_creation_mode_id)
+            .scalar()
+            or PLAN_ONLY
+        )
+        if mode == FREE_FORM and parent_mode != FREE_FORM:
+            raise HierarchyError(
+                "child_creation_mode_too_powerful",
+                "A Plan-only parent cannot grant free-form user creation",
+            )
+        if can_manage_plans and not parent_settings.can_manage_plans:
+            raise HierarchyError(
+                "plan_management_delegation_forbidden",
+                "Parent cannot delegate Plan management",
+            )
+    child_settings.user_creation_mode_id = USER_CREATION_MODE_IDS[mode]
+    child_settings.can_manage_plans = bool(can_manage_plans)
+
+
 def own_credit_spend(db: Session, settings: MarzhelpAdminSettings) -> int:
     mode = admin_billing.billing_mode(settings)
     if mode == admin_billing.BillingMode.SEAT_CREDIT:
@@ -418,6 +725,8 @@ def own_credit_spend(db: Session, settings: MarzhelpAdminSettings) -> int:
         return int(settings.used_traffic or 0)
     if mode == admin_billing.BillingMode.USED_TRAFFIC:
         return marzhelp_policy.used_traffic_spend(db, settings.admin_id)
+    if mode == admin_billing.BillingMode.USER_CREDIT:
+        return int(db.query(User.id).filter(User.admin_id == settings.admin_id).count())
     if (settings.calculate_volume or "used_traffic") == "created_traffic":
         return int(settings.used_traffic or 0)
     return marzhelp_policy.used_traffic_spend(db, settings.admin_id)
@@ -428,6 +737,8 @@ def available_credit(db: Session, settings: MarzhelpAdminSettings) -> int | None
     configured_limit = (
         settings.device_capacity_limit
         if mode == admin_billing.BillingMode.SEAT_CREDIT
+        else settings.max_users
+        if mode == admin_billing.BillingMode.USER_CREDIT
         else settings.total_traffic
     )
     if configured_limit is None:
@@ -435,10 +746,15 @@ def available_credit(db: Session, settings: MarzhelpAdminSettings) -> int | None
     admin = db.get(Admin, settings.admin_id)
     if admin is not None and is_owner(db, admin):
         return None
+    delegated = (
+        0
+        if mode == admin_billing.BillingMode.USED_TRAFFIC
+        else int(settings.delegated_traffic or 0)
+    )
     return max(
         int(configured_limit or 0)
         - own_credit_spend(db, settings)
-        - int(settings.delegated_traffic or 0),
+        - delegated,
         0,
     )
 
@@ -454,8 +770,12 @@ def automatic_suspension_reason(
     configured_limit = (
         settings.device_capacity_limit
         if admin_billing.billing_mode(settings) == admin_billing.BillingMode.SEAT_CREDIT
+        else settings.max_users
+        if admin_billing.billing_mode(settings) == admin_billing.BillingMode.USER_CREDIT
         else settings.total_traffic
     )
+    if admin_billing.billing_mode(settings) == admin_billing.BillingMode.USER_CREDIT:
+        return None
     available = available_credit(db, settings) if configured_limit is not None else None
     if available is not None and available <= 0:
         return 2
@@ -488,9 +808,7 @@ def transfer_credit(
 
     ledger_from_id = target.id if operation_type == "reclaim" else source.id
     ledger_to_id = source.id if operation_type == "reclaim" else target.id
-    reason = (note or f"{operation_type} credit").strip()
-    if not reason:
-        raise HierarchyError("reason_required", "A reason is required for credit adjustment")
+    reason = (note or f"system:{operation_type}_credit").strip()
 
     def checked_existing(existing: AdminCreditTransfer):
         if (
@@ -535,22 +853,37 @@ def transfer_credit(
             source_mode = admin_billing.billing_mode(source_wallet)
             target_mode = admin_billing.billing_mode(target_wallet)
             seat_resource = target_mode == admin_billing.BillingMode.SEAT_CREDIT
-            if (
-                not is_owner(db, source)
-                and (source_mode == admin_billing.BillingMode.SEAT_CREDIT) != seat_resource
-            ):
+            user_resource = target_mode == admin_billing.BillingMode.USER_CREDIT
+            compatible = (
+                source_mode == target_mode
+                or source_mode == admin_billing.BillingMode.USED_TRAFFIC
+                and target_mode == admin_billing.BillingMode.ALLOCATED_TRAFFIC
+            )
+            if not is_owner(db, source) and not compatible:
                 raise HierarchyError(
                     "credit_resource_mismatch",
                     "Parent and child billing modes use incompatible credit resources",
                 )
-            resource = "seat_credit" if seat_resource else "traffic_credit"
+            resource = (
+                "seat_credit"
+                if seat_resource
+                else "user_credit"
+                if user_resource
+                else "traffic_credit"
+            )
             balance_column = (
                 MarzhelpAdminSettings.device_capacity_limit
                 if seat_resource
+                else MarzhelpAdminSettings.max_users
+                if user_resource
                 else MarzhelpAdminSettings.total_traffic
             )
             balance_before = getattr(target_wallet, balance_column.key)
             source_delegated_before = int(source_wallet.delegated_traffic or 0)
+            tracks_delegated_credit = (
+                not is_owner(db, source)
+                and source_mode != admin_billing.BillingMode.USED_TRAFFIC
+            )
 
             if operation_type == "reclaim":
                 reclaimable = available_credit(db, target_wallet)
@@ -561,18 +894,26 @@ def transfer_credit(
                     )
                 if amount > reclaimable:
                     raise HierarchyError("reclaim_exceeds_available", "Reclaim exceeds child available credit")
-                if amount > source_delegated_before:
+                if tracks_delegated_credit and amount > source_delegated_before:
                     raise HierarchyError(
                         "reclaim_exceeds_delegated",
                         "Reclaim exceeds credit delegated by the parent",
                     )
                 balance_after = int(balance_before) - amount
-                source_delegated_after = source_delegated_before - amount
+                source_delegated_after = (
+                    source_delegated_before - amount
+                    if tracks_delegated_credit
+                    else source_delegated_before
+                )
             else:
                 available = available_credit(db, source_wallet)
-                if available is not None and amount > available:
+                if not is_owner(db, source) and available is not None and amount > available:
                     raise HierarchyError("credit_exhausted", "Parent has insufficient delegatable credit")
-                source_delegated_after = source_delegated_before + amount
+                source_delegated_after = (
+                    source_delegated_before + amount
+                    if tracks_delegated_credit
+                    else source_delegated_before
+                )
                 balance_after = int(balance_before or 0) + amount
 
             updates = {
@@ -893,9 +1234,16 @@ def _freeze_admin_once(
     note: str | None = None,
     batch_size: int = 500,
 ) -> tuple[AdminSuspensionEvent, bool]:
-    """Owner Freeze always snapshots and freezes the complete descendant subtree."""
-    if not is_owner(db, actor):
-        raise HierarchyError("owner_required", "Only Owner can freeze an Admin subtree")
+    """Authorized parent Freeze snapshots and freezes the complete descendant subtree."""
+    if not (
+        is_owner(db, actor)
+        or can_manage_children(db, actor)
+        and actor.id != target.id
+        and admin_in_scope(db, actor, target.id)
+    ):
+        raise HierarchyError(
+            "freeze_forbidden", "Only Owner or an authorized parent can freeze this subtree"
+        )
     if target.id == actor.id or role_code(target) == OWNER:
         raise HierarchyError("invalid_freeze_target", "Owner cannot be frozen")
     if not idempotency_key or len(idempotency_key) > 128:
@@ -1070,9 +1418,16 @@ def unfreeze_admin(
     target: Admin,
     idempotency_key: str,
 ) -> tuple[AdminSuspensionEvent, int, int, bool]:
-    """Restore only state still owned by the matching Owner Freeze event."""
-    if not is_owner(db, actor):
-        raise HierarchyError("owner_required", "Only Owner can unfreeze an Admin subtree")
+    """Restore only state still owned by the matching Freeze event."""
+    if not (
+        is_owner(db, actor)
+        or can_manage_children(db, actor)
+        and actor.id != target.id
+        and admin_in_scope(db, actor, target.id)
+    ):
+        raise HierarchyError(
+            "unfreeze_forbidden", "Only Owner or an authorized parent can unfreeze this subtree"
+        )
     if not idempotency_key or len(idempotency_key) > 128:
         raise HierarchyError("invalid_idempotency_key", "A bounded idempotency key is required")
     replay = db.query(AdminSuspensionEvent).filter(
