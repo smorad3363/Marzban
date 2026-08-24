@@ -85,6 +85,25 @@ Fresh-install this exact candidate from GitHub:
 sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.0.0-rc.4/scripts/marzban.sh)" @ install --version v5.0.0-rc.4 --database mysql
 ```
 
+## v5.0.0-rc.5 MySQL credit reconciliation candidate
+
+This candidate keeps the `rc.4` Admin and Dashboard changes and restores finite
+delegated-credit reconciliation for an unrestricted Owner. Actual-usage parents
+remain exempt from upfront delegated-credit charging and are charged from actual
+descendant traffic.
+
+Update a staging server to this exact candidate:
+
+```bash
+marzban update --version v5.0.0-rc.5
+```
+
+Fresh-install this exact candidate from GitHub:
+
+```bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.0.0-rc.5/scripts/marzban.sh)" @ install --version v5.0.0-rc.5 --database mysql
+```
+
 ## Release process
 
 1. Update `VERSION` and `app.__version__`.

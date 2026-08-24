@@ -880,10 +880,10 @@ def transfer_credit(
             )
             balance_before = getattr(target_wallet, balance_column.key)
             source_delegated_before = int(source_wallet.delegated_traffic or 0)
-            tracks_delegated_credit = (
-                not is_owner(db, source)
-                and source_mode != admin_billing.BillingMode.USED_TRAFFIC
-            )
+            # Owner remains unlimited, but finite credit delegated from every
+            # non-USED_TRAFFIC wallet must still be recorded for reconciliation.
+            # USED_TRAFFIC parents are charged from actual descendant usage instead.
+            tracks_delegated_credit = source_mode != admin_billing.BillingMode.USED_TRAFFIC
 
             if operation_type == "reclaim":
                 reclaimable = available_credit(db, target_wallet)

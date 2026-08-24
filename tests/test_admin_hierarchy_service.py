@@ -359,8 +359,8 @@ def test_credit_transfer_is_idempotent_and_reclaim_is_bounded(db):
     db.refresh(owner_wallet)
     db.refresh(child_wallet)
     assert duplicate.id == first.id
-    # Owner is unrestricted and USED_TRAFFIC parents are charged by actual subtree use.
-    assert owner_wallet.delegated_traffic == 0
+    # Owner is unrestricted, while finite legacy delegation stays reconcilable.
+    assert owner_wallet.delegated_traffic == 300
     assert child_wallet.total_traffic == 300
 
     with pytest.raises(admin_hierarchy.HierarchyError) as conflict:
