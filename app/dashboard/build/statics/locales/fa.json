@@ -580,5 +580,8 @@
   "errors.codes.admin_phone_required": "شماره تلفن برای ادمین جدید الزامی است.",
   "errors.codes.credit_exhausted": "اعتبار کافی برای انجام این عملیات وجود ندارد.",
   "errors.codes.bulk_scope_required": "محدوده عملیات گروهی باید صریحاً انتخاب شود.",
-  "errors.codes.plan_scope_required": "محدوده شبکه پلن باید صریح و غیرخالی باشد."
+  "errors.codes.plan_scope_required": "محدوده شبکه پلن باید صریح و غیرخالی باشد.",
+  "errors.codes.activation_forbidden": "فقط مالک یا والد مجاز می‌تواند این ادمین را فعال کند.",
+  "errors.codes.account_not_disabled": "این ادمین در وضعیت غیرفعال نیست.",
+  "errors.codes.suspension_condition_active": "تا وقتی محدودیت اعتبار یا تاریخ پایان برطرف نشده، فعال‌سازی ممکن نیست."
 }

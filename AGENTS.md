@@ -1,3 +1,75 @@
+## Stable baseline and regression-safety contract
+
+> [!danger] CURRENT STATE IS THE STABLE BASELINE
+> **CURRENT STATE IS THE STABLE BASELINE. A requested change must not regress functionality that is currently working.**
+
+The current known-good release is `v5.0.0-rc.7`. Treat the current project state as
+stable and working, and follow these rules for every task:
+
+1. Preserve all existing working functionality unless the user explicitly requests a
+   behavior change.
+2. Always make the smallest possible change required for the requested task.
+3. Never perform unrelated refactors, cleanups, rewrites, formatting changes,
+   architecture changes, or optimizations.
+4. Do not modify unrelated features while working on another feature.
+5. Before modifying shared components, utilities, services, database code, API
+   contracts, authentication, routing, global configuration, global styles, Docker
+   files, installation scripts, update scripts, or dependency files, inspect their
+   usages and possible regression impact first.
+6. Prefer a local fix over changing shared or global behavior whenever practical.
+7. Do not add, remove, upgrade, or downgrade dependencies unless the requested task
+   actually requires it.
+8. Do not modify lockfiles unless an intentional dependency change requires it.
+9. Do not alter installation or update behavior or version references unless the user
+   explicitly requests it.
+10. Preserve compatibility with the current update command:
+
+    ```bash
+    marzban update --version v5.0.0-rc.7
+    ```
+
+11. Preserve compatibility with the current fresh-install command:
+
+    ```bash
+    sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.0.0-rc.7/scripts/marzban.sh)" @ install --version v5.0.0-rc.7 --database mysql
+    ```
+
+12. Do not run destructive Git commands such as `git reset --hard`, `git clean -fd`,
+    or commands that may discard existing work unless the user explicitly requests
+    them.
+13. Never overwrite or revert unrelated user changes.
+14. When fixing a bug, identify the root cause first. Do not hide errors by disabling
+    checks, suppressing exceptions, weakening validation, or removing tests.
+15. Existing tests and working behavior are part of the product contract. Do not
+    delete, skip, or weaken tests merely to make a change pass.
+16. After every implementation, inspect all of the following:
+
+    - `git status`
+    - `git diff --stat`
+    - `git diff`
+
+17. If a small task unexpectedly causes a large diff or changes unrelated files,
+    investigate and reduce the change before finishing.
+18. Run relevant available tests and checks after modifications.
+19. If shared or global code is changed, verify important consumers for regressions.
+20. Never claim something was tested unless it was actually tested.
+21. At completion, report:
+
+    - what was changed;
+    - which files were changed;
+    - why each file was changed;
+    - what tests and checks were run;
+    - whether shared or global behavior changed;
+    - any remaining risk or anything that could not be verified.
+
+22. If an unrelated issue is discovered, report it instead of silently fixing it.
+23. If requirements are ambiguous, preserve current behavior and choose the least
+    destructive implementation.
+24. Bug fixes and refactors should normally be separate tasks.
+25. Do not execute installation, update, deployment, database migration, destructive
+    database operations, release creation, Git push, or production-affecting commands
+    unless the user explicitly asks for them.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.

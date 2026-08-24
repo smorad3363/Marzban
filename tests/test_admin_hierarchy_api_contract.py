@@ -16,6 +16,7 @@ def test_admin_hierarchy_openapi_contract_is_registered():
         "/api/admin-management/{username}/api-tokens",
         "/api/admin-management/{username}/suspend",
         "/api/admin-management/{username}/resume",
+        "/api/admin-management/{username}/activate",
         "/api/admin-management/{username}/freeze",
         "/api/admin-management/{username}/unfreeze",
         "/api/admin-management/{username}/referral",

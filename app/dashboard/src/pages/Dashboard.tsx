@@ -1,6 +1,6 @@
-import { Badge, Box, Button, Collapse, HStack, Text, useBreakpointValue } from "@chakra-ui/react";
+import { Badge, Box, Button, Card, Collapse, HStack, Text, useBreakpointValue, useDisclosure } from "@chakra-ui/react";
+import { AdminFormDrawer } from "components/AdminFormDrawer";
 import { AppShell } from "components/AppShell";
-import { AdminCreditSummary } from "components/AdminCreditSummary";
 import { DashboardOverview } from "components/DashboardOverview";
 import { CoreSettingsModal } from "components/CoreSettingsModal";
 import { DeleteUserModal } from "components/DeleteUserModal";
@@ -8,6 +8,7 @@ import { Filters } from "components/Filters";
 import { HostsDialog } from "components/HostsDialog";
 import { NodesDialog } from "components/NodesModal";
 import { NodesUsage } from "components/NodesUsage";
+import { PlanCreateModal } from "components/PlanCreateModal";
 import { QRCodeDialog } from "components/QRCodeDialog";
 import { ResetAllUsageModal } from "components/ResetAllUsageModal";
 import { ResetUserUsageModal } from "components/ResetUserUsageModal";
@@ -17,7 +18,6 @@ import { UsersTable } from "components/UsersTable";
 import { fetchInbounds, useDashboard } from "contexts/DashboardContext";
 import { FC, useEffect, useState } from "react";
 import useGetUser from "hooks/useGetUser";
-import { Statistics } from "../components/Statistics";
 
 const calendarParts = (date: Date, calendar: "persian" | "islamic") => {
   const parts = new Intl.DateTimeFormat(`en-US-u-ca-${calendar}`, { month: "numeric", day: "numeric" }).formatToParts(date);
@@ -51,6 +51,8 @@ export const Dashboard: FC = () => {
   const { userData } = useGetUser();
   const isOwner = userData.role === "OWNER" || userData.is_sudo;
   const desktopUsersVisible = useBreakpointValue({ base: false, md: true }) ?? false;
+  const adminCreate = useDisclosure();
+  const planCreate = useDisclosure();
   const [mobileUsersOpen, setMobileUsersOpen] = useState(false);
   const today = new Date();
   const holiday = iranHoliday(today);
@@ -65,26 +67,22 @@ export const Dashboard: FC = () => {
   }, []);
   return (
     <AppShell>
-      <HStack justify="space-between" align="end" mb={5} flexWrap="wrap" gap={3}>
+      <Card as="header" p={{ base: 4, md: 5 }} mb={3} bg="linear-gradient(145deg, var(--panel-surface), var(--panel-nested))" color="gray.100" borderWidth="1px" borderColor="var(--panel-border)" borderRadius="14px">
+      <HStack justify="space-between" align="center" flexWrap="wrap" gap={3}>
         <Box>
-          <Text as="h1" fontSize={{ base: "2xl", md: "3xl" }} fontWeight="800" letterSpacing="-0.035em">
-            داشبورد
+          <Text color="primary.300" fontSize="xs" fontWeight="800">مرکز کنترل</Text>
+          <Text as="h1" mt={1} fontSize={{ base: "xl", md: "2xl" }} fontWeight="800" letterSpacing="-0.035em">
+            خوش آمدی، <Text as="span" dir="ltr">{userData.username}</Text>
           </Text>
-          <Text color="gray.400" mt={1}>آمار مهم حساب و کاربران را یکجا ببینید.</Text>
+          <Text color="gray.400" mt={1} fontSize="sm">وضعیت حساب، کاربران، فعالیت‌ها و منابع مجاز را یکجا ببینید.</Text>
         </Box>
-        <Box textAlign="end" px={3} py={2} bg="var(--panel-surface)" borderWidth="1px" borderColor="var(--panel-border)" borderRadius="10px">
+        <Box textAlign="end" px={3} py={2} bg="rgba(255,255,255,.03)" borderWidth="1px" borderColor="var(--panel-border)" borderRadius="10px">
           <Text fontSize="sm" fontWeight="750">{today.toLocaleDateString("fa-IR-u-ca-persian", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}</Text>
           <Badge mt={1} colorScheme={holiday ? "orange" : "green"}>{holiday || "روز کاری"}</Badge>
         </Box>
       </HStack>
-      <AdminCreditSummary />
-      <DashboardOverview />
-      {isOwner && <Box as="section" aria-labelledby="system-health-title" mb={6}>
-        <Text color="primary.300" fontSize="xs" fontWeight="800">وضعیت سرور</Text>
-        <Text id="system-health-title" as="h2" mt={1} fontSize="lg" fontWeight="800">سلامت سرور</Text>
-        <Text mt={1} mb={3} color="gray.400" fontSize="sm">تعداد کاربران فعال، ترافیک و حافظه مصرف‌شده.</Text>
-        <Statistics />
-      </Box>}
+      </Card>
+      <DashboardOverview onCreateAdmin={adminCreate.onOpen} onCreatePlan={planCreate.onOpen} />
       <Box as="section" aria-labelledby="user-operations-title">
         <Text color="primary.300" fontSize="xs" fontWeight="800">کاربران</Text>
         <Text id="user-operations-title" as="h2" mt={1} fontSize="lg" fontWeight="800">مدیریت کاربران</Text>
@@ -113,6 +111,8 @@ export const Dashboard: FC = () => {
       </Collapse>
       </Box>
         <UserDialog />
+        <AdminFormDrawer isOpen={adminCreate.isOpen} admin={null} onClose={adminCreate.onClose} />
+        <PlanCreateModal isOpen={planCreate.isOpen} isOwner={isOwner} onClose={planCreate.onClose} />
         <DeleteUserModal />
         <QRCodeDialog />
         <ResetUserUsageModal />

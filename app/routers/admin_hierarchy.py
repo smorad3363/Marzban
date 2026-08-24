@@ -1328,6 +1328,34 @@ def resume_admin(
     return {"restored_users": restored}
 
 
+@router.post("/admin-management/{username}/activate")
+def activate_disabled_admin(
+    username: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
+    actor = _db_actor(db, admin)
+    target = _target(db, username)
+    try:
+        admin_hierarchy.activate_disabled_admin(db, actor=actor, target=target)
+    except Exception as exc:
+        _raise_domain(exc)
+    AuditLogService.log(
+        db,
+        actor,
+        "admin.activate",
+        "admin",
+        f"Admin {actor.username} activated {target.username}",
+        target_id=target.id,
+        target_name=target.username,
+        previous_value={"account_status": "DISABLED"},
+        new_value={"account_status": "ACTIVE"},
+        request=request,
+    )
+    return {"account_status": "ACTIVE"}
+
+
 @router.post("/admin-management/{username}/users/disable")
 def disable_users_job(
     username: str,

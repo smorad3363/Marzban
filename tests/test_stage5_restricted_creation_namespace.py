@@ -236,6 +236,30 @@ def test_seat_raw_endpoint_is_denied_even_if_creation_mode_is_free_form(db, monk
     assert exc.value.detail["code"] == "plan_only"
 
 
+def test_plan_only_raw_endpoint_is_denied_after_policy_save(db, monkeypatch):
+    session, _ = db
+    tag, _ = _network(session, monkeypatch)
+    admin, settings = _admin(session, "plan-only-api", billing_mode="USER_CREDIT")
+    settings.user_creation_mode_id = admin_hierarchy.USER_CREATION_MODE_IDS[
+        admin_hierarchy.PLAN_ONLY
+    ]
+    session.get(AdminHierarchySettings, 1).enabled = True
+    session.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        add_user(
+            Request({"type": "http", "method": "POST", "path": "/api/user", "headers": []}),
+            _payload("forbidden-plan-only", tag),
+            BackgroundTasks(),
+            session,
+            APIAdmin(username=admin.username, is_sudo=False),
+        )
+
+    assert exc.value.status_code == 403
+    assert exc.value.detail["code"] == "plan_only"
+    assert session.query(User).filter(User.admin_id == admin.id).count() == 0
+
+
 def test_restricted_raw_endpoint_rejects_protected_network_and_device_fields(db, monkeypatch):
     session, _ = db
     tag, _ = _network(session, monkeypatch)

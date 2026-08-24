@@ -123,6 +123,25 @@ Fresh-install this exact candidate from GitHub:
 sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.0.0-rc.6/scripts/marzban.sh)" @ install --version v5.0.0-rc.6 --database mysql
 ```
 
+## v5.0.0-rc.7 Admin and Dashboard usability candidate
+
+This candidate keeps the `rc.6` migration and accounting behavior, fixes Admin
+policy persistence and status/credit actions, and ships the compact data-driven
+Dashboard and Admin list. The UI uses the existing scoped APIs and preserves
+Plan-only creation enforcement.
+
+Update to this exact candidate:
+
+```bash
+marzban update --version v5.0.0-rc.7
+```
+
+Fresh-install this exact candidate from GitHub:
+
+```bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.0.0-rc.7/scripts/marzban.sh)" @ install --version v5.0.0-rc.7 --database mysql
+```
+
 ## Release process
 
 1. Update `VERSION` and `app.__version__`.

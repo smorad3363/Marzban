@@ -2,7 +2,7 @@
 
 آخرین به‌روزرسانی: `2026-08-24`
 
-وضعیت: `V4.9.3_RELEASE_CANDIDATE` — پشتیبانی نصب تازه با MySQL latest و ارتقای مرحله‌ای دیتای موجود `8.0 → 8.4 → 9.7 → latest` پیاده و در CI با حفظ یک volume واقعی تأیید شد. انتشار immutable `v4.9.3` در انتظار گیت نهایی است.
+وضعیت: `V5.0.0-RC.7_RELEASE_IN_PROGRESS` — برش تأییدشدهٔ Dashboard و مدیریت Admin برای انتشار immutable آماده می‌شود؛ commit، tag، GitHub prerelease و GHCR باید دقیقاً یک منبع داشته باشند.
 
 ## قانون اجباری شروع هر چت و هر جلسه
 
@@ -830,6 +830,98 @@ reason codeهای حداقلی برای لاگ parent:
 
 ## نقطه دقیق ادامه
 
+> [!warning] انتشار immutable `v5.0.0-rc.7` — در حال اجرا (`2026-08-25`)
+> مجوز صریح کاربر برای commit، push، tag و prerelease دریافت شد. baseline راه‌اندازی
+> `v5.0.0-rc.6@cee2c74ce520c503f9dd66847cc62aa93edd5062` از remote و GitHub
+> بازتأیید شد و `v5.0.0-rc.7` روی remote وجود ندارد. manifest فقط کد، build، آزمون
+> و مستندات مرتبطِ working tree را شامل می‌شود؛ `.codex/`، `graphify-out/`،
+> `design-system/`، `.graphifyignore` و دو حذف نامطمئن مستندات خارج انتشار می‌مانند.
+> نقطهٔ ادامه: bump نسخه و release notes؛ گیت کامل آزمون/DB contract؛ بازبینی manifest؛
+> commit و push branch؛ tag annotated؛ انتظار برای CI MySQL/GHCR/GitHub Release؛
+> سپس تطبیق commit/tag/image digest و ارائهٔ دستور دقیق update. هیچ deploy اجرا نشود.
+
+> [!success] برش بازطراحی داده‌محور فهرست Admin — کامل (`2026-08-24`)
+> صفحهٔ `Admins` طبق مرجع فشردهٔ مشکی–طلایی کاربر بازطراحی شد، بدون افزودن
+> summary، endpoint یا دادهٔ تکراری. ردیف desktop فقط چهار گروه دارد: هویت و وضعیت،
+> نوع دسترسی و کاربران، اعتبار، عملیات permission-aware. موبایل همان داده را به کارت
+> فشرده و بدون جدول افقی تبدیل می‌کند. جست‌وجو، فیلترهای جمع‌شونده، انتخاب گروهی،
+> pagination، جزئیات، ویرایش، حذف، Freeze/Resume/Activate، Trial reset و ledger
+> افزایش/کاهش اعتبار حفظ شدند. contract، TypeScript، Vite، Browser در
+> `375/768/812x375/1024/1440` و Graphify همگی PASS شدند. API/schema/migration/
+> query/index/accounting/permission/version/install/update بدون تغییر. نقطهٔ ادامه:
+> این برش کامل است؛ بدون commit/push/tag/release/deploy.
+
+> [!success] برش بازطراحی داشبورد — کامل (`2026-08-24`)
+> داشبورد بر پایهٔ مرجع مشکی–طلایی کاربر بازطراحی شد، اما فقط داده‌های واقعی و
+> غیرتکراری نمایش داده می‌شوند. منابع قطعی این برش عبارت‌اند از aggregateهای
+> scope-aware در `/dashboard/overview`، وضعیت و اعتبار حساب در `/account/summary`،
+> پنج فعالیت آخر از cursor endpoint موجود `/account/activity?limit=5` و منابع واقعی
+> سرور در `/system` فقط برای Owner. نمودار نوع اعتبار فقط وقتی بیش از یک mode دارای
+> داده باشد نمایش داده می‌شود؛ برای حساب تک‌حالته، خلاصهٔ همان مدل اعتبار جایگزین
+> می‌شود. API، schema، migration، query، index، accounting، permission، version،
+> install و update در این برش تغییر نکردند. جزئیات تحلیلی در موبایل پیش‌فرض بسته
+> است و Dashboard دیگر summaryهای تکراری را mount نمی‌کند. contract، TypeScript،
+> build، Browser در `375/768/812x375/1024/1440` و ماتریس Owner/Super/Admin همگی
+> PASS شدند. نقطهٔ ادامه: این برش کامل است؛ بدون commit/push/deploy/release.
+
+در `2026-08-24` منوی عملیات سریع داشبورد اصلاح شد. trigger با مختصات فیزیکی در
+گوشهٔ چپ قرار گرفت و در Browser با کنترل branding هم‌پوشانی نداشت. «فهرست کاربران»،
+«مدیریت ادمین‌ها»، لینک عمومی «پلن‌ها» و تنظیمات تکراری حذف شدند. «ساخت ادمین» فقط
+با `can_create_admins` و «ساخت پلن» فقط برای Owner یا `can_manage_plans` نمایش داده
+می‌شوند؛ فرم واقعی Admin Drawer و فرم Plan با همان validation شبکه داخل Dashboard
+باز می‌شوند و URL بدون navigation/reload ثابت می‌ماند. ماتریس preview برای Owner،
+Super Admin و Admin محدود، UI/permission/inbound/TypeScript/build/Browser/console
+همگی PASS شدند. نقطه ادامه: برش کامل است؛ بدون backend/schema/accounting/version و
+کار بعدی فقط با دستور صریح جدید شروع شود.
+
+در `2026-08-24` گزینه‌های پیشرفته و وضعیت `DISABLED` اصلاح و کامل شد. علت نمایش
+کلیدهای انگلیسی، استفادهٔ مستقیم UI از نام فیلدهای policy به‌جای کلیدهای ترجمهٔ
+موجود بود. هر پنج محدودیت عملیات مستقل از نوع اعتبار باقی ماندند: ساخت/حذف/reset/
+revoke کنترل مجوز عملیاتی‌اند و منع حجم نامحدود در `PLAN_ONLY` نیز Plan نامحدود را
+fail-closed می‌کند. `disabled_branch` فقط fixture دیتای preview است؛ مسیر
+فعال‌سازی صریح برای Owner/والد مجاز اضافه شد و فقط account status را تغییر می‌دهد؛
+User، credit، Plan و accounting دست‌نخورده می‌مانند. «والد» به «زیرمجموعهٔ» تغییر
+کرد. targeted/full/UI/TypeScript/build/Browser/Graphify همگی PASS شدند. نقطه ادامه:
+برش کامل است؛ بدون schema/migration/version/dependency و کار بعدی فقط با دستور
+صریح جدید شروع شود.
+
+در `2026-08-24` رگرسیون رفع فریز رابط بررسی شد: UI فقط وجود
+`active_owner_freeze_event_id` را می‌سنجد، پس Admin با `account_status=SUSPENDED`
+و فریز دستی دکمه ندارد. قرارداد موجود backend دو مسیر دارد: `unfreeze` برای رویداد
+Owner subtree و `resume` برای suspension دستی. تست واقعی نشان داد suspension قدیمی
+بدون event نیز از `resume` با `no_active_suspension` رد می‌شود. اصلاح محدود backend:
+eventless suspension فقط وقتی شرط خودکار credit/expiry فعال نیست پاک می‌شود؛ eventهای
+موجود و restoration snapshot دست‌نخورده ماندند. service/full/build/Browser همگی
+PASS شدند و تست واقعی `frozen_branch: SUSPENDED -> ACTIVE` موفق بود؛ preview سپس
+به حالت فریز اولیه بازگردانده شد. نقطه ادامه: این برش کامل است؛ بدون
+schema/migration/accounting change و کار بعدی فقط با دستور صریح جدید شروع شود.
+
+در `2026-08-24` پس از اصلاح cache فرم، فهرست Admin در preview با
+`GET /api/admin-management` و HTTP 500 متوقف شد. علت قطعی، تقسیم بر صفر در
+`_quota_summary_values` برای credit محدود و تمام‌شده با `limit=0` است؛ credit صفر
+باید finite و exhausted بماند، اما درصد آن بدون تقسیم برابر `100` گزارش شود.
+هم‌زمان اکشن محلی افزایش/کاهش اعتبار با همان endpointهای ledger موجود کنار Freeze
+در desktop/mobile اضافه شد. تست رگرسیون zero-credit، UI contract، TypeScript/build،
+full backend و Browser همگی PASS شدند؛ رفت‌وبرگشت واقعی `0.01 GB` نیز بدون تغییر
+ماندهٔ نهایی موفق بود. نقطه ادامه: این برش کامل است؛ بدون
+schema/migration/query/version change و کار بعدی فقط با دستور صریح جدید شروع شود.
+
+در `2026-08-24` بررسی دو گزارش ذخیره‌نشدن `PLAN_ONLY` و دسته‌های Plan روی
+baseline `agent/admin-hierarchy-v4.9.0@3ca44d4d60178caa0b9ad4dd4560a6f0704c512f`
+شروع شد؛ tag نصب remote برابر `v5.0.0-rc.6@cee2c74ce520c503f9dd66847cc62aa93edd5062`
+بازتأیید شد. API و DB preview مقادیر `user_creation_mode=PLAN_ONLY` و
+`plan_category_ids=[1]` را پس از ذخیره درست برگرداندند؛ raw create برای
+`admin_demo` با `403 plan_only` رد شد و create-from-plan شمار Own User را
+`1 -> 2` تغییر داد و پس از حذف probe به `1` برگشت. علت رابط، نگه‌داشتن رکورد
+قدیمی در cache فهرست `admin-management` پس از mutation است؛ پاسخ canonical
+سرور در cache نوشته نمی‌شود و بازکردن سریع فرم مقدارهای پیش از ذخیره را نشان
+می‌دهد. اصلاح نهایی: cache همان query بلافاصله با پاسخ canonical درخواست PUT
+به‌روزرسانی شد و سپس invalidation قبلی نیز حفظ شد؛ بنابراین بازکردن فوری فرم، mode
+و دسته‌های تازهٔ Plan را از رکورد قدیمی بازسازی نمی‌کند. تست frontend، backend،
+build و Browser همگی PASS شدند؛ بدون schema/migration/API/accounting change و
+بدون commit/push/tag/release/deploy. نقطه ادامه: برش اصلاح این دو باگ کامل است و
+کار بعدی فقط با دستور صریح جدید شروع شود.
+
 در `2026-08-24` Owner رفع کامل رگرسیون‌های دسترسی و اصلاح UX فهرست‌شده در
 بازخورد مرورگر را تأیید کرد. baseline برابر
 `agent/admin-hierarchy-v4.9.0@91461d7b1637589b8189b4fba4193fc8eb5f3849`
@@ -1053,7 +1145,14 @@ git log -3 --oneline --decorate
 | `2026-08-24` | آماده‌سازی `v5.0.0-rc.5` | `PASS` برای pre-publication | Owner همچنان بدون سقف است، اما delegation محدود برای reconciliation ثبت می‌شود؛ والد `USED_TRAFFIC` از upfront delegation معاف و از مصرف واقعی فرزند شارژ می‌شود؛ قرارداد نسخه و مستندات به rc.5 افزایش یافت | `0d41cf8` + working tree | targeted=`26 passed`؛ full=`217 passed, 9 skipped`؛ release contract=`PASS`؛ Graphify=`4392/11275/471`؛ diff/secret/manifest gate پیش از commit تکرار می‌شود؛ MySQL CI گیت نهایی است | commit/push/tag rc.5؛ انتظار کامل CI/GHCR/Release؛ بدون deploy/final v5 |
 | `2026-08-24` | انتشار `v5.0.0-rc.5` | `FAIL` در MySQL 8.0؛ tag immutable حفظ شد | credit reconciliation رفع و MySQL latest + existing-volume سبز شدند؛ MySQL 8.0 هنگام downgrade چون composite status index پشتیبان FK شده بود، در drop index با خطای `1553` متوقف شد؛ Docker/Release اجرا نشد | `103807f48960f9c14986464d042dff548506fb5b`؛ tag=`v5.0.0-rc.5` | Actions run=`32709664980`؛ MySQL latest=`PASS`؛ existing-volume=`PASS`؛ MySQL 8.0=`FAIL`؛ image/Release=`NOT CREATED` | rc.5 بازنویسی نشود؛ پیش از drop composite index، index تک‌ستونی FK بازسازی شود؛ انتشار rc.6 |
 | `2026-08-24` | آماده‌سازی `v5.0.0-rc.6` | `PASS` برای pre-publication | downgrade MySQL ابتدا index تک‌ستونی `account_status_id` را در صورت نبود می‌سازد، سپس composite index را حذف می‌کند؛ FK و داده دست‌نخورده‌اند | `103807f` + working tree | migration/release targeted=`3 passed, 1 MySQL-local skipped`؛ compileall=`PASS`؛ full application از rc.5=`217 passed, 9 skipped`؛ Graphify=`4399/11282/473`؛ MySQL CI گیت نهایی | commit/push/tag rc.6 و انتظار CI/GHCR/Release؛ بدون deploy/final v5 |
-| `2026-08-24` | انتشار `v5.0.0-rc.6` | `PASS / PUBLISHED` | اصلاح downgrade index و همه تغییرات Admin/Dashboard به‌صورت prerelease immutable منتشر شد؛ `latest` جابه‌جا نشد و هیچ deploy سروری انجام نشد | commit=`cee2c74ce520c503f9dd66847cc62aa93edd5062`؛ tag object=`3fb06b05f7338c5e1ee888ff8ce0e43bfc805c58`؛ tag=`v5.0.0-rc.6` | Actions run=`32710294132`=`success`؛ MySQL `8.0`=`PASS`؛ MySQL `latest`=`PASS`؛ existing-volume `8.0 → 8.4 → 9.7 → latest`=`PASS`؛ backend local=`217 passed, 9 skipped`؛ multi-arch image=`amd64/arm64`؛ digest=`sha256:ed8c8cfbcc3ff2a7ddd28d1de91ccf322ce7c63f30e1d91f6995f9c7e1af04b4`؛ GitHub prerelease=`https://github.com/smorad3363/Marzban/releases/tag/v5.0.0-rc.6` | نصب/آپدیت فقط با pin `v5.0.0-rc.6`؛ backup production پیش از update؛ بدون deploy و بدون final `v5.0.0` |
+| `2026-08-24` | اصلاح ذخیرهٔ mode و دسته‌های Plan ادمین | `PASS` | پاسخ canonical ویرایش ادمین فوراً در cache فهرست جایگزین شد؛ بازکردن سریع فرم دیگر `PLAN_ONLY` یا دسته‌های ذخیره‌شده را به مقدار قبلی برنمی‌گرداند؛ enforcement و حسابداری backend دست‌نخورده ماند | `3ca44d4` + working tree؛ بدون commit | frontend contract، TypeScript، hierarchy authorization، Plan/Inbound و Vite=`PASS`؛ targeted backend=`26 passed`؛ full backend=`219 passed, 9 skipped`؛ Browser save/reopen فوری mode و category=`PASS`؛ raw custom create=`403 plan_only` و plan create/accounting=`PASS` | schema/migration/API/query/dependency/version/install/update=`UNCHANGED`؛ MySQL زنده لازم/اجرا نشد چون DB path تغییر نکرد؛ بدون commit/push/tag/release/deploy |
+| `2026-08-24` | بازیابی فهرست Admin و اکشن سریع اعتبار | `PASS` | credit محدود با `limit=0` بدون تقسیم بر صفر، exhausted و `100%` گزارش می‌شود؛ افزایش/کاهش mode-aware کنار Freeze در desktop/mobile با ledger موجود اضافه شد | `3ca44d4` + working tree؛ بدون commit | targeted backend=`7 passed`؛ full backend=`219 passed, 9 skipped`؛ Admin UX، hierarchy authorization، Plan/Inbound، TypeScript و Vite `1773 modules`=`PASS`؛ Browser list load و dialogهای grant/reclaim=`PASS`؛ رفت‌وبرگشت `0.01 GB`=`PASS` | schema/migration/query/index/dependency/version/install/update=`UNCHANGED`؛ MySQL live لازم/اجرا نشد؛ preview روی `127.0.0.1:8000` باز؛ بدون commit/push/tag/release/deploy |
+| `2026-08-24` | رفع فریز Admin دستی و قدیمی | `PASS` | هر `SUSPENDED` دکمه رفع فریز دارد؛ Owner Freeze به `unfreeze` و suspension معمولی به `resume` می‌رود؛ eventless suspension فقط در نبود شرط فعال credit/expiry آزاد می‌شود | `3ca44d4` + working tree؛ بدون commit | targeted service=`3 passed`؛ full backend=`220 passed, 9 skipped`؛ Admin UX، TypeScript و Vite `1773 modules`=`PASS`؛ Browser واقعی `frozen_branch: SUSPENDED -> ACTIVE`=`PASS` و fixture بازگردانی شد | snapshot/eventهای Owner و accounting دست‌نخورده؛ schema/migration/dependency/version/install/update=`UNCHANGED`؛ preview باز؛ بدون commit/push/tag/release/deploy |
+| `2026-08-24` | ترجمه محدودیت‌های Admin و فعال‌سازی `DISABLED` | `PASS` | پنج policy پیشرفته با برچسب/راهنمای فارسی؛ فعال‌سازی فقط account status توسط Owner/والد مجاز و بدون تغییر User/credit/Plan؛ برچسب رابطه «زیرمجموعهٔ» | `3ca44d4` + working tree؛ بدون commit | targeted=`5 passed`؛ full backend=`222 passed, 9 skipped`؛ Admin UX، JSON، TypeScript و Vite `1773 modules`=`PASS`؛ Browser ترجمه‌ها/دکمه/برچسب و console جدید بدون error=`PASS`؛ Graphify=`4408/11333/471` | schema/migration/query/index/dependency/version/install/update=`UNCHANGED`؛ MySQL live لازم/اجرا نشد؛ preview باز؛ بدون commit/push/tag/release/deploy |
+| `2026-08-24` | عملیات سریع permission-aware داخل Dashboard | `PASS` | trigger چپ و بدون overlap؛ حذف اکشن‌های تکراری؛ ساخت Admin با `can_create_admins` و ساخت Plan با Owner/`can_manage_plans`؛ هر دو فرم inline و URL ثابت | `3ca44d4` + working tree؛ بدون commit | Admin UX=`PASS`؛ Plan/Inbound=`14 assertions`؛ hierarchy authorization، TypeScript و Vite `1773 modules`=`PASS`؛ Browser owner: overlap=`false`، دو dialog inline، URL ثابت و console=`0 error`؛ preview matrix Owner/Super/Admin=`PASS`؛ Graphify=`4414/11365/465` | backend/schema/migration/query/index/accounting/dependency/version/install/update=`UNCHANGED`؛ full backend تکرار نشد چون backend تغییر نکرد؛ بدون commit/push/tag/release/deploy |
+| `2026-08-24` | بازطراحی داده‌محور Dashboard | `PASS` | چیدمان فشردهٔ مشکی–طلایی با خلاصهٔ mode-aware حساب، KPIهای scope-aware، وضعیت‌های انحصاری کاربران، پنج فعالیت آخر، نمودار چند-mode مشروط، منابع Owner-only و جزئیات جمع‌شوندهٔ موبایل؛ mountهای تکراری credit/statistics حذف شدند | `3ca44d4` + working tree؛ بدون commit | Admin UX، hierarchy authorization، Plan/Inbound، TypeScript و Vite `1773 modules`=`PASS`؛ Browser `375/768/812x375/1024/1440` بدون overflow، mobile scroll بسته=`1005`، console=`0 error`؛ role/API matrix Owner/Super/Admin=`PASS`؛ Graphify=`4424/11375/458` | API/schema/migration/query/index/accounting/permission/dependency/version/install/update=`UNCHANGED`؛ MySQL/SQL review از endpointهای bounded و queryهای موجود استفاده کرد و DB زنده لازم/اجرا نشد؛ preview باز؛ بدون commit/push/tag/release/deploy |
+| `2026-08-24` | بازطراحی داده‌محور فهرست Admin | `PASS` | یک فهرست فشرده با چهار گروه دادهٔ غیرتکراری؛ status surface همراه badge متنی، progress صریح مصرف اعتبار، اکشن‌های permission-aware همان ردیف، secondary menu موبایل، filter/search بدون overlap و کارت موبایل بدون جدول افقی | `3ca44d4` + working tree؛ بدون commit | Admin UX، hierarchy authorization، Plan/Inbound و TypeScript=`PASS`؛ Vite=`1773 modules` و asset `index.0541cb66.js`؛ Browser `375/768/812x375/1024/1440` بدون overflow، filter/search overlap=`false`، menu/filter/details/credit-dialog/bulk-selection=`PASS` و console=`0 error`؛ Graphify=`4426/11377/454` | endpoint و query موجود `/admin-management` حفظ شد؛ backend/API/schema/migration/query/index/accounting/permission/dependency/version/install/update=`UNCHANGED`؛ MySQL زنده لازم/اجرا نشد؛ بدون commit/push/tag/release/deploy |
+| `2026-08-25` | آماده‌سازی انتشار `v5.0.0-rc.7` | pre-publication local gate=`PASS` | نسخه runtime/contract/مستندات به rc.7؛ build نهایی با API نسبی `/api/` و asset `index.132a6776.js`؛ manifest فقط برش Admin/Dashboard تأییدشده و فایل‌های release | `3ca44d4` + working tree؛ بدون commit | full backend=`223 passed, 9 skipped`؛ release/API/Plan-only targeted=`13 passed`؛ Admin UX، hierarchy authorization و Plan/Inbound=`PASS`؛ TypeScript/Vite=`1773 modules`؛ compileall/diff-check=`PASS`؛ Graphify=`4432/11382/461` | schema/migration/query/index/dependency/install/update-script=`UNCHANGED`؛ MySQL محلی موجود نبود و CI روی 8.0/latest + existing-volume گیت نهایی است؛ manifest/secret review، commit/push/tag immutable، سپس تطبیق GitHub/GHCR؛ بدون deploy |
 
 ### گزارش DB انتشار `v5.0.0-rc.6`
 

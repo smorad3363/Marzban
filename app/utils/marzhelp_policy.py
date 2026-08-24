@@ -372,7 +372,13 @@ def _quota_summary_values(
         if configured_limit is not None and (configured_limit > 0 or zero_is_finite)
         else None
     )
-    percent = round((used * 100) / limit, 2) if limit is not None else None
+    percent = (
+        None
+        if limit is None
+        else 100.0
+        if limit == 0
+        else round((used * 100) / limit, 2)
+    )
     admin_threshold = int(
         settings.admin_traffic_warning_percent or 80
         if settings is not None

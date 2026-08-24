@@ -39,6 +39,7 @@ from pydantic import ValidationError
 from app.models.admin import Admin as APIAdmin
 from app.models.user import UserStatus
 from app.routers.admin_hierarchy import (
+    activate_disabled_admin as activate_disabled_admin_route,
     freeze_admin as freeze_admin_route,
     get_admin_tree,
     unfreeze_admin as unfreeze_admin_route,
@@ -407,6 +408,11 @@ def test_zero_credit_is_finite_after_hierarchy_activation(db):
     wallet.calculate_volume = "created_traffic"
     db.commit()
 
+    quota = marzhelp_policy.quota_summary(db, child.id)
+    assert quota["credit_limit"] == 0
+    assert quota["credit_remaining"] == 0
+    assert quota["credit_usage_percent"] == 100
+
     with pytest.raises(marzhelp_policy.MarzhelpPolicyError) as raised:
         marzhelp_policy._validate_traffic_credit(db, wallet, allocated_charge=1)
     assert raised.value.code == "traffic_exhausted"
@@ -498,6 +504,80 @@ def test_suspend_resume_restores_only_users_changed_by_event(db):
     assert restored == 1
     assert active.status == UserStatus.active
     assert disabled.status == UserStatus.disabled
+
+
+def test_resume_releases_eventless_manual_suspension(db):
+    owner, child, _, _, _ = _legacy_tree(db)
+    settings = db.get(MarzhelpAdminSettings, child.id)
+    settings.account_status_id = admin_hierarchy.ACCOUNT_STATUS_IDS[admin_hierarchy.SUSPENDED]
+    settings.suspended_reason_id = 1
+    settings.suspended_at = datetime.utcnow()
+    settings.suspended_by_admin_id = owner.id
+    settings.suspension_event_id = None
+    db.commit()
+
+    assert admin_hierarchy.resume_admin(db, actor=owner, target=child) == 0
+    db.refresh(settings)
+    assert settings.account_status_id == admin_hierarchy.ACCOUNT_STATUS_IDS[admin_hierarchy.ACTIVE]
+    assert settings.suspended_reason_id is None
+    assert settings.suspended_at is None
+    assert settings.suspended_by_admin_id is None
+
+
+def test_authorized_parent_activates_disabled_admin_without_touching_users(db):
+    owner, child, _, _, _ = _legacy_tree(db)
+    settings = db.get(MarzhelpAdminSettings, child.id)
+    settings.total_traffic = None
+    settings.account_status_id = admin_hierarchy.ACCOUNT_STATUS_IDS[admin_hierarchy.DISABLED]
+    disabled_user = User(username="disabled-admin-user", admin_id=child.id, status=UserStatus.disabled)
+    db.add(disabled_user)
+    db.commit()
+
+    admin_hierarchy.activate_disabled_admin(db, actor=owner, target=child)
+
+    db.refresh(settings)
+    db.refresh(disabled_user)
+    assert settings.account_status_id == admin_hierarchy.ACCOUNT_STATUS_IDS[admin_hierarchy.ACTIVE]
+    assert disabled_user.status == UserStatus.disabled
+
+
+def test_active_admin_cannot_be_activated_again(db):
+    owner, child, _, _, _ = _legacy_tree(db)
+
+    with pytest.raises(admin_hierarchy.HierarchyError) as error:
+        admin_hierarchy.activate_disabled_admin(db, actor=owner, target=child)
+
+    assert error.value.code == "account_not_disabled"
+
+
+def test_activate_disabled_route_updates_status_and_writes_audit(db):
+    owner, child, _, _, _ = _legacy_tree(db)
+    settings = db.get(MarzhelpAdminSettings, child.id)
+    settings.total_traffic = None
+    settings.account_status_id = admin_hierarchy.ACCOUNT_STATUS_IDS[admin_hierarchy.DISABLED]
+    db.commit()
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": f"/api/admin-management/{child.username}/activate",
+            "headers": [],
+            "client": ("127.0.0.1", 12345),
+        }
+    )
+
+    response = activate_disabled_admin_route(
+        child.username,
+        request,
+        db,
+        APIAdmin(id=owner.id, username=owner.username, is_sudo=True),
+    )
+
+    db.refresh(settings)
+    audit = db.query(AdminAuditLog).filter(AdminAuditLog.action == "admin.activate").one()
+    assert response == {"account_status": "ACTIVE"}
+    assert settings.account_status_id == admin_hierarchy.ACCOUNT_STATUS_IDS[admin_hierarchy.ACTIVE]
+    assert audit.target_name == child.username
 
 
 def test_stage7_referral_is_owner_only_idempotent_and_attribution_only(db):

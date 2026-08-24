@@ -1584,8 +1584,20 @@ def resume_admin(db: Session, *, actor: Admin, target: Admin) -> int:
     if not admin_in_scope(db, actor, target.id) or actor.id == target.id:
         raise HierarchyError("resume_scope_forbidden", "Target admin is outside actor scope")
     settings = db.get(MarzhelpAdminSettings, target.id)
-    if settings is None or settings.suspension_event_id is None:
+    if settings is None or settings.account_status_id != ACCOUNT_STATUS_IDS[SUSPENDED]:
         raise HierarchyError("no_active_suspension", "Admin has no resumable suspension event")
+    if settings.suspension_event_id is None:
+        if automatic_suspension_reason(db, settings) is not None:
+            raise HierarchyError(
+                "suspension_condition_active",
+                "Automatic suspension condition is still active",
+            )
+        settings.account_status_id = ACCOUNT_STATUS_IDS[ACTIVE]
+        settings.suspended_reason_id = None
+        settings.suspended_at = None
+        settings.suspended_by_admin_id = None
+        db.commit()
+        return 0
     event_id = int(settings.suspension_event_id)
     rows = (
         db.query(AdminSuspensionUser, User)
@@ -1623,6 +1635,37 @@ def resume_admin(db: Session, *, actor: Admin, target: Admin) -> int:
         event.resolved_at = utc_now_naive()
     db.commit()
     return restored
+
+
+def activate_disabled_admin(db: Session, *, actor: Admin, target: Admin) -> None:
+    """Activate a disabled Admin without changing any User state or credit."""
+    if actor.id == target.id or not (
+        is_owner(db, actor)
+        or can_manage_children(db, actor) and admin_in_scope(db, actor, target.id)
+    ):
+        raise HierarchyError(
+            "activation_forbidden",
+            "Only Owner or an authorized parent can activate this Admin",
+        )
+    settings = (
+        db.query(MarzhelpAdminSettings)
+        .filter(MarzhelpAdminSettings.admin_id == target.id)
+        .with_for_update()
+        .one_or_none()
+    )
+    if settings is None or settings.account_status_id != ACCOUNT_STATUS_IDS[DISABLED]:
+        raise HierarchyError("account_not_disabled", "Admin account is not disabled")
+    if automatic_suspension_reason(db, settings) is not None:
+        raise HierarchyError(
+            "suspension_condition_active",
+            "Automatic suspension condition is still active",
+        )
+    settings.account_status_id = ACCOUNT_STATUS_IDS[ACTIVE]
+    settings.suspended_reason_id = None
+    settings.suspended_at = None
+    settings.suspended_by_admin_id = None
+    settings.suspension_event_id = None
+    db.commit()
 
 
 def run_disable_job(

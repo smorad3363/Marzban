@@ -12,7 +12,7 @@ import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 import { fetch } from "service/http";
 import {
-  AdminCapabilities, AdminPolicy, ManagedAdmin, ManagedAdminPayload,
+  AdminCapabilities, AdminPolicy, ManagedAdmin, ManagedAdminList, ManagedAdminPayload,
   PlanCategory, SubscriptionMode,
 } from "types/Admin";
 import { localizedApiError } from "utils/apiError";
@@ -28,6 +28,14 @@ const billingLabels: Record<BillingMode, { title: string; help: string }> = {
   LEGACY_COMPAT: { title: "حالت قدیمی", help: "فقط برای مشاهده ادمین‌های مهاجرت‌داده‌شده." },
   SEAT_CREDIT: { title: "اعتبار دستگاه قدیمی", help: "فقط برای سازگاری رکوردهای قبلی." },
 };
+
+const advancedPolicyOptions = [
+  { key: "prevent_user_creation", label: "admins.preventCreate", help: "admins.preventCreateHelp" },
+  { key: "prevent_user_deletion", label: "admins.preventDelete", help: "admins.preventDeleteHelp" },
+  { key: "prevent_user_reset", label: "admins.preventReset", help: "admins.preventResetHelp" },
+  { key: "prevent_revoke_subscription", label: "admins.preventRevoke", help: "admins.preventRevokeHelp" },
+  { key: "prevent_unlimited_traffic", label: "admins.preventUnlimited", help: "admins.preventUnlimitedHelp" },
+] as const;
 
 const emptyPolicy = (): AdminPolicy => ({
   billing_mode: "USED_TRAFFIC", total_traffic: null, expiry_date: null,
@@ -114,11 +122,17 @@ export const AdminFormDrawer: FC<Props> = ({ isOpen, admin, onClose }) => {
     item.tag.toLocaleLowerCase().includes(inboundSearch.trim().toLocaleLowerCase())
   ), [inbounds, inboundSearch]);
 
-  const mutation = useMutation((payload: ManagedAdminPayload) => fetch(
+  const mutation = useMutation<ManagedAdmin, Error, ManagedAdminPayload>((payload) => fetch(
     isEditing ? `/admin-management/${admin?.username}` : "/admin-management",
     { method: isEditing ? "PUT" : "POST", body: payload }
   ), {
-    onSuccess: () => {
+    onSuccess: (savedAdmin) => {
+      if (isEditing) {
+        queryClient.setQueriesData<ManagedAdminList | undefined>("admin-management", (current) => current ? ({
+          ...current,
+          admins: current.admins.map((item) => item.id === savedAdmin.id ? savedAdmin : item),
+        }) : current);
+      }
       queryClient.invalidateQueries("admin-management");
       queryClient.invalidateQueries("admin-hierarchy-tree");
       queryClient.invalidateQueries("admin-capabilities");
@@ -269,7 +283,7 @@ export const AdminFormDrawer: FC<Props> = ({ isOpen, admin, onClose }) => {
               <Section title="روش ساخت کاربر" description="حالت امن، ساخت فقط از پلن است. ساخت سفارشی باید جداگانه توسط والد مجاز شود.">
                 <SimpleGrid columns={{ base: 1, md: 2 }} gap={2}>
                   {(capabilitiesQuery.data?.allowed_child_user_creation_modes || ["PLAN_ONLY"]).map((creationMode) => (
-                    <Button key={creationMode} type="button" minH="58px" h="auto" py={2.5} whiteSpace="normal" textAlign="start" justifyContent="flex-start" variant={form.user_creation_mode === creationMode ? "solid" : "outline"} colorScheme={form.user_creation_mode === creationMode ? "green" : "gray"} onClick={() => setField("user_creation_mode", creationMode)}>
+                    <Button key={creationMode} type="button" aria-pressed={form.user_creation_mode === creationMode} minH="58px" h="auto" py={2.5} whiteSpace="normal" textAlign="start" justifyContent="flex-start" variant={form.user_creation_mode === creationMode ? "solid" : "outline"} colorScheme={form.user_creation_mode === creationMode ? "green" : "gray"} onClick={() => setField("user_creation_mode", creationMode)}>
                       <Box><Text fontWeight="800">{creationMode === "PLAN_ONLY" ? "فقط ساخت از پلن" : "ساخت سفارشی"}</Text><Text mt={1} fontSize="xs" fontWeight="400" opacity={0.78}>{creationMode === "PLAN_ONLY" ? "حجم، مدت، دستگاه و پروتکل از پلن می‌آیند." : "ادمین می‌تواند مشخصات کاربر را در محدوده واگذارشده تعیین کند."}</Text></Box>
                     </Button>
                   ))}
@@ -307,10 +321,10 @@ export const AdminFormDrawer: FC<Props> = ({ isOpen, admin, onClose }) => {
                   <Section title="نوع اشتراک‌های مجاز"><SimpleGrid columns={{ base: 1, md: 2 }} gap={2}>{subscriptionModes.map((item) => <Checkbox key={item} minH="42px" isChecked={form.policy.allowed_subscription_modes.includes(item)} onChange={(e) => toggleSubscriptionMode(item, e.target.checked)}>{t(`admins.subscriptionMode.${item}`)}</Checkbox>)}</SimpleGrid></Section>
                 </Stack></AccordionPanel></AccordionItem>
 
-                <AccordionItem borderColor="var(--panel-border)"><AccordionButton minH="48px"><Box flex="1" textAlign="start"><Text fontWeight="800">گزینه‌های پیشرفته</Text><Text fontSize="xs" color="gray.400">تلگرام، حریم خصوصی و محدودکردن عملیات کاربر</Text></Box><AccordionIcon /></AccordionButton><AccordionPanel px={0} pb={3}><Section title="پیشرفته"><SimpleGrid columns={{ base: 1, md: 2 }} gap={3}>
+                <AccordionItem borderColor="var(--panel-border)"><AccordionButton minH="48px"><Box flex="1" textAlign="start"><Text fontWeight="800">گزینه‌های پیشرفته</Text><Text fontSize="xs" color="gray.400">تلگرام، حریم خصوصی و محدودکردن عملیات کاربر</Text></Box><AccordionIcon /></AccordionButton><AccordionPanel px={0} pb={3}><Section title="پیشرفته" description="این محدودیت‌ها در همه نوع‌های اعتبار مستقل از حسابداری اعمال می‌شوند."><SimpleGrid columns={{ base: 1, md: 2 }} gap={3}>
                   <FormControl><FormLabel>{t("admins.telegramId")}</FormLabel><Input type="number" value={form.telegram_id ?? ""} dir="ltr" onChange={(e) => setField("telegram_id", nullableNumber(e))} /></FormControl>
                   <HStack justify="space-between" p={3} borderWidth="1px" borderColor="var(--panel-border)" borderRadius="10px"><Text fontSize="sm">نمایش کامل IP کاربر</Text><Switch isChecked={form.policy.view_full_client_ip} onChange={(e) => setPolicy("view_full_client_ip", e.target.checked)} /></HStack>
-                  {(["prevent_user_creation", "prevent_user_deletion", "prevent_user_reset", "prevent_revoke_subscription", "prevent_unlimited_traffic"] as Array<keyof AdminPolicy>).map((key) => <HStack key={key} justify="space-between" p={3} borderWidth="1px" borderColor="var(--panel-border)" borderRadius="10px"><Text fontSize="sm">{t(`admins.${key}`)}</Text><Switch isChecked={Boolean(form.policy[key])} onChange={(e) => setPolicy(key, e.target.checked as never)} /></HStack>)}
+                  {advancedPolicyOptions.map((item) => <HStack key={item.key} justify="space-between" align="start" p={3} borderWidth="1px" borderColor="var(--panel-border)" borderRadius="10px"><Box pe={2}><Text fontSize="sm">{t(item.label)}</Text><Text mt={1} fontSize="xs" color="gray.400">{t(item.help)}</Text></Box><Switch flexShrink={0} isChecked={Boolean(form.policy[item.key])} onChange={(e) => setPolicy(item.key, e.target.checked as never)} /></HStack>)}
                 </SimpleGrid></Section></AccordionPanel></AccordionItem>
               </Accordion>
             </Stack>
