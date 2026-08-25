@@ -830,7 +830,7 @@ reason codeهای حداقلی برای لاگ parent:
 
 ## نقطه دقیق ادامه
 
-> [!warning] آماده‌سازی انتشار immutable `v5.0.0-rc.9` (`2026-08-25`)
+> [!warning] آماده‌سازی انتشار immutable `v5.0.0-rc.10` پس از گیت `rc.9` (`2026-08-25`)
 > بازتولید شد: validation داخل `install_command` هنوز prerelease را رد می‌کند؛
 > `latest` از endpoint/تگ stable-only استفاده می‌کند؛ نصب پس از health وارد follow
 > بی‌پایان log می‌شود؛ و CI با lockfile قدیمی‌تر از dependencyهای بیلد محلی کار
@@ -842,8 +842,11 @@ reason codeهای حداقلی برای لاگ parent:
 > deterministic جایگزین شد و CI اختلاف build committed را رد می‌کند. خطای
 > `selectionStart` با حفظ NumberInput و DOM `text + decimal inputMode`
 > رفع شد. APIهای User/Admin، schema، migration، query/index و accounting تغییر نکردند.
-> نقطهٔ ادامه: بازبینی manifest/secret، commit/push/tag `v5.0.0-rc.9`، انتظار CI
-> MySQL/build/image/release و تطبیق نهایی؛ هیچ deploy اجرا نشود.
+> `rc.9@559b4cd` در هر سه گیت MySQL موفق بود اما parity بایت‌های minifier بین
+> Windows/Linux را رد کرد و image/Release نساخت؛ tag immutable حفظ شد. در `rc.10`
+> CI source را در `/tmp` build می‌کند، committed dashboard را تغییر نمی‌دهد و Docker
+> دقیقاً همان build ثبت‌شدهٔ محلی را حمل می‌کند. نقطهٔ ادامه: گیت محلی، commit/push/tag
+> `v5.0.0-rc.10`، انتظار CI MySQL/build/image/release؛ هیچ deploy اجرا نشود.
 
 > [!warning] انتشار immutable `v5.0.0-rc.8` — گیت parity updater (`2026-08-25`)
 > `v5.0.0-rc.7@a4045b87e89f33d62c79f00f837db9ac62d8558f` با CI، MySQL، GHCR
@@ -1172,6 +1175,7 @@ git log -3 --oneline --decorate
 | `2026-08-25` | آماده‌سازی انتشار `v5.0.0-rc.7` | pre-publication local gate=`PASS` | نسخه runtime/contract/مستندات به rc.7؛ build نهایی با API نسبی `/api/` و asset `index.132a6776.js`؛ manifest فقط برش Admin/Dashboard تأییدشده و فایل‌های release | `3ca44d4` + working tree؛ بدون commit | full backend=`223 passed, 9 skipped`؛ release/API/Plan-only targeted=`13 passed`؛ Admin UX، hierarchy authorization و Plan/Inbound=`PASS`؛ TypeScript/Vite=`1773 modules`؛ compileall/diff-check=`PASS`؛ Graphify=`4432/11382/461` | schema/migration/query/index/dependency/install/update-script=`UNCHANGED`؛ MySQL محلی موجود نبود و CI روی 8.0/latest + existing-volume گیت نهایی است؛ manifest/secret review، commit/push/tag immutable، سپس تطبیق GitHub/GHCR؛ بدون deploy |
 | `2026-08-25` | گیت parity پس از انتشار `v5.0.0-rc.7` و آماده‌سازی `rc.8` | `rc.7 CI=PASS`؛ updater parity=`FAIL` پیش از تحویل | commit/tag/CI/GHCR `rc.7` دقیق بودند؛ ریشهٔ اختلاف بالقوه regex پایدار-only در `marzban_script_ref` بود که برای prerelease اسکریپت را از `master` می‌گرفت؛ اصلاح محدود به پذیرش SemVer prerelease و bump immutable بعدی است | `a4045b87e89f33d62c79f00f837db9ac62d8558f` + working tree | Actions `32784403799` تمام jobها=`PASS`؛ GHCR digest rc.7/sha=`sha256:0aa58215d7e61981d85029c2eedaec3cd8a530114e81848f042ccebc6b201b79`؛ remote branch/tag peeled/CI head یکسان | تست contract updater و regression؛ انتشار immutable `v5.0.0-rc.8`؛ تطبیق نهایی؛ `rc.7` بازنویسی نشود و هیچ deploy اجرا نشود |
 | `2026-08-25` | اصلاح install/update/bootstrap/build parity و آماده‌سازی `rc.9` | local gate=`PASS`؛ CI نهایی باز | SemVer prerelease در install، resolve جدیدترین release برای update بدون نسخه، ref یکسان script/files/image، پایان نصب بعد health، `create-owner` امن، قفل React/Chakra محلی، locale build ID مبتنی بر VERSION، CI build diff و رفع DOM number selection | `b1d88d7` + working tree | shell syntax/resolver=`PASS`؛ release/bootstrap=`2 passed`؛ Admin UX/hierarchy/Plan=`PASS`؛ TypeScript/Vite Node `20.19.5`=`1726 modules` و rebuild byte parity=`PASS`؛ YAML/diff-check=`PASS`؛ Graphify=`4454/11426/457` و diagnose clean؛ MySQL زنده=`NOT EXECUTED` | manifest/secret review؛ commit/push/tag immutable `v5.0.0-rc.9`؛ انتظار کامل CI/GHCR/Release؛ بدون deploy |
+| `2026-08-25` | گیت `rc.9` و آماده‌سازی `rc.10` | `rc.9 CI=FAIL` فقط parity؛ سه DB=`PASS` | build source روی Linux hash متفاوت از Windows داشت؛ برای parity واقعی image، build source به `/tmp` منتقل و committed dashboard دست‌نخورده نگه داشته شد | `559b4cd` + working tree | Actions `32795337382`: MySQL 8.0/latest/existing-volume=`PASS`؛ Docker parity=`FAIL`؛ local isolated source build + committed immutability=`PASS` | انتشار immutable `rc.10` و انتظار CI/GHCR/Release؛ `rc.9` بازنویسی نشود؛ بدون deploy |
 
 ### گزارش DB انتشار `v5.0.0-rc.6`
 

@@ -10,6 +10,20 @@ The `latest` tag is only a moving pointer to the newest stable tagged release.
 Prereleases never move `latest`. Older version and SHA tags remain available and
 are not replaced by a later release.
 
+## v5.0.0-rc.10 exact committed-dashboard image candidate
+
+This candidate preserves the `rc.9` fixes and makes the release image consume the
+exact committed local dashboard build. CI still performs a clean source build in an
+isolated temporary directory and rejects any mutation of the committed dashboard.
+
+```bash
+marzban update --version v5.0.0-rc.10
+```
+
+```bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.0.0-rc.10/scripts/marzban.sh)" @ install --version v5.0.0-rc.10 --database mysql
+```
+
 ## v5.0.0-rc.9 install, update, Owner bootstrap, and build-parity candidate
 
 This candidate makes `latest` in the installer/updater resolve to the newest

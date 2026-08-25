@@ -25,11 +25,17 @@ export default defineConfig({
     svgr(),
     visualizer(),
     splitVendorChunkPlugin(),
-    {
+    (() => {
+      let outDir = "build";
+      return {
       name: "write-dashboard-404-fallback",
-      closeBundle() {
-        copyFileSync("build/index.html", "build/404.html");
+      configResolved(config) {
+        outDir = config.build.outDir;
       },
-    },
+      closeBundle() {
+        copyFileSync(`${outDir}/index.html`, `${outDir}/404.html`);
+      },
+      };
+    })(),
   ],
 });
