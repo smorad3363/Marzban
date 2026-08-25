@@ -10,6 +10,40 @@ The `latest` tag is only a moving pointer to the newest stable tagged release.
 Prereleases never move `latest`. Older version and SHA tags remain available and
 are not replaced by a later release.
 
+## v5.0.0-rc.9 install, update, Owner bootstrap, and build-parity candidate
+
+This candidate makes `latest` in the installer/updater resolve to the newest
+published GitHub release, including prereleases, and then uses that exact immutable
+tag for the script, compose files, and application image. Fresh installation now
+returns after its health check. `marzban create-owner USERNAME` securely creates or
+repairs the first Owner. The dashboard dependency lock and committed build are also
+verified by CI, and numeric inputs no longer use the invalid DOM number-selection
+combination.
+
+Update to the newest published release:
+
+```bash
+marzban update
+```
+
+Update to this exact candidate:
+
+```bash
+marzban update --version v5.0.0-rc.9
+```
+
+Fresh-install this exact candidate from GitHub:
+
+```bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.0.0-rc.9/scripts/marzban.sh)" @ install --version v5.0.0-rc.9 --database mysql
+```
+
+Create the first Owner after installation:
+
+```bash
+marzban create-owner saji
+```
+
 ## v5.0.0-rc.1 staging candidate
 
 This prerelease is the staging candidate for the v5 feature set. It is not the

@@ -134,7 +134,8 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
               ref={ref}
               step={step}
               className={classNames(className)}
-              type={type}
+              type={type == "number" ? "text" : type}
+              inputMode={type == "number" ? "decimal" : undefined}
               placeholder={placeholder}
               onChange={onChange}
               onBlur={onBlur}

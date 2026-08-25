@@ -22,6 +22,39 @@ MARZBAN_FILES_URL_PREFIX="https://raw.githubusercontent.com/${MARZBAN_GITHUB_REP
 MARZBAN_SCRIPT_URL="https://github.com/${MARZBAN_GITHUB_REPO}/raw/${MARZBAN_GITHUB_BRANCH}/${MARZBAN_SCRIPTS_PATH}"
 MARZBAN_RELEASES_API="https://api.github.com/repos/${MARZBAN_GITHUB_REPO}/releases"
 
+is_release_version() {
+    [[ "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]
+}
+
+is_immutable_sha_image() {
+    [[ "$1" =~ ^sha-[0-9a-f]{12,40}$ ]]
+}
+
+latest_published_version() {
+    curl -fsSL "${MARZBAN_RELEASES_API}?per_page=100" 2>/dev/null |
+        jq -r '[.[] | select(.draft == false)][0].tag_name // empty'
+}
+
+resolve_requested_version() {
+    local requested_version="${1:-latest}"
+    local resolved_version
+    if [ "$requested_version" = "latest" ]; then
+        resolved_version=$(latest_published_version)
+        if ! is_release_version "$resolved_version"; then
+            colorized_echo red "Could not resolve the latest published Marzban release." >&2
+            return 1
+        fi
+        echo "$resolved_version"
+        return
+    fi
+    if [ "$requested_version" = "dev" ] || is_release_version "$requested_version" || is_immutable_sha_image "$requested_version"; then
+        echo "$requested_version"
+        return
+    fi
+    colorized_echo red "Invalid version format: $requested_version" >&2
+    return 1
+}
+
 marzban_docker_image() {
     local version="${1:-latest}"
     echo "${MARZBAN_DOCKER_IMAGE}:${version}"
@@ -140,15 +173,15 @@ detect_compose() {
 
 marzban_script_ref() {
     local requested_version="${1:-latest}"
-    local release_ref=""
-    if [[ "$requested_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+    if is_release_version "$requested_version"; then
         echo "$requested_version"
         return
     fi
-    if [ "$requested_version" = "latest" ] && command -v jq >/dev/null 2>&1; then
-        release_ref=$(curl -fsSL "${MARZBAN_RELEASES_API}/latest" 2>/dev/null | jq -r '.tag_name // empty' || true)
+    if is_immutable_sha_image "$requested_version"; then
+        echo "${requested_version#sha-}"
+        return
     fi
-    echo "${release_ref:-$MARZBAN_GITHUB_BRANCH}"
+    echo "$MARZBAN_GITHUB_BRANCH"
 }
 
 install_marzban_script_from_repo() {
@@ -754,7 +787,11 @@ install_marzban() {
         exit 1
     fi
     # Fetch releases
-    FILES_URL_PREFIX="$MARZBAN_FILES_URL_PREFIX"
+    if is_release_version "$marzban_version"; then
+        FILES_URL_PREFIX="https://raw.githubusercontent.com/${MARZBAN_GITHUB_REPO}/${marzban_version}"
+    else
+        FILES_URL_PREFIX="$MARZBAN_FILES_URL_PREFIX"
+    fi
 
     mkdir -p "$DATA_DIR"
     mkdir -p "$APP_DIR"
@@ -1164,6 +1201,7 @@ install_command() {
         install_yq
     fi
     detect_compose
+    marzban_version=$(resolve_requested_version "$marzban_version") || exit 1
     install_marzban_script_from_repo "$marzban_version"
     # Function to check if a version exists in the GitHub releases
     check_version_exists() {
@@ -1184,7 +1222,7 @@ install_command() {
         fi
     }
     # Check if the version is valid and exists
-    if [[ "$marzban_version" == "latest" || "$marzban_version" == "dev" || "$marzban_version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    if [[ "$marzban_version" == "dev" ]] || is_release_version "$marzban_version"; then
         if check_version_exists "$marzban_version"; then
             install_marzban "$marzban_version" "$database_type"
             echo "Installing $marzban_version version"
@@ -1193,14 +1231,15 @@ install_command() {
             exit 1
         fi
     else
-        echo "Invalid version format. Please enter a valid version (e.g. v0.5.2)"
+        echo "Invalid version format. Please enter a valid version (e.g. v5.0.0-rc.9)"
         exit 1
     fi
     up_marzban
     if ! verify_marzban_health; then
         exit 1
     fi
-    follow_marzban_logs
+    colorized_echo green "Marzban ${marzban_version} installed and healthy."
+    colorized_echo yellow "Create the first Owner with: marzban create-owner USERNAME"
 }
 
 install_yq() {
@@ -1300,6 +1339,39 @@ follow_marzban_logs() {
 
 marzban_cli() {
     $COMPOSE -f $COMPOSE_FILE -p "$APP_NAME" exec -e CLI_PROG_NAME="marzban cli" marzban marzban-cli "$@"
+}
+
+create_owner_command() {
+    local username="${1:-}"
+    local password
+    check_running_as_root
+    if ! is_marzban_installed; then
+        colorized_echo red "Marzban's not installed!"
+        exit 1
+    fi
+    detect_compose
+    if ! is_marzban_up; then
+        colorized_echo red "Marzban is not up."
+        exit 1
+    fi
+    if [ -z "$username" ]; then
+        read -r -p "Owner username: " username
+    fi
+    if [ -z "$username" ]; then
+        colorized_echo red "Owner username is required."
+        exit 1
+    fi
+    read -r -s -p "Owner password: " password
+    echo
+    if [ -z "$password" ]; then
+        colorized_echo red "Owner password is required."
+        exit 1
+    fi
+    $COMPOSE -f "$COMPOSE_FILE" -p "$APP_NAME" exec -T \
+        -e CLI_PROG_NAME="marzban cli" \
+        -e MARZBAN_ADMIN_PASSWORD="$password" \
+        marzban marzban-cli admin bootstrap-owner --username "$username"
+    unset password
 }
 
 set_owner_command() {
@@ -1622,6 +1694,11 @@ update_command() {
     if ! command -v yq >/dev/null 2>&1; then
         install_yq
     fi
+    if ! command -v jq >/dev/null 2>&1; then
+        install_package jq
+    fi
+
+    requested_version=$(resolve_requested_version "$requested_version") || exit 1
 
     local mysql_upgrade_state
     if mysql_upgrade_required_for_update; then
@@ -1993,6 +2070,7 @@ usage() {
     colorized_echo yellow "  logs            $(tput sgr0)– Show logs"
     colorized_echo yellow "  cli             $(tput sgr0)– Marzban CLI"
     colorized_echo yellow "  set-owner       $(tput sgr0)– Select Owner and migrate the admin hierarchy"
+    colorized_echo yellow "  create-owner    $(tput sgr0)– Create or repair the first Owner"
     colorized_echo yellow "  install         $(tput sgr0)– Install Marzban"
     colorized_echo yellow "  update          $(tput sgr0)– Update to latest or an exact version"
     colorized_echo yellow "  rollback        $(tput sgr0)– Roll back to an exact version"
@@ -2015,6 +2093,7 @@ usage() {
     echo
 }
 
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
 case "$1" in
     up)
         shift; up_command "$@";;
@@ -2030,6 +2109,8 @@ case "$1" in
         shift; cli_command "$@";;
     set-owner)
         shift; set_owner_command "$@";;
+    create-owner)
+        shift; create_owner_command "$@";;
     backup)
         shift; backup_command "$@";;
     backup-service)
@@ -2055,3 +2136,4 @@ case "$1" in
     help|*)
         usage;;
 esac
+fi

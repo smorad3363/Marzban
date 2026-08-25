@@ -3,7 +3,7 @@
 > [!danger] CURRENT STATE IS THE STABLE BASELINE
 > **CURRENT STATE IS THE STABLE BASELINE. A requested change must not regress functionality that is currently working.**
 
-The current known-good release is `v5.0.0-rc.8`. Treat the current project state as
+The current known-good release is `v5.0.0-rc.9`. Treat the current project state as
 stable and working, and follow these rules for every task:
 
 1. Preserve all existing working functionality unless the user explicitly requests a
@@ -25,13 +25,13 @@ stable and working, and follow these rules for every task:
 10. Preserve compatibility with the current update command:
 
     ```bash
-    marzban update --version v5.0.0-rc.8
+    marzban update --version v5.0.0-rc.9
     ```
 
 11. Preserve compatibility with the current fresh-install command:
 
     ```bash
-    sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.0.0-rc.8/scripts/marzban.sh)" @ install --version v5.0.0-rc.8 --database mysql
+    sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.0.0-rc.9/scripts/marzban.sh)" @ install --version v5.0.0-rc.9 --database mysql
     ```
 
 12. Do not run destructive Git commands such as `git reset --hard`, `git clean -fd`,

@@ -133,11 +133,11 @@ def delete_admin(
 @app.command(name="create")
 def create_admin(
     username: str = typer.Option(..., *utils.FLAGS["username"], show_default=False, prompt=True),
-    password: str = typer.Option(..., prompt=True, confirmation_prompt=True,
+    password: str = typer.Option(..., "--password", "-p", prompt=True, confirmation_prompt=True,
                                  hide_input=True, hidden=True, envvar=utils.PASSWORD_ENVIRON_NAME),
-    telegram_id: str = typer.Option('', *utils.FLAGS["telegram_id"], prompt="Telegram ID",
+    telegram_id: str = typer.Option('', *utils.FLAGS["telegram_id"],
                                     show_default=False, callback=validate_telegram_id),
-    discord_webhook: str = typer.Option('', *utils.FLAGS["discord_webhook"], prompt=True,
+    discord_webhook: str = typer.Option('', *utils.FLAGS["discord_webhook"],
                                         show_default=False, callback=validate_discord_webhook),
 ):
     """
@@ -155,6 +155,32 @@ def create_admin(
             utils.success(f'Admin "{username}" created successfully.')
         except IntegrityError:
             utils.error(f'Admin "{username}" already exists!')
+
+
+@app.command(name="bootstrap-owner")
+def bootstrap_owner(
+    username: str = typer.Option(..., *utils.FLAGS["username"]),
+    password: str = typer.Option(..., "--password", "-p", hide_input=True, hidden=True,
+                                 envvar=utils.PASSWORD_ENVIRON_NAME),
+):
+    """Create the first admin when needed and atomically assign it as Owner."""
+    with GetDB() as db:
+        current = crud.get_admin(db, username=username)
+        if current is None:
+            crud.create_admin(
+                db,
+                AdminCreate(username=username, password=password, is_sudo=True),
+                commit=False,
+            )
+        else:
+            crud.partial_update_admin(
+                db,
+                current,
+                AdminPartialModify(password=password, is_sudo=True),
+                commit=False,
+            )
+        result = admin_hierarchy.set_owner(db, username)
+    utils.success(f'Owner "{result["owner"]}" is ready.')
 
 
 @app.command(name="update")
