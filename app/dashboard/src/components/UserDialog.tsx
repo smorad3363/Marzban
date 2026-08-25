@@ -359,8 +359,8 @@ export const UserDialog: FC<UserDialogProps> = () => {
     () => fetch("/account/summary"),
     { enabled: isOpen, staleTime: 30000 }
   );
-  const restrictedCreate = !isEditing && (
-    accountQuery.data?.user_creation_mode === "PLAN_ONLY" ||
+  const customCreateAllowed = isEditing || accountQuery.data?.user_creation_mode === "FREE_FORM";
+  const restrictedCreate = !isEditing && accountQuery.data?.user_creation_mode === "FREE_FORM" && (
     accountQuery.data?.billing_mode === "USED_TRAFFIC" ||
     accountQuery.data?.billing_mode === "ALLOCATED_TRAFFIC"
   );
@@ -625,7 +625,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="6xl" scrollBehavior="inside">
+    <Modal isOpen={isOpen && customCreateAllowed} onClose={onClose} size="6xl" scrollBehavior="inside">
       <ModalOverlay bg="rgba(0, 0, 0, .78)" backdropFilter="blur(8px)" />
       <FormProvider {...form}>
         <ModalContent

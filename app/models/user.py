@@ -368,6 +368,10 @@ class UserResponse(User):
 
     @field_validator("proxies", mode="before")
     def validate_proxies(cls, v, values, **kwargs):
+        # Keep malformed preexisting rows readable so operators can repair or delete
+        # them. Creation still rejects an empty proxy set before committing.
+        if not v:
+            return {}
         if isinstance(v, list):
             v = {p.type: p.settings for p in v}
         return super().validate_proxies(v, values, **kwargs)

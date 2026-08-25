@@ -85,6 +85,12 @@ def add_user(
         if settings is not None:
             new_user = marzhelp_policy.restricted_create_payload(settings, new_user)
 
+    if not new_user.proxies:
+        raise HTTPException(
+            status_code=422,
+            detail={"proxies": "Each user needs at least one proxy"},
+        )
+
     for proxy_type in new_user.proxies:
         if not xray.config.inbounds_by_protocol.get(proxy_type):
             raise HTTPException(

@@ -10,6 +10,21 @@ The `latest` tag is only a moving pointer to the newest stable tagged release.
 Prereleases never move `latest`. Older version and SHA tags remain available and
 are not replaced by a later release.
 
+## v5.0.0-rc.11 Plan-only creation and User-list recovery candidate
+
+This candidate makes `PLAN_ONLY` fail closed in every User creation surface and
+routes the Admin to available Plans. The raw User endpoint now rejects an empty
+proxy set before commit. User responses tolerate an already-persisted proxyless
+row so the User list loads again and the operator can remove or repair that row.
+
+```bash
+marzban update --version v5.0.0-rc.11
+```
+
+```bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.0.0-rc.11/scripts/marzban.sh)" @ install --version v5.0.0-rc.11 --database mysql
+```
+
 ## v5.0.0-rc.10 exact committed-dashboard image candidate
 
 This candidate preserves the `rc.9` fixes and makes the release image consume the

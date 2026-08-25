@@ -26,6 +26,7 @@ import debounce from "lodash.debounce";
 import React, { FC, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "react-query";
+import { Link } from "react-router-dom";
 import { fetch } from "service/http";
 import { AccountSummary, AdminCapabilities } from "types/Admin";
 
@@ -171,7 +172,8 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
               })}
             />
           </IconButton>
-          {account.data?.user_creation_mode !== "PLAN_ONLY" && <Button
+          {account.isLoading && <Button size="sm" minH="44px" px={5} isDisabled isLoading>بررسی دسترسی</Button>}
+          {account.data?.user_creation_mode === "FREE_FORM" && <Button
             colorScheme="primary"
             size="sm"
             onClick={() => onCreateUser(true)}
@@ -180,6 +182,16 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
             boxShadow="0 0 18px rgba(34, 197, 94, .18)"
           >
             {t("createUser")}
+          </Button>}
+          {account.data?.user_creation_mode === "PLAN_ONLY" && <Button
+            as={Link}
+            to="/plans/"
+            colorScheme="primary"
+            size="sm"
+            px={5}
+            minH="44px"
+          >
+            ساخت کاربر از پلن
           </Button>}
         </HStack>
       </GridItem>

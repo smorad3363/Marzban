@@ -28,7 +28,7 @@ from app.models.admin import Admin as APIAdmin, AdminCreate
 from app.models import user as user_models
 from app.models.admin_hierarchy import PlanCreate, PlanVersionInput
 from app.models.proxy import ProxyTypes
-from app.models.user import UserCreate, UserStatus
+from app.models.user import UserCreate, UserResponse, UserStatus
 from app.routers.user import add_user
 from app.subscription import share as subscription_share
 from app.utils import admin_hierarchy, admin_plans, marzhelp_policy
@@ -258,6 +258,49 @@ def test_plan_only_raw_endpoint_is_denied_after_policy_save(db, monkeypatch):
     assert exc.value.status_code == 403
     assert exc.value.detail["code"] == "plan_only"
     assert session.query(User).filter(User.admin_id == admin.id).count() == 0
+
+
+def test_partial_custom_payload_never_commits_a_proxyless_user_in_compatibility_mode(db):
+    session, _ = db
+    admin, settings = _admin(session, "plan-only-compat", billing_mode="USER_CREDIT")
+    settings.user_creation_mode_id = admin_hierarchy.USER_CREATION_MODE_IDS[
+        admin_hierarchy.PLAN_ONLY
+    ]
+    session.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        add_user(
+            Request({"type": "http", "method": "POST", "path": "/api/user", "headers": []}),
+            UserCreate(username="thirteen-gib", data_limit=13 * 1024**3),
+            BackgroundTasks(),
+            session,
+            APIAdmin(username=admin.username, is_sudo=False),
+        )
+
+    assert exc.value.status_code == 422
+    assert exc.value.detail == {"proxies": "Each user needs at least one proxy"}
+    assert session.query(User).filter(User.username == "thirteen-gib").count() == 0
+
+
+def test_proxyless_existing_user_remains_readable_for_operator_recovery(db, monkeypatch):
+    session, _ = db
+    monkeypatch.setattr(user_models, "create_subscription_token", lambda username: f"token-{username}")
+    admin, _ = _admin(session, "recovery-admin", billing_mode="USER_CREDIT")
+    broken = User(
+        username="recovery-admin_broken",
+        admin_id=admin.id,
+        status=UserStatus.active,
+        data_limit=13 * 1024**3,
+        proxies=[],
+    )
+    session.add(broken)
+    session.commit()
+
+    response = UserResponse.model_validate(broken)
+
+    assert response.username == broken.username
+    assert response.proxies == {}
+    assert response.links == []
 
 
 def test_restricted_raw_endpoint_rejects_protected_network_and_device_fields(db, monkeypatch):

@@ -59,6 +59,7 @@ import { FC, ReactNode, useEffect, useState } from "react";
 import CopyToClipboard from "react-copy-to-clipboard";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "react-query";
+import { Link } from "react-router-dom";
 import { fetch } from "service/http";
 import { AccountSummary, UserPlan } from "types/Admin";
 import { User } from "types/User";
@@ -815,9 +816,14 @@ const EmptySection: FC<{ isFiltered: boolean }> = ({ isFiltered }) => {
       <Text color="gray.300" maxW="52ch">
         {isFiltered ? t("usersTable.noUserMatched") : t("usersTable.noUser")}
       </Text>
-      {!isFiltered && account.data?.user_creation_mode !== "PLAN_ONLY" && (
+      {!isFiltered && account.data?.user_creation_mode === "FREE_FORM" && (
         <Button size="sm" colorScheme="primary" onClick={() => onCreateUser(true)}>
           {t("createUser")}
+        </Button>
+      )}
+      {!isFiltered && account.data?.user_creation_mode === "PLAN_ONLY" && (
+        <Button as={Link} to="/plans/" size="sm" colorScheme="primary">
+          ساخت کاربر از پلن
         </Button>
       )}
     </VStack>

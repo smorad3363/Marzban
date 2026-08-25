@@ -1,8 +1,8 @@
 # نقشه راه Owner، Super Admin، Admin، سلسله‌مراتب و انتقال اعتبار
 
-آخرین به‌روزرسانی: `2026-08-24`
+آخرین به‌روزرسانی: `2026-08-25`
 
-وضعیت: `V5.0.0-RC.7_RELEASE_IN_PROGRESS` — برش تأییدشدهٔ Dashboard و مدیریت Admin برای انتشار immutable آماده می‌شود؛ commit، tag، GitHub prerelease و GHCR باید دقیقاً یک منبع داشته باشند.
+وضعیت: `V5.0.0-RC.11_PREPUBLICATION_PASS` — اصلاح ساخت سفارشی برای Admin دارای `PLAN_ONLY` و بازیابی فهرست User کامل است؛ گیت محلی پاس شد و انتشار immutable در حال انجام است.
 
 ## قانون اجباری شروع هر چت و هر جلسه
 
@@ -830,6 +830,22 @@ reason codeهای حداقلی برای لاگ parent:
 
 ## نقطه دقیق ادامه
 
+> [!warning] اصلاح `PLAN_ONLY` و بازیابی فهرست User برای `v5.0.0-rc.11` (`2026-08-25`)
+> baseline شبکه بازتأیید شد: `v5.0.0-rc.10@7b6aaf27e25bbd9b8740d71d4dd971796d987695`،
+> Actions run `32795972592=success`، GitHub prerelease موجود و GHCR digest برابر
+> `sha256:1c92fd3bc0048324c0d824ab5b0b3a34bc79b46d5f79fa785ec754d295a7fd18` است؛
+> Latest پایدار GitHub همچنان `v4.9.8` است. بازتولید منبع نشان داد `UserDialog` برای
+> `PLAN_ONLY` payload ناقص بدون proxy می‌سازد؛ در حالت compatibility، `crud.create_user`
+> رکورد را پیش از `UserResponse` commit می‌کند، serialization با الزام proxy به HTTP 500
+> می‌رسد، retry به 409 می‌رسد و همان رکورد بدون proxy تمام پاسخ‌های `/api/users` را 500
+> می‌کند. اصلاح کامل شد: backend ساخت بدون proxy را پیش از commit با HTTP 422 رد می‌کند
+> و خواندن رکورد خراب موجود را برای بازیابی و حذف اپراتوری تحمل می‌کند؛ UI تا دریافت
+> policy fail-closed است و برای `PLAN_ONLY` فقط مسیر `/plans/` را نشان می‌دهد. full
+> regression=`226 passed, 9 skipped`، contractهای پنل و TypeScript=`PASS`، build نهایی
+> `index.36f50bb0.js` با rebuild بایت‌به‌بایت=`PASS` و Graphify=`4464/11445/467` است.
+> نقطه ادامه: manifest محدود، commit/push/tag، MySQL CI و تطبیق GHCR/Release immutable
+> `v5.0.0-rc.11`؛ بدون deploy.
+
 > [!warning] آماده‌سازی انتشار immutable `v5.0.0-rc.10` پس از گیت `rc.9` (`2026-08-25`)
 > بازتولید شد: validation داخل `install_command` هنوز prerelease را رد می‌کند؛
 > `latest` از endpoint/تگ stable-only استفاده می‌کند؛ نصب پس از health وارد follow
@@ -1176,6 +1192,7 @@ git log -3 --oneline --decorate
 | `2026-08-25` | گیت parity پس از انتشار `v5.0.0-rc.7` و آماده‌سازی `rc.8` | `rc.7 CI=PASS`؛ updater parity=`FAIL` پیش از تحویل | commit/tag/CI/GHCR `rc.7` دقیق بودند؛ ریشهٔ اختلاف بالقوه regex پایدار-only در `marzban_script_ref` بود که برای prerelease اسکریپت را از `master` می‌گرفت؛ اصلاح محدود به پذیرش SemVer prerelease و bump immutable بعدی است | `a4045b87e89f33d62c79f00f837db9ac62d8558f` + working tree | Actions `32784403799` تمام jobها=`PASS`؛ GHCR digest rc.7/sha=`sha256:0aa58215d7e61981d85029c2eedaec3cd8a530114e81848f042ccebc6b201b79`؛ remote branch/tag peeled/CI head یکسان | تست contract updater و regression؛ انتشار immutable `v5.0.0-rc.8`؛ تطبیق نهایی؛ `rc.7` بازنویسی نشود و هیچ deploy اجرا نشود |
 | `2026-08-25` | اصلاح install/update/bootstrap/build parity و آماده‌سازی `rc.9` | local gate=`PASS`؛ CI نهایی باز | SemVer prerelease در install، resolve جدیدترین release برای update بدون نسخه، ref یکسان script/files/image، پایان نصب بعد health، `create-owner` امن، قفل React/Chakra محلی، locale build ID مبتنی بر VERSION، CI build diff و رفع DOM number selection | `b1d88d7` + working tree | shell syntax/resolver=`PASS`؛ release/bootstrap=`2 passed`؛ Admin UX/hierarchy/Plan=`PASS`؛ TypeScript/Vite Node `20.19.5`=`1726 modules` و rebuild byte parity=`PASS`؛ YAML/diff-check=`PASS`؛ Graphify=`4454/11426/457` و diagnose clean؛ MySQL زنده=`NOT EXECUTED` | manifest/secret review؛ commit/push/tag immutable `v5.0.0-rc.9`؛ انتظار کامل CI/GHCR/Release؛ بدون deploy |
 | `2026-08-25` | گیت `rc.9` و آماده‌سازی `rc.10` | `rc.9 CI=FAIL` فقط parity؛ سه DB=`PASS` | build source روی Linux hash متفاوت از Windows داشت؛ برای parity واقعی image، build source به `/tmp` منتقل و committed dashboard دست‌نخورده نگه داشته شد | `559b4cd` + working tree | Actions `32795337382`: MySQL 8.0/latest/existing-volume=`PASS`؛ Docker parity=`FAIL`؛ local isolated source build + committed immutability=`PASS` | انتشار immutable `rc.10` و انتظار CI/GHCR/Release؛ `rc.9` بازنویسی نشود؛ بدون deploy |
+| `2026-08-25` | اصلاح `PLAN_ONLY` و بازیابی فهرست User؛ آماده‌سازی `rc.11` | local pre-publication gate=`PASS` | جلوگیری از commit شدن User بدون proxy؛ تحمل فقط در response برای ردیف خراب موجود؛ fail-closed شدن مجوز ساخت سفارشی و هدایت `PLAN_ONLY` به `/plans/`؛ build نسخه‌دار تازه | `7b6aaf2` + working tree؛ بدون commit | full backend=`226 passed, 9 skipped`؛ Admin UX/hierarchy/Plan=`PASS`؛ TypeScript=`PASS`؛ Vite Node `20.19.5` و rebuild 24 فایل byte-identical=`PASS`؛ Graphify=`4464/11445/467` | schema/migration/query/index=`UNCHANGED`؛ MySQL و SQL optimization review: رد زودهنگام یک write خراب را حذف می‌کند و ریسک migration ندارد؛ MySQL 8.0/latest/existing-volume در CI گیت نهایی؛ commit/push/tag/GHCR/Release immutable `rc.11`؛ بدون deploy |
 
 ### گزارش DB انتشار `v5.0.0-rc.6`
 
