@@ -413,9 +413,10 @@ type ActionButtonsProps = {
   onEdit: () => void;
   onRenew: () => void;
   accent: string;
+  readOnly: boolean;
 };
 
-const ActionButtons: FC<ActionButtonsProps> = ({ user, onEdit, onRenew, accent }) => {
+const ActionButtons: FC<ActionButtonsProps> = ({ user, onEdit, onRenew, accent, readOnly }) => {
   const { setQRCode, setSubLink } = useDashboard();
   const { t } = useTranslation();
   const proxyLinks = user.links.join("\r\n");
@@ -512,22 +513,22 @@ const ActionButtons: FC<ActionButtonsProps> = ({ user, onEdit, onRenew, accent }
           }}
         />
       </Tooltip>
-      <Tooltip label={t("userDialog.editUser")} placement="top">
+      {!readOnly && <Tooltip label={t("userDialog.editUser")} placement="top">
         <IconButton
           {...buttonStyle}
           aria-label={t("userDialog.editUser")}
           icon={<EditIcon />}
           onClick={onEdit}
         />
-      </Tooltip>
-      <Tooltip label="تمدید با پلن" placement="top">
+      </Tooltip>}
+      {!readOnly && <Tooltip label="تمدید با پلن" placement="top">
         <IconButton
           {...buttonStyle}
           aria-label="تمدید با پلن"
           icon={<PlanIcon />}
           onClick={onRenew}
         />
-      </Tooltip>
+      </Tooltip>}
     </HStack>
   );
 };
@@ -538,6 +539,7 @@ type UserCardProps = {
   onSelectedChange: (selected: boolean) => void;
   onOpen: () => void;
   onRenew: () => void;
+  readOnly: boolean;
 };
 
 const UserCard: FC<UserCardProps> = ({
@@ -546,6 +548,7 @@ const UserCard: FC<UserCardProps> = ({
   onSelectedChange,
   onOpen,
   onRenew,
+  readOnly,
 }) => {
   const { t, i18n } = useTranslation();
   const reduceMotion = usePrefersReducedMotion();
@@ -625,14 +628,14 @@ const UserCard: FC<UserCardProps> = ({
                   <GlowStatusBadge user={user} visualState={visualState} />
                 </Box>
               </Box>
-              <Checkbox
+              {!readOnly && <Checkbox
                 isChecked={selected}
                 onChange={(event) => onSelectedChange(event.target.checked)}
                 colorScheme={visualState === "danger" ? "red" : visualState === "pending" ? "yellow" : "green"}
                 size="lg"
                 flexShrink={0}
                 aria-label={`${t("usersTable.selectUser")}: ${user.username}`}
-              />
+              />}
             </HStack>
 
             <HStack spacing={2} flexWrap="wrap" minW={0}>
@@ -786,15 +789,15 @@ const UserCard: FC<UserCardProps> = ({
           gap={2}
           wrap="wrap"
         >
-          <ActionButtons user={user} onEdit={onOpen} onRenew={onRenew} accent={visual.accent} />
-          <UserDeviceLimit user={user} />
+          <ActionButtons user={user} onEdit={onOpen} onRenew={onRenew} accent={visual.accent} readOnly={readOnly} />
+          {!readOnly && <UserDeviceLimit user={user} />}
         </Flex>
       </Stack>
     </Card>
   );
 };
 
-const EmptySection: FC<{ isFiltered: boolean }> = ({ isFiltered }) => {
+const EmptySection: FC<{ isFiltered: boolean; readOnly: boolean }> = ({ isFiltered, readOnly }) => {
   const { onCreateUser } = useDashboard();
   const { t } = useTranslation();
   const account = useQuery<AccountSummary, Error>("account-summary", () => fetch("/account/summary"));
@@ -816,12 +819,12 @@ const EmptySection: FC<{ isFiltered: boolean }> = ({ isFiltered }) => {
       <Text color="gray.300" maxW="52ch">
         {isFiltered ? t("usersTable.noUserMatched") : t("usersTable.noUser")}
       </Text>
-      {!isFiltered && account.data?.user_creation_mode === "FREE_FORM" && (
+      {!readOnly && !isFiltered && account.data?.user_creation_mode === "FREE_FORM" && (
         <Button size="sm" colorScheme="primary" onClick={() => onCreateUser(true)}>
           {t("createUser")}
         </Button>
       )}
-      {!isFiltered && account.data?.user_creation_mode === "PLAN_ONLY" && (
+      {!readOnly && !isFiltered && account.data?.user_creation_mode === "PLAN_ONLY" && (
         <Button as={Link} to="/plans/" size="sm" colorScheme="primary">
           ساخت کاربر از پلن
         </Button>
@@ -843,6 +846,8 @@ export const UsersTable: FC<UsersTableProps> = (props) => {
   const toast = useToast();
   const queryClient = useQueryClient();
   const renewalModal = useDisclosure();
+  const account = useQuery<AccountSummary, Error>("account-summary", () => fetch("/account/summary"));
+  const readOnly = account.data?.account_status === "SUSPENDED";
   const [renewalUser, setRenewalUser] = useState<User | null>(null);
   const [renewalPlanId, setRenewalPlanId] = useState("");
   const plans = useQuery<UserPlan[], Error>(
@@ -925,16 +930,16 @@ export const UsersTable: FC<UsersTableProps> = (props) => {
       borderColor="rgba(148, 163, 184, .13)"
     >
       {users.length === 0 ? (
-        <EmptySection isFiltered={isFiltered} />
+        <EmptySection isFiltered={isFiltered} readOnly={readOnly} />
       ) : (
         <>
-          <BulkUserActions
+          {!readOnly && <BulkUserActions
             users={selectedUsers}
             allVisibleSelected={allVisibleSelected}
             visibleCount={users.length}
             onToggleAll={toggleAllVisible}
             onClear={() => setSelectedUsernames(new Set())}
-          />
+          />}
           <Grid
             templateColumns={{
               base: "minmax(0, 1fr)",
@@ -960,6 +965,7 @@ export const UsersTable: FC<UsersTableProps> = (props) => {
                 user={user}
                 selected={selectedUsernames.has(user.username)}
                 onSelectedChange={(selected) => setUserSelected(user.username, selected)}
+                readOnly={readOnly}
                 onOpen={() => onEditingUser(user)}
                 onRenew={() => {
                   setRenewalUser(user);

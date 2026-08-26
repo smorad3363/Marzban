@@ -19,6 +19,7 @@ from app.db.models import (
     AdminUserPlanAccess,
     AdminUserPlanHost,
     AdminUserPlanInbound,
+    AdminUserPlanPrice,
     AdminUserPlanVersion,
     MarzhelpAdminSettings,
     Proxy,
@@ -40,17 +41,14 @@ from app.models.admin_hierarchy import (
 from app.models.proxy import ProxySettings, ProxyTypes
 from app.models.user import UserCreate, UserDataLimitResetStrategy, UserStatus, UserStatusCreate
 from app.device_limit.slots import sync_device_slots
-from app.utils import admin_billing, admin_hierarchy, marzhelp_policy
+from app.utils import admin_billing, admin_hierarchy, marzhelp_policy, money_billing
 
 
 def _can_manage_plans(db: Session, actor: Admin) -> bool:
     if admin_hierarchy.is_owner(db, actor):
         return True
     settings = db.get(MarzhelpAdminSettings, actor.id)
-    return (
-        admin_hierarchy.role_code(actor) == admin_hierarchy.SUPER_ADMIN
-        and bool(settings and settings.can_manage_plans)
-    )
+    return bool(settings and settings.can_manage_plans)
 
 
 def effective_categories_query(db: Session, actor: Admin):
@@ -369,8 +367,11 @@ def _validate_version(db: Session, actor: Admin, version: PlanVersionInput) -> N
                 "credit_exhausted", "Plan seat cost exceeds available seat credit"
             )
         return
-    if mode == admin_billing.BillingMode.USED_TRAFFIC:
-        return
+    if mode == admin_billing.BillingMode.USED_TRAFFIC and not admin_hierarchy.is_owner(db, actor):
+        raise admin_hierarchy.HierarchyError(
+            "plan_for_used_traffic_forbidden",
+            "Actual-usage Admins use custom users and cannot create Plans",
+        )
     if version.data_limit == 0 and available is not None:
         raise admin_hierarchy.HierarchyError("unlimited_traffic_forbidden", "Finite credit cannot create unlimited plans")
     if available is not None and version.data_limit > available:
@@ -463,6 +464,7 @@ def _add_version(
     version = AdminUserPlanVersion(
         plan_id=plan.id,
         version_number=number,
+        price_toman=0 if plan.is_trial else values.price_toman,
         data_limit=values.data_limit,
         duration_days=values.duration_days,
         concurrent_user_limit=values.concurrent_user_limit,
@@ -544,6 +546,19 @@ def effective_plans_query(db: Session, actor: Admin):
     query = db.query(AdminUserPlan).filter(AdminUserPlan.archived_at.is_(None))
     if admin_hierarchy.is_owner(db, actor):
         return query
+    settings = db.get(MarzhelpAdminSettings, actor.id)
+    if (
+        settings is not None
+        and settings.money_billing_enabled
+        and admin_billing.billing_mode(settings) == admin_billing.BillingMode.USED_TRAFFIC
+    ):
+        return query.filter(AdminUserPlan.id == -1)
+    if (
+        settings is not None
+        and settings.money_billing_enabled
+        and admin_billing.billing_mode(settings) in money_billing.PRICED_PLAN_MODES
+    ):
+        return query
     direct = exists().where(
         and_(
             AdminUserPlanAccess.plan_id == AdminUserPlan.id,
@@ -568,16 +583,21 @@ def effective_plans_query(db: Session, actor: Admin):
             AdminPlanCategoryAccess.admin_id == actor.id,
         )
     )
-    return query.filter(
+    query = query.filter(
         or_(AdminUserPlan.owner_admin_id == actor.id, category_access, direct, inherited)
     )
+    return query
 
 
 def can_use_plan(db: Session, actor: Admin, plan_id: int) -> bool:
     return bool(effective_plans_query(db, actor).filter(AdminUserPlan.id == plan_id).first())
 
 
-def plan_responses(db: Session, plans: list[AdminUserPlan]) -> list[PlanResponse]:
+def plan_responses(
+    db: Session,
+    plans: list[AdminUserPlan],
+    actor: Admin | None = None,
+) -> list[PlanResponse]:
     if not plans:
         return []
     version_ids = [plan.current_version_id for plan in plans if plan.current_version_id]
@@ -615,6 +635,16 @@ def plan_responses(db: Session, plans: list[AdminUserPlan]) -> list[PlanResponse
     ):
         hosts_by_version[version_id].setdefault(inbound_tag, []).append(host_id)
     plan_ids = [plan.id for plan in plans]
+    actor_is_owner = bool(actor is not None and admin_hierarchy.is_owner(db, actor))
+    actor_prices = {
+        row.plan_id: int(row.price_toman)
+        for row in db.query(AdminUserPlanPrice)
+        .filter(
+            AdminUserPlanPrice.admin_id == actor.id,
+            AdminUserPlanPrice.plan_id.in_(plan_ids),
+        )
+        .all()
+    } if actor is not None and not actor_is_owner else {}
     access_by_plan = {plan_id: [] for plan_id in plan_ids}
     for row in (
         db.query(AdminUserPlanAccess)
@@ -645,6 +675,7 @@ def plan_responses(db: Session, plans: list[AdminUserPlan]) -> list[PlanResponse
                 version_number=version.version_number,
                 archived_at=plan.archived_at,
                 version=PlanVersionResponse(
+                    price_toman=int(version.price_toman or 0),
                     data_limit=version.data_limit,
                     duration_days=version.duration_days,
                     concurrent_user_limit=version.concurrent_user_limit,
@@ -657,13 +688,23 @@ def plan_responses(db: Session, plans: list[AdminUserPlan]) -> list[PlanResponse
                 allowed_admin_ids=[row.admin_id for row in access],
                 include_subtree=any(row.include_subtree for row in access),
                 is_trial=bool(plan.is_trial),
+                effective_price_toman=(
+                    0
+                    if plan.is_trial
+                    else actor_prices.get(plan.id, int(version.price_toman or 0))
+                ),
+                base_price_toman=(
+                    int(version.price_toman or 0)
+                    if actor_is_owner
+                    else None
+                ),
             )
         )
     return responses
 
 
-def plan_response(db: Session, plan: AdminUserPlan) -> PlanResponse:
-    return plan_responses(db, [plan])[0]
+def plan_response(db: Session, plan: AdminUserPlan, actor: Admin | None = None) -> PlanResponse:
+    return plan_responses(db, [plan], actor=actor)[0]
 
 
 def _plan_user_payload(plan: AdminUserPlan, version: AdminUserPlanVersion, username: str, status, note):
@@ -851,6 +892,17 @@ def create_user_from_plan(
             idempotency_key=idempotency_key,
         )
         db.add(assignment)
+        db.flush()
+        money_billing.charge_plan_purchase(
+            db,
+            buyer=actor,
+            actor=actor,
+            plan=plan,
+            version=version,
+            operation_type="create",
+            idempotency_key=idempotency_key,
+            user_id=user.id,
+        )
         db.commit()
         db.refresh(user)
         db.refresh(assignment)
@@ -981,6 +1033,7 @@ def renew_user_from_plan(
         and (settings.calculate_volume or "used_traffic") == "created_traffic"
     ):
         settings.used_traffic = int(settings.used_traffic or 0) + int(version.data_limit or 0)
+    marzhelp_policy.record_lifetime_created(settings, version.data_limit)
     if settings.renewal_remaining is not None:
         settings.renewal_remaining -= 1
     settings.renewals_used = int(settings.renewals_used or 0) + 1
@@ -1005,6 +1058,19 @@ def renew_user_from_plan(
     )
     try:
         db.add(assignment)
+        buyer = db.get(Admin, user.admin_id)
+        if buyer is None:
+            raise admin_hierarchy.HierarchyError("user_owner_missing", "User owner Admin is missing")
+        money_billing.charge_plan_purchase(
+            db,
+            buyer=buyer,
+            actor=actor,
+            plan=plan,
+            version=version,
+            operation_type="renew",
+            idempotency_key=idempotency_key,
+            user_id=user.id,
+        )
         db.commit()
         db.refresh(user)
         db.refresh(assignment)

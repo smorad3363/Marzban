@@ -28,7 +28,7 @@ from app.models.admin import Admin as APIAdmin, AdminCreate
 from app.models import user as user_models
 from app.models.admin_hierarchy import PlanCreate, PlanVersionInput
 from app.models.proxy import ProxyTypes
-from app.models.user import UserCreate, UserResponse, UserStatus
+from app.models.user import UserCreate, UserModify, UserResponse, UserStatus
 from app.routers.user import add_user
 from app.subscription import share as subscription_share
 from app.utils import admin_hierarchy, admin_plans, marzhelp_policy
@@ -258,6 +258,78 @@ def test_plan_only_raw_endpoint_is_denied_after_policy_save(db, monkeypatch):
     assert exc.value.status_code == 403
     assert exc.value.detail["code"] == "plan_only"
     assert session.query(User).filter(User.admin_id == admin.id).count() == 0
+
+
+def test_plan_only_direct_quota_edits_are_blocked_but_notes_remain_editable(db):
+    session, _ = db
+    admin, settings = _admin(session, "plan-only-editor")
+    settings.user_creation_mode_id = admin_hierarchy.USER_CREATION_MODE_IDS[
+        admin_hierarchy.PLAN_ONLY
+    ]
+    user = User(
+        username="plan-only-editor_customer",
+        admin_id=admin.id,
+        status=UserStatus.active,
+        data_limit=1024,
+        expire=2_000_000_000,
+        concurrent_user_limit=1,
+    )
+    session.add(user)
+    session.commit()
+    actor = APIAdmin(id=admin.id, username=admin.username, is_sudo=False)
+
+    with pytest.raises(marzhelp_policy.MarzhelpPolicyError) as exc:
+        crud.update_user(
+            session,
+            user,
+            UserModify(
+                data_limit=2048,
+                expire=2_100_000_000,
+                concurrent_user_limit=2,
+            ),
+            actor=actor,
+        )
+
+    assert exc.value.code == "plan_only_direct_edit_forbidden"
+    updated = crud.update_user(session, user, UserModify(note="read-only quota fields"), actor=actor)
+    assert updated.note == "read-only quota fields"
+
+
+def test_plan_only_plan_renewal_and_owner_override_can_change_quota(db):
+    session, _ = db
+    admin, settings = _admin(session, "plan-only-renew")
+    settings.user_creation_mode_id = admin_hierarchy.USER_CREATION_MODE_IDS[
+        admin_hierarchy.PLAN_ONLY
+    ]
+    user = User(
+        username="plan-only-renew_customer",
+        admin_id=admin.id,
+        status=UserStatus.active,
+        data_limit=1024,
+        expire=2_000_000_000,
+        concurrent_user_limit=1,
+    )
+    session.add(user)
+    session.commit()
+    actor = APIAdmin(id=admin.id, username=admin.username, is_sudo=False)
+    owner = APIAdmin(username="owner", is_sudo=True)
+
+    renewed = crud.update_user(
+        session,
+        user,
+        UserModify(data_limit=2048),
+        operation=marzhelp_policy.UserUpdateOperation.renew,
+        actor=actor,
+    )
+    assert renewed.data_limit == 2048
+    overridden = crud.update_user(
+        session,
+        user,
+        UserModify(expire=2_100_000_000, concurrent_user_limit=2),
+        actor=owner,
+    )
+    assert overridden.expire == 2_100_000_000
+    assert overridden.concurrent_user_limit == 2
 
 
 def test_partial_custom_payload_never_commits_a_proxyless_user_in_compatibility_mode(db):

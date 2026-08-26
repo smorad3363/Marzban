@@ -127,4 +127,4 @@ def test_response_contract_and_farsi_error_unlimited_sources():
     assert "<option>25</option>" in pagination
     assert "<option>50</option>" in pagination
     assert "<option>500</option>" not in pagination
-    assert 'account.available_traffic' in credit and 'creditValue' in credit
+    assert 'account.money_balance_toman' in credit and 'اعتبار مالی' in credit

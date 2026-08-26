@@ -578,6 +578,7 @@ class AdminUserPlanVersion(Base):
         nullable=False,
     )
     version_number = Column(Integer, nullable=False)
+    price_toman = Column(BigInteger, nullable=False, default=0)
     data_limit = Column(BigInteger, nullable=False)
     duration_days = Column(Integer, nullable=False)
     concurrent_user_limit = Column(Integer, nullable=True)
@@ -650,6 +651,25 @@ class UserPlanAssignment(Base):
     is_trial = Column(Boolean, nullable=False, default=False)
     idempotency_key = Column(String(128), nullable=False, unique=True)
     created_at = Column(DateTime, nullable=False, default=utc_now_naive)
+
+
+class AdminUserPlanPrice(Base):
+    __tablename__ = "admin_user_plan_prices"
+    __table_args__ = (
+        Index("ix_admin_user_plan_prices_plan_admin", "plan_id", "admin_id"),
+        CheckConstraint("price_toman >= 0", name="ck_admin_user_plan_price_nonnegative"),
+    )
+
+    admin_id = Column(Integer, ForeignKey("admins.id", ondelete="CASCADE"), primary_key=True)
+    plan_id = Column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        ForeignKey("admin_user_plans.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    price_toman = Column(BigInteger, nullable=False)
+    assigned_by_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=utc_now_naive)
+    updated_at = Column(DateTime, nullable=False, default=utc_now_naive, onupdate=utc_now_naive)
 
 
 class TrialCleanupOperation(Base):
@@ -745,6 +765,13 @@ class MarzhelpAdminSettings(Base):
     # Existing rows are deliberately kept in compatibility mode. Only Owner may
     # assign one of the explicit commercial modes through the billing service.
     billing_mode = Column(String(32), nullable=True, default="LEGACY_COMPAT")
+    # Monetary billing is opt-in for migrated accounts, and enabled for newly
+    # configured commercial accounts. Values are stored as whole Toman.
+    money_billing_enabled = Column(Boolean, nullable=False, default=False)
+    money_balance_toman = Column(BigInteger, nullable=False, default=0)
+    used_traffic_price_per_gib_toman = Column(BigInteger, nullable=True)
+    # Numerator remainder modulo GiB for exact fractional usage settlement.
+    usage_billing_remainder = Column(BigInteger, nullable=False, default=0)
     total_traffic = Column(BigInteger, nullable=True)
     delegated_traffic = Column(BigInteger, nullable=False, default=0)
     used_traffic = Column(BigInteger, nullable=False, default=0)
@@ -824,7 +851,8 @@ class MarzhelpAdminSettings(Base):
     prevent_unlimited_traffic = Column(Boolean, nullable=False, default=False)
     # Full client addresses are sensitive. Non-sudo admins receive masked
     # addresses unless this capability is explicitly granted by sudo.
-    view_full_client_ip = Column(Boolean, nullable=False, default=False)
+    # Compatibility column: policy writes now keep full client IP visibility enabled.
+    view_full_client_ip = Column(Boolean, nullable=False, default=True)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
     inbound_permissions = relationship(
         "MarzhelpAdminInboundPermission",
@@ -1150,6 +1178,38 @@ class MarzhelpAccountingTransaction(Base):
     result = Column(String(16), nullable=False, default="consumed")
     details = Column(JSON, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+
+
+class AdminMoneyTransaction(Base):
+    __tablename__ = "admin_money_transactions"
+    __table_args__ = (
+        UniqueConstraint("operation_key", "admin_id", name="uq_admin_money_operation_admin"),
+        Index("ix_admin_money_admin_created", "admin_id", "created_at", "id"),
+        Index("ix_admin_money_user_created", "user_id", "created_at", "id"),
+    )
+
+    id = Column(BigInteger().with_variant(Integer, "sqlite"), primary_key=True, autoincrement=True)
+    operation_key = Column(String(160), nullable=False)
+    operation_type = Column(String(32), nullable=False)
+    admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
+    actor_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="RESTRICT"), nullable=False)
+    counterparty_admin_id = Column(Integer, ForeignKey("admins.id", ondelete="SET NULL"), nullable=True)
+    delta_toman = Column(BigInteger, nullable=False)
+    balance_before = Column(BigInteger, nullable=False)
+    balance_after = Column(BigInteger, nullable=False)
+    plan_id = Column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        ForeignKey("admin_user_plans.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    version_id = Column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        ForeignKey("admin_user_plan_versions.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    details = Column(JSON, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
 
 class User(Base):

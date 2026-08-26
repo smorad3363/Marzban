@@ -166,7 +166,8 @@ def modify_user(
 
     previous_value = user_audit_state(dbuser)
     old_status = dbuser.status
-    dbuser = crud.update_user(db, dbuser, modified_user)
+    dbactor = crud.get_admin(db, admin.username) or admin
+    dbuser = crud.update_user(db, dbuser, modified_user, actor=dbactor)
     user = UserResponse.model_validate(dbuser)
     new_value = user_audit_state(dbuser)
     audit_action = classify_user_change(previous_value, new_value)
@@ -524,7 +525,7 @@ def bulk_user_action(
 
             old_status = dbuser.status
             modified_user = UserModify(next_plan=next_plan, **changes)
-            dbuser = crud.update_user(db, dbuser, modified_user, commit=False)
+            dbuser = crud.update_user(db, dbuser, modified_user, commit=False, actor=effective_admin)
             updated.append(dbuser.username)
             updated_users.append((dbuser, old_status))
 

@@ -17,7 +17,7 @@ def test_release_version_and_install_rollback_contract():
         re.MULTILINE,
     )
     assert app_version is not None
-    assert version == app_version.group(1) == "5.0.0-rc.11"
+    assert version == app_version.group(1) == "5.0.0-rc.12"
 
     assert 'MARZBAN_GITHUB_BRANCH="${MARZBAN_GITHUB_BRANCH:-master}"' in installer
     assert 'MARZBAN_DOCKER_IMAGE="${MARZBAN_DOCKER_IMAGE:-ghcr.io/smorad3363/marzban}"' in installer
@@ -67,6 +67,8 @@ def test_release_version_and_install_rollback_contract():
     assert 'readFileSync("../../VERSION", "utf8").trim()' in vite_config
     assert "Date.now()" not in vite_config
 
+    assert "marzban update --version v5.0.0-rc.12" in release_docs
+    assert "install --version v5.0.0-rc.12 --database mysql" in release_docs
     assert "marzban update --version v5.0.0-rc.11" in release_docs
     assert "install --version v5.0.0-rc.11 --database mysql" in release_docs
     assert "marzban update --version v5.0.0-rc.10" in release_docs

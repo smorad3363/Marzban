@@ -44,6 +44,8 @@ from app.models.admin_hierarchy import (
     ExternalApiPolicy,
     HierarchyAdminNode,
     HierarchyChildCreate,
+    MoneyTransferRequest,
+    MoneyTransferResponse,
     PlanCreate,
     PlanNetworkOption,
     PlanCategoryCreate,
@@ -74,6 +76,7 @@ from app.utils import (
     admin_plans,
     billing_service,
     marzhelp_policy,
+    money_billing,
     responses,
     trials,
 )
@@ -346,7 +349,8 @@ def _node_response(
     return HierarchyAdminNode(
         id=row.id,
         username=row.username,
-        role=role or admin_hierarchy.role_code(row),
+        role=(admin_hierarchy.ADMIN if role == admin_hierarchy.SUPER_ADMIN else role)
+        or admin_hierarchy.role_code(row),
         parent_admin_id=row.parent_admin_id,
         depth=depth,
         external_api_enabled=bool(row.external_api_enabled),
@@ -676,6 +680,72 @@ def reclaim_credit(
     admin: Admin = Depends(Admin.get_current),
 ):
     return _credit_move(username, values, "reclaim", request, db, admin)
+
+
+def _money_move(
+    username: str,
+    values: MoneyTransferRequest,
+    operation: str,
+    request: Request,
+    db: Session,
+    admin: Admin,
+):
+    actor = _db_actor(db, admin)
+    child = _target(db, username)
+    parent = db.get(DBAdmin, child.parent_admin_id) if child.parent_admin_id else None
+    if parent is None:
+        raise HTTPException(status_code=400, detail="Target has no parent money account")
+    try:
+        result, created = money_billing.transfer_money(
+            db,
+            actor=actor,
+            parent=parent,
+            child=child,
+            amount_toman=values.amount_toman,
+            operation_type=operation,
+            idempotency_key=values.idempotency_key,
+            note=values.note,
+        )
+        if created:
+            AuditLogService.log(
+                db,
+                actor,
+                f"money.{operation}",
+                "admin_money",
+                f"Admin {actor.username} {operation} {values.amount_toman} Toman for {child.username}",
+                target_id=child.id,
+                target_name=child.username,
+                details={"amount_toman": values.amount_toman, "idempotency_key": values.idempotency_key},
+                request=request,
+                commit=False,
+            )
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        _raise_domain(exc)
+    return MoneyTransferResponse(**result, replayed=not created)
+
+
+@router.post("/admin-management/{username}/money/grant", response_model=MoneyTransferResponse)
+def grant_money(
+    username: str,
+    values: MoneyTransferRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
+    return _money_move(username, values, "grant", request, db, admin)
+
+
+@router.post("/admin-management/{username}/money/reclaim", response_model=MoneyTransferResponse)
+def reclaim_money(
+    username: str,
+    values: MoneyTransferRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
+):
+    return _money_move(username, values, "reclaim", request, db, admin)
 
 
 def _trial_quota_adjustment(
@@ -1466,6 +1536,11 @@ def account_summary(
         renewal_enabled=bool(settings.renewal_enabled) if settings else True,
         renewal_remaining=settings.renewal_remaining if settings else None,
         billing_mode=admin_billing.billing_mode(settings),
+        money_billing_enabled=bool(settings.money_billing_enabled) if settings else False,
+        money_balance_toman=int(settings.money_balance_toman or 0) if settings else 0,
+        used_traffic_price_per_gib_toman=(
+            settings.used_traffic_price_per_gib_toman if settings else None
+        ),
         user_creation_mode=mode or admin_hierarchy.FREE_FORM,
         can_manage_plans=bool(settings.can_manage_plans) if settings else False,
         trial_quota=int(settings.trial_quota or 0) if settings else 0,
@@ -1537,7 +1612,7 @@ def get_user_plans(
     if before_id is not None:
         query = query.filter(AdminUserPlan.id < before_id)
     plans = query.order_by(AdminUserPlan.id.desc()).limit(limit).all()
-    return admin_plans.plan_responses(db, plans)
+    return admin_plans.plan_responses(db, plans, actor=actor)
 
 
 @router.get("/plan-network-options", response_model=list[PlanNetworkOption])
@@ -1667,7 +1742,7 @@ def create_user_plan(
     actor = _db_actor(db, admin)
     try:
         plan = admin_plans.create_plan(db, actor, values)
-        result = admin_plans.plan_response(db, plan)
+        result = admin_plans.plan_response(db, plan, actor=actor)
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="Plan name already exists in this owner scope")
@@ -1702,7 +1777,7 @@ def update_user_plan(
     previous_version_id = plan.current_version_id
     try:
         updated = admin_plans.update_plan(db, actor, plan, values)
-        result = admin_plans.plan_response(db, updated)
+        result = admin_plans.plan_response(db, updated, actor=actor)
     except Exception as exc:
         _raise_domain(exc)
     AuditLogService.log(

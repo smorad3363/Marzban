@@ -94,11 +94,11 @@ def role_code(admin: Admin | object) -> str:
     role = getattr(admin, "role", None)
     code = getattr(role, "code", None)
     if code:
-        return str(code)
+        return ADMIN if str(code) == SUPER_ADMIN else str(code)
     role_id = getattr(admin, "role_id", None)
     for candidate, candidate_id in ROLE_IDS.items():
         if role_id == candidate_id:
-            return candidate
+            return ADMIN if candidate == SUPER_ADMIN else candidate
     return OWNER if bool(getattr(admin, "is_sudo", False)) else ADMIN
 
 
@@ -147,11 +147,6 @@ def admin_creation_remaining(
 
 
 def allowed_child_roles(parent: Admin | object) -> list[str]:
-    parent_role = role_code(parent)
-    if parent_role == OWNER:
-        return [SUPER_ADMIN, ADMIN]
-    if parent_role == SUPER_ADMIN:
-        return [SUPER_ADMIN, ADMIN]
     return [ADMIN]
 
 
@@ -510,7 +505,6 @@ def set_owner(db: Session, username: str) -> dict:
             raise HierarchyError("admin_not_found", f"Admin {username!r} does not exist")
 
         original_sudo = {item.id: bool(item.is_sudo) for item in admins}
-        role_by_id = {item.id: role_code(item) for item in admins}
         reason_counts: Counter[str] = Counter()
         cycle_nodes = _parent_cycle_nodes(admins)
         valid_ids = {item.id for item in admins}
@@ -522,10 +516,7 @@ def set_owner(db: Session, username: str) -> dict:
         for item in admins:
             if item.id == selected.id:
                 continue
-            if original_sudo[item.id] or role_by_id[item.id] in {OWNER, SUPER_ADMIN}:
-                item.role_id = ROLE_IDS[SUPER_ADMIN]
-            else:
-                item.role_id = ROLE_IDS[ADMIN]
+            item.role_id = ROLE_IDS[ADMIN]
             item.is_sudo = False
             item.external_api_enabled = False
 
@@ -548,12 +539,6 @@ def set_owner(db: Session, username: str) -> dict:
                 ] += 1
             else:
                 reason_counts["existing_valid_parent_preserved"] += 1
-
-        # A node with children must be able to manage them.
-        parent_ids = {item.parent_admin_id for item in admins if item.parent_admin_id is not None}
-        for item in admins:
-            if item.id in parent_ids and item.id != selected.id and item.role_id == ROLE_IDS[ADMIN]:
-                item.role_id = ROLE_IDS[SUPER_ADMIN]
 
         db.flush()
         closure_rows = _rebuild_closure(db, admins, int(settings.max_depth or 64))
@@ -765,6 +750,14 @@ def automatic_suspension_reason(
     *,
     today: date | None = None,
 ) -> int | None:
+    admin = db.get(Admin, settings.admin_id)
+    if (
+        admin is not None
+        and not is_owner(db, admin)
+        and bool(settings.money_billing_enabled)
+        and int(settings.money_balance_toman or 0) <= 0
+    ):
+        return 2
     if settings.expiry_date is not None and settings.expiry_date < (today or date.today()):
         return 3
     configured_limit = (

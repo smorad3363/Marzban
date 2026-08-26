@@ -63,6 +63,7 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
   const account = useQuery<AccountSummary, Error>("account-summary", () => fetch("/account/summary"));
   const capabilities = useQuery<AdminCapabilities, Error>(["admin-capabilities", userData.username], () => fetch("/admin/capabilities"));
   const canManageAdmins = Boolean(capabilities.data?.can_manage_admins);
+  const accountActive = account.data?.account_status === "ACTIVE";
   const adminOptions = useQuery<AdminOption[], Error>(
     ["user-filter-admins"],
     fetchAdminOptions,
@@ -173,7 +174,7 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
             />
           </IconButton>
           {account.isLoading && <Button size="sm" minH="44px" px={5} isDisabled isLoading>بررسی دسترسی</Button>}
-          {account.data?.user_creation_mode === "FREE_FORM" && <Button
+          {accountActive && account.data?.user_creation_mode === "FREE_FORM" && <Button
             colorScheme="primary"
             size="sm"
             onClick={() => onCreateUser(true)}
@@ -183,7 +184,7 @@ export const Filters: FC<FilterProps> = ({ ...props }) => {
           >
             {t("createUser")}
           </Button>}
-          {account.data?.user_creation_mode === "PLAN_ONLY" && <Button
+          {accountActive && account.data?.user_creation_mode === "PLAN_ONLY" && <Button
             as={Link}
             to="/plans/"
             colorScheme="primary"

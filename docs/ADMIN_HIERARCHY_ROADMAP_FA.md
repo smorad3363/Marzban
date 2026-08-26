@@ -1,8 +1,8 @@
 # نقشه راه Owner، Super Admin، Admin، سلسله‌مراتب و انتقال اعتبار
 
-آخرین به‌روزرسانی: `2026-08-25`
+آخرین به‌روزرسانی: `2026-08-26`
 
-وضعیت: `V5.0.0-RC.11_PREPUBLICATION_PASS` — اصلاح ساخت سفارشی برای Admin دارای `PLAN_ONLY` و بازیابی فهرست User کامل است؛ گیت محلی پاس شد و انتشار immutable در حال انجام است.
+وضعیت: `V5.0.0-RC.12_PREPUBLICATION_PASS` — ساده‌سازی Admin، حسابداری مالی reseller، enforcement و حذف نمایش روش ساخت کاربر کامل است؛ کاربر انتشار immutable را صریحاً خواسته است.
 
 ## قانون اجباری شروع هر چت و هر جلسه
 
@@ -830,6 +830,50 @@ reason codeهای حداقلی برای لاگ parent:
 
 ## نقطه دقیق ادامه
 
+> [!todo] حذف نمایش روش ساخت کاربر و انتشار `v5.0.0-rc.12` (`2026-08-26`)
+> کاربر صریحاً حذف «روش ساخت کاربر» از فرم ساخت و ویرایش Admin و انتشار نسخهٔ
+> immutable جدید را خواست. backend از `billing_mode` مقدار canonical را تعیین می‌کند:
+> `USED_TRAFFIC=FREE_FORM` و `ALLOCATED_TRAFFIC/USER_CREDIT=PLAN_ONLY`. انتخاب یا
+> نمایش دستی از فرم حذف شود، اما enforcement و payload سازگار باقی بماند. سپس build
+> نسخه‌دار، تست هدفمند UI/backend/migration/release، Graphify، review کامل diff و
+> انتشار GitHub/GHCR انجام شود؛ `marzban update` و دریافت تازهٔ installer واقعاً
+> بررسی شوند. baseline شبکه: remote tag `v5.0.0-rc.11@04048b9` و Latest پایدار
+> `v4.9.8`؛ نسخهٔ بعدی فقط پس از گیت محلی منتشر شود.
+
+> [!success] لانچر تک‌دستوری Dev محلی (`2026-08-26`)
+> اسکریپت PowerShell ایزوله با MySQL آزمایشی روی `127.0.0.1:33079`، Alembic، seed
+> تکرارپذیر Owner/Admin/User/Plan، Backend واقعی با Xray و Vite HMR اجرا شد. probe
+> بدون خطای image، pull صریح MySQL، Dockerfile مخصوص CRLF ویندوز، context بدون
+> artifactهای محلی و root درست Vite اعمال شد. seed علاوه بر ساخت روش canonical
+> `chacha20-ietf-poly1305`، داده نمونه قدیمی را هم idempotent اصلاح می‌کند؛ در نتیجه
+> `/api/users` دیگر ResponseValidationError ندارد. ورود Owner و سه Admin، MySQL
+> healthy، Frontend=`200`، Owner API، فهرست چهار Admin و شش User و Browser داخلی
+> بدون console error پاس شد. production، schema، migration، dependency و release
+> تغییر نکرد. نقطه ادامه: Dev روشن بماند؛ تغییر source با Save از Vite HMR دیده شود.
+
+> [!todo] ساده‌سازی مدیر و دسترسی‌های Plan-only (`2026-08-25`)
+> درخواست و تصمیم‌های قطعی در [[ADMIN_SIMPLIFICATION_HANDOFF_FA]] ثبت شد. ادامه از نوشتن
+> تست‌های بازگشتی و migration افزایشی نقش آغاز شود. working tree دارای تغییرات قبلی
+> Modal و fail-closed است و نباید revert شود. `v5.0.0-rc.11@04048b9` baseline محلی است؛
+> GitHub prerelease `rc.11` و Latest پایدار `v4.9.8` تأیید شدند، اما `git ls-remote`
+> به‌علت DNS و GHCR digest به‌علت نبود `read:packages` ناموفق بود. پیاده‌سازی و تست
+> محلی ادامه یابد؛ commit/push/tag/release/deploy تا تأیید دوباره و دستور صریح ممنوع.
+
+> [!success] بازگردانی فرم Admin به Modal وسط‌چین (`2026-08-25`)
+> تصویر production با source و tag `v5.0.0-rc.11` تطبیق داده شد: خرابی cache یا
+> updater نیست. `AdminFormDrawer.tsx` عمداً Chakra `Drawer size="full"` با ارتفاع
+> `100dvh` و عرض desktop برابر `940px` می‌سازد و contract در
+> `test-admin-ux.cjs` نیز Modal را ممنوع کرده است؛ بنابراین CI ظاهر غلط را صحیح فرض
+> کرده بود. wrapper به `Modal size="5xl"` با `maxH="calc(100dvh - 24px)"`، scroll
+> داخلی، footer ثابت و دکمه بستن سمت مقابل عنوان برگشت؛ تمام fieldها، permissionها،
+> APIها و business logic حفظ شدند. Browser یک loop موجود در deep-link
+> `#/admins/?create=1` را نیز آشکار کرد؛ dependency ناپایدار `formDisclosure` با callback
+> پایدار جایگزین شد. desktop=`1440x900` و mobile=`375x812` هر دو مرکز دقیق، حاشیه
+> `12px` و بدون overflow افقی‌اند؛ contractها، TypeScript، build production و rebuild
+> بایت‌به‌بایت=`PASS`. نقطه ادامه: در صورت درخواست صریح، bump نسخه و committed build،
+> regression، commit/push/tag/GHCR/Release immutable بعدی؛ بدون deploy.
+> هیچ push، tag، release یا deploy بدون درخواست صریح جدید انجام نشود.
+
 > [!warning] اصلاح `PLAN_ONLY` و بازیابی فهرست User برای `v5.0.0-rc.11` (`2026-08-25`)
 > baseline شبکه بازتأیید شد: `v5.0.0-rc.10@7b6aaf27e25bbd9b8740d71d4dd971796d987695`،
 > Actions run `32795972592=success`، GitHub prerelease موجود و GHCR digest برابر
@@ -1193,6 +1237,23 @@ git log -3 --oneline --decorate
 | `2026-08-25` | اصلاح install/update/bootstrap/build parity و آماده‌سازی `rc.9` | local gate=`PASS`؛ CI نهایی باز | SemVer prerelease در install، resolve جدیدترین release برای update بدون نسخه، ref یکسان script/files/image، پایان نصب بعد health، `create-owner` امن، قفل React/Chakra محلی، locale build ID مبتنی بر VERSION، CI build diff و رفع DOM number selection | `b1d88d7` + working tree | shell syntax/resolver=`PASS`؛ release/bootstrap=`2 passed`؛ Admin UX/hierarchy/Plan=`PASS`؛ TypeScript/Vite Node `20.19.5`=`1726 modules` و rebuild byte parity=`PASS`؛ YAML/diff-check=`PASS`؛ Graphify=`4454/11426/457` و diagnose clean؛ MySQL زنده=`NOT EXECUTED` | manifest/secret review؛ commit/push/tag immutable `v5.0.0-rc.9`؛ انتظار کامل CI/GHCR/Release؛ بدون deploy |
 | `2026-08-25` | گیت `rc.9` و آماده‌سازی `rc.10` | `rc.9 CI=FAIL` فقط parity؛ سه DB=`PASS` | build source روی Linux hash متفاوت از Windows داشت؛ برای parity واقعی image، build source به `/tmp` منتقل و committed dashboard دست‌نخورده نگه داشته شد | `559b4cd` + working tree | Actions `32795337382`: MySQL 8.0/latest/existing-volume=`PASS`؛ Docker parity=`FAIL`؛ local isolated source build + committed immutability=`PASS` | انتشار immutable `rc.10` و انتظار CI/GHCR/Release؛ `rc.9` بازنویسی نشود؛ بدون deploy |
 | `2026-08-25` | اصلاح `PLAN_ONLY` و بازیابی فهرست User؛ آماده‌سازی `rc.11` | local pre-publication gate=`PASS` | جلوگیری از commit شدن User بدون proxy؛ تحمل فقط در response برای ردیف خراب موجود؛ fail-closed شدن مجوز ساخت سفارشی و هدایت `PLAN_ONLY` به `/plans/`؛ build نسخه‌دار تازه | `7b6aaf2` + working tree؛ بدون commit | full backend=`226 passed, 9 skipped`؛ Admin UX/hierarchy/Plan=`PASS`؛ TypeScript=`PASS`؛ Vite Node `20.19.5` و rebuild 24 فایل byte-identical=`PASS`؛ Graphify=`4464/11445/467` | schema/migration/query/index=`UNCHANGED`؛ MySQL و SQL optimization review: رد زودهنگام یک write خراب را حذف می‌کند و ریسک migration ندارد؛ MySQL 8.0/latest/existing-volume در CI گیت نهایی؛ commit/push/tag/GHCR/Release immutable `rc.11`؛ بدون deploy |
+| `2026-08-25` | بازگردانی فرم Admin به Modal وسط‌چین | local gate=`PASS`؛ publication=`NOT REQUESTED` | جایگزینی فقط wrapper `Drawer` با Chakra `Modal` وسط‌چین؛ scroll داخلی و footer ثابت؛ اصلاح جای دکمه بستن RTL؛ حذف dependency ناپایدار deep-link ساخت Admin | `04048b9` + working tree؛ بدون commit | Admin UX/hierarchy/Plan=`PASS`؛ TypeScript=`PASS`؛ Browser desktop `1440x900`: modal=`1024x876@208,12`، mobile `375x812`: modal=`351x788@12,12`، center delta=`0,0` و horizontal overflow=`false`؛ deep-link query پاک و dialog باز؛ Vite Node `20.19.5` asset=`index.788f4660.js` و rebuild 24 فایل byte-identical=`PASS`؛ Graphify=`4464/11445/466` | API/backend/schema/migration/query/index/accounting/dependency=`UNCHANGED`؛ در صورت درخواست صریح، bump و انتشار immutable بعدی؛ بدون deploy |
+| `2026-08-25` | مهار بازگشت `PLAN_ONLY` به `FREE_FORM` | local gate=`PASS`؛ publication=`NOT REQUESTED` | root cause: migration عمداً hierarchy را تا اجرای `set-owner` خاموش نگه می‌دارد؛ capabilities در حالت sudo گزینه‌ها را نشان می‌داد، ولی create/modify فقط هنگام hierarchy فعال mode را ذخیره می‌کرد و default DB=`FREE_FORM` باقی می‌ماند. `hierarchy_enabled` به capabilities اضافه شد؛ UI هشدار و فرمان دقیق نشان می‌دهد و create/modify پیش از write با `409 admin_hierarchy_not_initialized` fail-closed می‌شوند | `04048b9` + working tree؛ بدون commit | regression create/modify و persistence=`3 passed`؛ مجموعه مرتبط backend=`19 passed` پیش از افزودن تست modify و targeted نهایی=`3 passed`؛ Admin UX=`PASS`؛ TypeScript=`PASS`؛ `git diff --check` فقط هشدار line-ending داشت | روی سرور `marzban set-owner saj` اجرا شود، سپس `asdad` دوباره روی `PLAN_ONLY` ذخیره شود؛ schema/migration/index جدید ندارد، داده production در این برش تغییر نکرد؛ بدون commit/push/tag/release/deploy |
+| `2026-08-25` | شروع ساده‌سازی مدیر و سیاست read-only | `IN_PROGRESS` | نقش محصول فقط `OWNER/ADMIN` شد؛ API ساخت فرزند فقط `ADMIN` می‌پذیرد؛ گزینه و فیلتر نقش حذف شد؛ lookup قدیمی `SUPER_ADMIN` برای rollback در DB ماند و runtime آن را `ADMIN` می‌بیند | `04048b9` + working tree؛ بدون commit | role/service/plan/namespace targeted=`38 passed`؛ preflight Graphify/MySQL/SQL/UI=`PASS`؛ GitHub Release=`PASS`؛ `git ls-remote` DNS=`FAIL`؛ GHCR scope=`403` | افزودن lifetime metrics بدون N+1، سپس قفل Plan-only و suspended read-only؛ release-sensitive ممنوع |
+| `2026-08-25` | تکمیل ساده‌سازی مدیر، lifetime و read-only | local gate=`PASS`؛ publication=`NOT REQUESTED` | فقط `OWNER/ADMIN`؛ فرم فشرده و بدون role/advanced accordion؛ lifetime consumed/created هم‌زمان و monotonic؛ قفل مستقیم quota برای `PLAN_ONLY` با Owner bypass؛ `SUSPENDED` دارای GET scope و mutation ممنوع؛ IP کامل همیشه فعال | `04048b9` + working tree؛ بدون commit | backend targeted=`61 passed`؛ Admin UX/hierarchy/Plan=`PASS`؛ TypeScript=`PASS`؛ Vite=`1773 modules`؛ Browser Modal Owner=`PASS` و console tab نهایی=`0 error` | Graphify update؛ سپس توقف تا دستور صریح انتشار؛ MySQL CI گیت نهایی و migration جدید=`0` |
+| `2026-08-26` | لانچر تک‌دستوری Dev محلی | static gate=`PASS`؛ integration=`BLOCKED` | PowerShell ایزوله MySQL 8.0، Alembic، seed Owner/Admin/User/Plan، Backend واقعی با Xray/reload، Vite HMR، VS Code و مرورگر را راه‌اندازی می‌کند؛ seed فقط DB دقیق `marzban_dev@33079` را می‌پذیرد | `04048b9` + working tree؛ بدون commit | PowerShell parser=`PASS`؛ Python compile/import=`PASS`؛ DB guard safe/unsafe=`PASS`؛ Docker/MySQL/Xray=`NOT EXECUTED` چون Docker Desktop نصب نیست | نصب Docker Desktop؛ اجرای `powershell -ExecutionPolicy Bypass -File .\scripts\dev-local.ps1`؛ production/schema/migration/dependency/release=`UNCHANGED` |
+| `2026-08-26` | رفع اجرای نخست لانچر Dev | integration=`PASS`؛ Dev روشن | probe image با `docker image ls --quiet`؛ pull صریح `mysql:8.0`؛ حذف `.test-*`/`.codex`/`graphify-out` از build context؛ `scripts/Dockerfile.dev` برای CRLF ویندوز؛ اجرای module-based seed؛ root صحیح Vite؛ URL دقیق `dashboard/index.html`؛ روش canonical Shadowsocks و repair idempotent داده نمونه | `04048b9` + working tree؛ بدون commit | PowerShell parser=`PASS`؛ image build=`PASS`؛ Alembic MySQL 8.0 تا `c2f4a8d6e913`=`PASS`؛ seed دوباره=`PASS`؛ MySQL=`healthy`؛ Frontend=`200`؛ Owner و سه Admin login=`PASS`؛ `/api/users` شش ردیف و `/api/admin-management` چهار ردیف=`PASS`؛ Browser Owner/Dashboard/User list و console=`PASS` | Dev روشن بماند؛ production/schema/migration/query/index/dependency/version/release=`UNCHANGED`؛ بدون commit/push/tag/release/deploy |
+| `2026-08-26 10:44 +03:30` | آماده‌سازی `v5.0.0-rc.12` | local gate=`PASS` | نمایش «روش ساخت کاربر» از create/edit حذف شد؛ mapping canonical backend و payload حفظ شد؛ Owner در mode مصرف واقعی همچنان می‌تواند Plan/Trial بسازد؛ قیمت override هر reseller در پاسخ Plan و زنجیرهٔ خرید اعمال می‌شود و edit عادی Admin آن را پاک نمی‌کند؛ نسخه، build و release docs به rc.12 رسید | `04048b9` + working tree؛ بدون commit | frontend contracts=`PASS`؛ TypeScript/Vite=`1773 modules`؛ Browser create/edit بدون گزینه و console error=`PASS`؛ backend/migration/release targeted=`67 passed`؛ full discovery=`228 passed, 8 failed, 9 skipped` و failureهای سازگاری repair=`11 passed, 1 skipped`؛ money/trial/release retest=`16 passed, 1 skipped`؛ MySQL 8.0 head=`c2f4a8d6e913` و index/EXPLAIN=`PASS`؛ Graphify code-only=`4535/11226/509` | manifest/secret/diff review؛ commit/push/tag immutable rc.12؛ انتظار CI full/MySQL/GHCR/Release؛ سپس تست installer/update؛ بدون deploy |
+
+### گزارش DB پیش از انتشار `v5.0.0-rc.12`
+
+- source: `v5.0.0-rc.11@04048b90ce27fd77d0ca3f936faca26da932ef90`؛ target محلی: `v5.0.0-rc.12`.
+- migration: `c2f4a8d6e913` روی `8b7d3e5f1a24`؛ چهار ستون مالی افزایشی، قیمت نسخهٔ Plan، جدول قیمت reseller و ledger immutable اضافه می‌شوند.
+- MySQL: fresh Dev روی `mysql:8.0` تا head اجرا و seed idempotent پاس شد؛ production DB لمس نشد. matrix کامل 8.0/latest/existing-volume و backup/restore در CI release گیت نهایی است.
+- index: ledger دارای `(admin_id, created_at, id)` و `(user_id, created_at, id)`؛ قیمت reseller دارای PK `(admin_id, plan_id)` و index معکوس `(plan_id, admin_id)` است.
+- evidence: `EXPLAIN` آخرین تراکنش‌های Admin از `ix_admin_money_admin_created` با `type=ref` و backward index scan استفاده کرد؛ full scan دیده نشد.
+- کارایی: debit/credit و history bounded از indexهای مرکب استفاده می‌کنند؛ delete User رکورد ledger را حذف نمی‌کند و شمارنده‌های lifetime monotonic می‌مانند.
+- ریسک: DDL افزایشی و قابل downgrade است؛ پیش از update واقعی backup الزامی است. downgrade جدول‌های مالی و ستون‌های جدید را حذف می‌کند، پس rollback schema فقط با تصمیم اپراتور و backup انجام شود.
 
 ### گزارش DB انتشار `v5.0.0-rc.6`
 

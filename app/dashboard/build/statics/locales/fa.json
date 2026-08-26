@@ -577,6 +577,7 @@
   "errors.codes.pagination_offset_invalid": "شماره صفحه نامعتبر است. صفحه را از ابتدا انتخاب کنید.",
   "errors.codes.sort_option_invalid": "ترتیب نمایش انتخاب‌شده معتبر نیست.",
   "errors.codes.owner_required": "این عملیات فقط برای مالک سامانه مجاز است.",
+  "errors.codes.admin_hierarchy_not_initialized": "ساختار ادمین‌ها هنوز روی سرور فعال نشده است. ابتدا دستور marzban set-owner USERNAME را اجرا کنید.",
   "errors.codes.admin_phone_required": "شماره تلفن برای ادمین جدید الزامی است.",
   "errors.codes.credit_exhausted": "اعتبار کافی برای انجام این عملیات وجود ندارد.",
   "errors.codes.bulk_scope_required": "محدوده عملیات گروهی باید صریحاً انتخاب شود.",

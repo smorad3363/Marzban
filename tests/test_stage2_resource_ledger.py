@@ -13,6 +13,7 @@ from app.db.models import (
     AdminAccountStatus,
     AdminAuditLog,
     AdminCreditTransfer,
+    AdminMoneyTransaction,
     AdminHierarchySettings,
     AdminRole,
     AdminSuspensionReason,
@@ -20,9 +21,9 @@ from app.db.models import (
     MarzhelpAdminSettings,
 )
 from app.models.admin import Admin as APIAdmin
-from app.models.admin import ManagedAdminCreate, MarzhelpAdminPolicy
+from app.models.admin import ManagedAdminCreate, ManagedAdminModify, MarzhelpAdminPolicy
 from app.models.admin_hierarchy import CreditTransferRequest, RenewalPolicyUpdate
-from app.routers.admin import create_managed_admin
+from app.routers.admin import create_managed_admin, get_admin_capabilities, modify_managed_admin
 from app.routers import admin_hierarchy as hierarchy_router
 from app.routers.admin_hierarchy import grant_credit, reclaim_credit, update_renewal_policy
 from app.utils import admin_hierarchy
@@ -242,25 +243,86 @@ def test_new_admin_initial_credit_uses_parent_funded_ledger(db):
             role="ADMIN",
             policy=MarzhelpAdminPolicy(
                 billing_mode="ALLOCATED_TRAFFIC",
-                total_traffic=30 * GIB,
             ),
+            initial_money_credit_toman=1_000_000,
         ),
         db,
         APIAdmin.model_validate(owner),
     )
     child = db.query(Admin).filter_by(username="new-child").one()
-    transfer = db.query(AdminCreditTransfer).filter_by(adjusted_admin_id=child.id).one()
-    owner_wallet = db.get(MarzhelpAdminSettings, owner.id)
+    transfer = db.query(AdminMoneyTransaction).filter_by(admin_id=child.id).one()
     child_wallet = db.get(MarzhelpAdminSettings, child.id)
-    assert response.policy.total_traffic == 30 * GIB
-    assert transfer.idempotency_key == f"admin-create-{child.id}-traffic-credit"
-    assert transfer.delta == 30 * GIB
-    assert transfer.note == "Initial admin traffic credit"
-    assert owner_wallet.delegated_traffic == 30 * GIB
-    assert child_wallet.total_traffic == 30 * GIB
+    assert response.policy.total_traffic is None
+    assert transfer.operation_key == f"money:grant:admin-create-{child.id}-money-credit"
+    assert transfer.delta_toman == 1_000_000
+    assert child_wallet.money_balance_toman == 1_000_000
+    assert response.user_creation_mode == admin_hierarchy.PLAN_ONLY
+    assert child_wallet.user_creation_mode_id == admin_hierarchy.USER_CREATION_MODE_IDS[
+        admin_hierarchy.PLAN_ONLY
+    ]
     assert db.query(AdminAuditLog).filter_by(
-        action="credit.grant", target_id=str(child.id)
+        action="money.grant", target_id=str(child.id)
     ).count() == 1
+
+
+def test_managed_admin_create_fails_closed_until_owner_initializes_hierarchy(db):
+    owner, _, _ = _seed(db)
+    actor = APIAdmin.model_validate(owner)
+    assert get_admin_capabilities(db, actor).hierarchy_enabled is True
+    db.get(AdminHierarchySettings, 1).enabled = False
+    db.commit()
+    assert get_admin_capabilities(db, actor).hierarchy_enabled is False
+
+    with pytest.raises(HTTPException) as error:
+        create_managed_admin(
+            _request("/api/admin-management"),
+            ManagedAdminCreate(
+                username="must-not-fall-back",
+                password="secret-password",
+                phone="09395253363",
+                role="ADMIN",
+                user_creation_mode="PLAN_ONLY",
+                policy=MarzhelpAdminPolicy(
+                    billing_mode="ALLOCATED_TRAFFIC",
+                    total_traffic=13 * GIB,
+                ),
+            ),
+            db,
+            actor,
+        )
+
+    assert error.value.status_code == 409
+    assert error.value.detail["code"] == "admin_hierarchy_not_initialized"
+    assert db.query(Admin).filter_by(username="must-not-fall-back").one_or_none() is None
+
+
+def test_managed_admin_modify_fails_closed_instead_of_ignoring_plan_only(db):
+    owner, child, _ = _seed(db)
+    child_settings = db.get(MarzhelpAdminSettings, child.id)
+    assert child_settings.user_creation_mode_id == admin_hierarchy.USER_CREATION_MODE_IDS[
+        admin_hierarchy.FREE_FORM
+    ]
+    db.get(AdminHierarchySettings, 1).enabled = False
+    db.commit()
+
+    with pytest.raises(HTTPException) as error:
+        modify_managed_admin(
+            _request(f"/api/admin-management/{child.username}", "PUT"),
+            ManagedAdminModify(
+                user_creation_mode="PLAN_ONLY",
+                policy=MarzhelpAdminPolicy(),
+            ),
+            child,
+            db,
+            APIAdmin.model_validate(owner),
+        )
+
+    assert error.value.status_code == 409
+    assert error.value.detail["code"] == "admin_hierarchy_not_initialized"
+    db.refresh(child_settings)
+    assert child_settings.user_creation_mode_id == admin_hierarchy.USER_CREATION_MODE_IDS[
+        admin_hierarchy.FREE_FORM
+    ]
 
 
 def test_renewal_policy_is_visible_and_parent_or_owner_authorized(db):

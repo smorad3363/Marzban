@@ -555,6 +555,7 @@ def update_user(
     modify: UserModify,
     commit: bool = True,
     operation: marzhelp_policy.UserUpdateOperation = marzhelp_policy.UserUpdateOperation.edit,
+    actor: Admin | object | None = None,
 ) -> User:
     """
     Updates a user with new details.
@@ -572,6 +573,7 @@ def update_user(
         dbuser,
         modify,
         operation=operation,
+        actor=actor,
     )
     added_proxies: Dict[ProxyTypes, Proxy] = {}
     if modify.proxies:
@@ -1263,10 +1265,16 @@ def upsert_marzhelp_admin_policy(
     values = policy.model_dump(
         exclude={
             "billing_mode",
+            "money_balance_toman",
             "allowed_inbounds",
             "allowed_user_limits",
             "allowed_subscription_modes",
         }
+    )
+    values.update(
+        view_full_client_ip=True,
+        prevent_user_creation=False,
+        prevent_revoke_subscription=False,
     )
     for field, value in values.items():
         setattr(settings, field, value)

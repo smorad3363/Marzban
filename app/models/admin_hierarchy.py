@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from app.utils.admin_billing import BillingMode
 
 
-AdminRoleCode = Literal["OWNER", "SUPER_ADMIN", "ADMIN"]
+AdminRoleCode = Literal["OWNER", "ADMIN"]
 
 
 class HierarchyAdminNode(BaseModel):
@@ -43,7 +43,7 @@ class HierarchyChildCreate(BaseModel):
     username: str = Field(min_length=3, max_length=34)
     password: str = Field(min_length=6, max_length=128)
     phone: Optional[str] = Field(default=None, max_length=32)
-    role: Literal["SUPER_ADMIN", "ADMIN"] = "ADMIN"
+    role: Literal["ADMIN"] = "ADMIN"
     billing_mode: BillingMode
     initial_credit: Optional[int] = Field(default=None, ge=1)
     user_creation_mode: Literal["FREE_FORM", "PLAN_ONLY"] = "PLAN_ONLY"
@@ -254,6 +254,9 @@ class AccountSummary(BaseModel):
     renewal_enabled: bool = True
     renewal_remaining: Optional[int] = None
     billing_mode: BillingMode = BillingMode.LEGACY_COMPAT
+    money_billing_enabled: bool = False
+    money_balance_toman: int = 0
+    used_traffic_price_per_gib_toman: Optional[int] = None
     user_creation_mode: Literal["FREE_FORM", "PLAN_ONLY"] = "FREE_FORM"
     can_manage_plans: bool = False
     trial_quota: int = 0
@@ -286,6 +289,7 @@ class PlanCategoryResponse(BaseModel):
 
 
 class PlanVersionInput(BaseModel):
+    price_toman: int = Field(default=0, ge=0)
     data_limit: int = Field(ge=0)
     duration_days: int = Field(ge=1, le=3650)
     concurrent_user_limit: Optional[int] = Field(default=None, ge=1)
@@ -339,6 +343,7 @@ class PlanUpdate(BaseModel):
 
 
 class PlanVersionResponse(BaseModel):
+    price_toman: int
     data_limit: int
     duration_days: int
     concurrent_user_limit: Optional[int]
@@ -363,6 +368,26 @@ class PlanResponse(BaseModel):
     allowed_admin_ids: list[int]
     include_subtree: bool
     is_trial: bool
+    effective_price_toman: int = 0
+    base_price_toman: Optional[int] = None
+
+
+class AdminPlanPriceInput(BaseModel):
+    plan_id: int = Field(gt=0)
+    price_toman: int = Field(ge=0)
+
+
+class MoneyTransferRequest(BaseModel):
+    amount_toman: int = Field(gt=0)
+    idempotency_key: str = Field(min_length=8, max_length=128)
+    note: Optional[str] = Field(default=None, max_length=512)
+
+
+class MoneyTransferResponse(BaseModel):
+    operation_key: str
+    source_balance_toman: Optional[int] = None
+    target_balance_toman: int
+    replayed: bool = False
 
 
 class PlanNetworkHostOption(BaseModel):

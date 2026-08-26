@@ -56,6 +56,7 @@ type PlanDraft = {
   name: string;
   description: string;
   dataGiB: string;
+  priceToman: string;
   durationDays: string;
   deviceLimit: string;
   resetStrategy: "no_reset" | "day" | "week" | "month" | "year";
@@ -69,6 +70,7 @@ const emptyDraft = (): PlanDraft => ({
   name: "",
   description: "",
   dataGiB: "10",
+  priceToman: "50000",
   durationDays: "30",
   deviceLimit: "",
   resetStrategy: "no_reset",
@@ -103,7 +105,8 @@ export const Plans: FC = () => {
   const missingHosts = networkOptions.isLoading
     ? []
     : missingPlanHostIds(draft.hosts, inboundOptions);
-  const canManage = account.data?.role === "OWNER" || account.data?.can_manage_plans;
+  const accountActive = account.data?.account_status === "ACTIVE";
+  const canManage = accountActive && (account.data?.role === "OWNER" || account.data?.can_manage_plans);
 
   useEffect(() => {
     if (!modal.isOpen) return;
@@ -111,6 +114,7 @@ export const Plans: FC = () => {
       name: editing.name,
       description: editing.description || "",
       dataGiB: String(editing.version.data_limit / GIB),
+      priceToman: String(editing.version.price_toman),
       durationDays: String(editing.version.duration_days),
       deviceLimit: editing.version.concurrent_user_limit === null ? "" : String(editing.version.concurrent_user_limit),
       resetStrategy: editing.version.reset_strategy,
@@ -128,6 +132,7 @@ export const Plans: FC = () => {
         description: draft.description.trim() || null,
         category_id: draft.categoryId ? Number(draft.categoryId) : null,
         version: {
+          price_toman: draft.isTrial ? 0 : Number(draft.priceToman),
           data_limit: Math.round(Number(draft.dataGiB) * GIB),
           duration_days: Number(draft.durationDays),
           concurrent_user_limit: draft.deviceLimit ? Number(draft.deviceLimit) : null,
@@ -234,7 +239,7 @@ export const Plans: FC = () => {
       {canManage && (
         <Card p={5} mb={5} bg="#111d17" color="gray.100" borderWidth="1px" borderColor="#33483b" borderRadius="18px">
           <Text fontWeight="800">دسته‌بندی پلن‌ها</Text>
-          <Text color="gray.400" fontSize="sm" mt={1}>پلن را اینجا دسته‌بندی کنید؛ دسترسی هر ادمین به دسته‌ها فقط از صفحه ادمین‌ها تنظیم می‌شود.</Text>
+          <Text color="gray.400" fontSize="sm" mt={1}>پلن و قیمت آن را همین‌جا تنظیم کنید؛ مدیرهای پلنی از فهرست فعال استفاده می‌کنند.</Text>
           <HStack mt={4} align="end" flexWrap="wrap">
             <FormControl maxW={{ base: "full", md: "360px" }}>
               <FormLabel fontSize="sm">نام دسته‌بندی جدید</FormLabel>
@@ -255,8 +260,8 @@ export const Plans: FC = () => {
           {(plans.data || []).map((plan) => (
             <Card key={plan.id} p={4} bg="var(--panel-surface)" color="gray.100" borderWidth="1px" borderColor="var(--panel-border)" borderRadius="14px" boxShadow="panel">
               <HStack justify="space-between" align="start"><Box minW={0}><Text as="h2" fontSize="lg" fontWeight="800" overflowWrap="anywhere">{plan.name}</Text><Text color="gray.400" fontSize="sm" mt={1}>{plan.description || "بدون توضیح"}</Text></Box><Stack align="end" spacing={1}>{plan.is_trial && <Badge colorScheme="orange">آزمایشی</Badge>}<Badge colorScheme="cyan">نسخه {plan.version_number}</Badge><Badge colorScheme="purple">{plan.category_name || "بدون دسته"}</Badge></Stack></HStack>
-              <SimpleGrid columns={2} gap={3} mt={5}><Box><Text color="gray.400" fontSize="xs">حجم</Text><Text mt={1} fontWeight="700">{formatBytes(plan.version.data_limit)}</Text></Box><Box><Text color="gray.400" fontSize="xs">مدت</Text><Text mt={1} fontWeight="700">{plan.version.duration_days} روز</Text></Box><Box><Text color="gray.400" fontSize="xs">دستگاه</Text><Text mt={1}>{plan.version.concurrent_user_limit ?? "نامحدود"}</Text></Box><Box><Text color="gray.400" fontSize="xs">دسته‌بندی</Text><Text mt={1}>{plan.category_name || "بدون دسته"}</Text></Box></SimpleGrid>
-              <FormControl mt={5}><FormLabel fontSize="xs">نام کاربری جدید</FormLabel><HStack><Input minH="44px" dir="ltr" value={usernames[plan.id] || ""} onChange={(event) => setUsernames((current) => ({ ...current, [plan.id]: event.target.value }))} /><Button minH="44px" isDisabled={!usernames[plan.id]?.trim()} isLoading={createUser.isLoading} onClick={() => createUser.mutate({ plan, username: usernames[plan.id].trim() })}>ساخت</Button></HStack></FormControl>
+              <SimpleGrid columns={2} gap={3} mt={5}><Box><Text color="gray.400" fontSize="xs">حجم</Text><Text mt={1} fontWeight="700">{formatBytes(plan.version.data_limit)}</Text></Box><Box><Text color="gray.400" fontSize="xs">مدت</Text><Text mt={1} fontWeight="700">{plan.version.duration_days} روز</Text></Box><Box><Text color="gray.400" fontSize="xs">قیمت پلن</Text><Text mt={1} fontWeight="700">{plan.effective_price_toman.toLocaleString("fa-IR")} تومان</Text></Box><Box><Text color="gray.400" fontSize="xs">دستگاه</Text><Text mt={1}>{plan.version.concurrent_user_limit ?? "نامحدود"}</Text></Box><Box><Text color="gray.400" fontSize="xs">دسته‌بندی</Text><Text mt={1}>{plan.category_name || "بدون دسته"}</Text></Box></SimpleGrid>
+              {accountActive && <FormControl mt={5}><FormLabel fontSize="xs">نام کاربری جدید</FormLabel><HStack><Input minH="44px" dir="ltr" value={usernames[plan.id] || ""} onChange={(event) => setUsernames((current) => ({ ...current, [plan.id]: event.target.value }))} /><Button minH="44px" isDisabled={!usernames[plan.id]?.trim()} isLoading={createUser.isLoading} onClick={() => createUser.mutate({ plan, username: usernames[plan.id].trim() })}>ساخت</Button></HStack></FormControl>}
               {canManage && <HStack mt={4}><Button minH="44px" size="sm" variant="outline" onClick={() => openEdit(plan)}>نسخه جدید</Button><Button minH="44px" size="sm" variant="ghost" colorScheme="red" onClick={() => { setArchiveTarget(plan); archiveDialog.onOpen(); }}>بایگانی</Button></HStack>}
             </Card>
           ))}
@@ -267,9 +272,9 @@ export const Plans: FC = () => {
       <Modal isOpen={modal.isOpen} onClose={modal.onClose} size="2xl" scrollBehavior="inside"><ModalOverlay bg="rgba(0,0,0,.72)" /><ModalContent as="form" onSubmit={submit} mx={3} my={3} maxH="calc(100dvh - 24px)" overflow="hidden" bg="var(--panel-surface)" color="gray.100" borderWidth="1px" borderColor="var(--panel-border-strong)"><ModalHeader ps={14}>{editing ? "ساخت نسخه جدید" : "پلن جدید"}</ModalHeader><ModalCloseButton top={3} insetInlineStart={3} insetInlineEnd="auto" /><ModalBody overflowY="auto"><Stack spacing={4}>
         <FormControl isRequired><FormLabel>نام پلن</FormLabel><Input minH="44px" value={draft.name} isReadOnly={Boolean(editing)} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} /></FormControl>
         <FormControl><FormLabel>توضیح</FormLabel><Textarea value={draft.description} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} /></FormControl>
-        <FormControl isRequired><FormLabel>دسته‌بندی</FormLabel><Select value={draft.categoryId} onChange={(event) => setDraft((current) => ({ ...current, categoryId: event.target.value }))}><option value="">انتخاب دسته‌بندی</option>{(categories.data || []).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</Select><FormHelperText>اختصاص این دسته به ادمین‌ها از صفحه مدیریت ادمین انجام می‌شود.</FormHelperText></FormControl>
+        <FormControl isRequired><FormLabel>دسته‌بندی</FormLabel><Select value={draft.categoryId} onChange={(event) => setDraft((current) => ({ ...current, categoryId: event.target.value }))}><option value="">انتخاب دسته‌بندی</option>{(categories.data || []).map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</Select></FormControl>
         {account.data?.role === "OWNER" && <FormControl><Checkbox minH="44px" alignItems="center" isChecked={draft.isTrial} isDisabled={Boolean(editing)} onChange={(event) => setDraft((current) => ({ ...current, isTrial: event.target.checked }))}>پلن آزمایشی</Checkbox><FormHelperText>مشخصات آزمایشی پس از ساخت تغییر نمی‌کند و هر ساخت موفق یک سهمیه تست مصرف می‌کند.</FormHelperText></FormControl>}
-        <SimpleGrid columns={{ base: 1, md: 2 }} gap={4}><FormControl isRequired><FormLabel>حجم (GiB)</FormLabel><Input minH="44px" type="number" min={0} step={0.01} dir="ltr" value={draft.dataGiB} onChange={(event) => setDraft((current) => ({ ...current, dataGiB: event.target.value }))} /></FormControl><FormControl isRequired><FormLabel>مدت (روز)</FormLabel><Input minH="44px" type="number" min={1} max={3650} dir="ltr" value={draft.durationDays} onChange={(event) => setDraft((current) => ({ ...current, durationDays: event.target.value }))} /></FormControl><FormControl><FormLabel>تعداد دستگاه</FormLabel><Input minH="44px" type="number" min={1} dir="ltr" value={draft.deviceLimit} onChange={(event) => setDraft((current) => ({ ...current, deviceLimit: event.target.value }))} /></FormControl><FormControl><FormLabel>ریست حجم</FormLabel><Select minH="44px" value={draft.resetStrategy} onChange={(event) => setDraft((current) => ({ ...current, resetStrategy: event.target.value as PlanDraft["resetStrategy"] }))}><option value="no_reset">بدون ریست</option><option value="day">روزانه</option><option value="week">هفتگی</option><option value="month">ماهانه</option><option value="year">سالانه</option></Select></FormControl></SimpleGrid>
+        <SimpleGrid columns={{ base: 1, md: 2 }} gap={4}><FormControl isRequired><FormLabel>حجم (GiB)</FormLabel><Input minH="44px" type="number" min={0} step={0.01} dir="ltr" value={draft.dataGiB} onChange={(event) => setDraft((current) => ({ ...current, dataGiB: event.target.value }))} /></FormControl><FormControl isRequired={!draft.isTrial}><FormLabel>قیمت پلن (تومان)</FormLabel><Input minH="44px" type="number" min={0} step={1000} dir="ltr" value={draft.isTrial ? "0" : draft.priceToman} isDisabled={draft.isTrial} onChange={(event) => setDraft((current) => ({ ...current, priceToman: event.target.value }))} /></FormControl><FormControl isRequired><FormLabel>مدت (روز)</FormLabel><Input minH="44px" type="number" min={1} max={3650} dir="ltr" value={draft.durationDays} onChange={(event) => setDraft((current) => ({ ...current, durationDays: event.target.value }))} /></FormControl><FormControl><FormLabel>تعداد دستگاه</FormLabel><Input minH="44px" type="number" min={1} dir="ltr" value={draft.deviceLimit} onChange={(event) => setDraft((current) => ({ ...current, deviceLimit: event.target.value }))} /></FormControl><FormControl><FormLabel>ریست حجم</FormLabel><Select minH="44px" value={draft.resetStrategy} onChange={(event) => setDraft((current) => ({ ...current, resetStrategy: event.target.value as PlanDraft["resetStrategy"] }))}><option value="no_reset">بدون ریست</option><option value="day">روزانه</option><option value="week">هفتگی</option><option value="month">ماهانه</option><option value="year">سالانه</option></Select></FormControl></SimpleGrid>
         <FormControl>
           <FormLabel>Inboundها</FormLabel>
           <Stack maxH="280px" overflowY="auto" spacing={1} p={2} borderWidth="1px" borderColor="#33483b" borderRadius="10px">

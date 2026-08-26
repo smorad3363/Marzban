@@ -92,7 +92,7 @@ export type UserApi = {
   id?: number | null;
   discord_webook: string;
   is_sudo: boolean;
-  role?: "OWNER" | "SUPER_ADMIN" | "ADMIN" | null;
+  role?: "OWNER" | "ADMIN" | null;
   parent_admin_id?: number | null;
   external_api_enabled?: boolean;
   telegram_id: number | string;

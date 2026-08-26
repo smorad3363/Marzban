@@ -7,11 +7,13 @@ from typing import Union
 from pymysql.err import OperationalError
 from sqlalchemy import and_, bindparam, insert, select, update
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.dml import Insert
 
 from app import scheduler, xray
 from app.db import GetDB
 from app.db.models import Admin, NodeUsage, NodeUserUsage, System, User
+from app.utils import money_billing
 from config import (
     DISABLE_RECORDING_NODE_USAGE,
     JOB_RECORD_NODE_USAGES_INTERVAL,
@@ -158,7 +160,8 @@ def record_user_usages():
         if admin_id:
             admin_usage[admin_id] += user_usage["value"]
 
-    # record users usage
+    # Record user totals, lifetime Admin totals, and monetary usage billing in
+    # one transaction so traffic can never be stored without its matching bill.
     with GetDB() as db:
         stmt = update(User). \
             where(User.id == bindparam('uid')). \
@@ -167,14 +170,25 @@ def record_user_usages():
                 online_at=datetime.utcnow()
         )
 
-        safe_execute(db, stmt, users_usage)
-
         admin_data = [{"admin_id": admin_id, "value": value} for admin_id, value in admin_usage.items()]
-        if admin_data:
-            admin_update_stmt = update(Admin). \
-                where(Admin.id == bindparam('admin_id')). \
-                values(users_usage=Admin.users_usage + bindparam('value'))
-            safe_execute(db, admin_update_stmt, admin_data)
+        admin_update_stmt = update(Admin). \
+            where(Admin.id == bindparam('admin_id')). \
+            values(users_usage=Admin.users_usage + bindparam('value'))
+        tries = 0
+        while True:
+            try:
+                db.connection().execute(stmt, users_usage)
+                if admin_data:
+                    db.connection().execute(admin_update_stmt, admin_data)
+                money_billing.settle_used_traffic(db, dict(admin_usage))
+                db.commit()
+                break
+            except (OperationalError, IntegrityError) as err:
+                db.rollback()
+                if tries < 3 and (isinstance(err, IntegrityError) or err.args[0] == 1213):
+                    tries += 1
+                    continue
+                raise
 
     if DISABLE_RECORDING_NODE_USAGE:
         return

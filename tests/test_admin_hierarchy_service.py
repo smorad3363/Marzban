@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 
 import pytest
 import sqlalchemy as sa
-from fastapi import BackgroundTasks
+from fastapi import BackgroundTasks, HTTPException
 from sqlalchemy import event
 from sqlalchemy.orm import sessionmaker
 from starlette.requests import Request
@@ -15,6 +15,7 @@ from app.db.models import (
     AdminHierarchySettings,
     AdminAuditLog,
     AdminPlanCategoryAccess,
+    AdminMoneyTransaction,
     AdminRole,
     AdminCreditTransfer,
     AdminReferralAttribution,
@@ -22,6 +23,9 @@ from app.db.models import (
     AdminSuspensionAdmin,
     AdminSuspensionReason,
     AdminUserCreationMode,
+    AdminUserPlan,
+    AdminUserPlanPrice,
+    AdminUserPlanVersion,
     MarzhelpAdminSettings,
     ProxyHost,
     ProxyInbound,
@@ -44,7 +48,7 @@ from app.routers.admin_hierarchy import (
     get_admin_tree,
     unfreeze_admin as unfreeze_admin_route,
 )
-from app.utils import admin_billing, admin_hierarchy, admin_plans, marzhelp_policy
+from app.utils import admin_billing, admin_hierarchy, admin_plans, marzhelp_policy, money_billing
 
 
 @pytest.fixture()
@@ -117,7 +121,7 @@ def test_set_owner_backfills_without_deleting_ids_or_users(db):
     assert report["admin_count"] == 3
     assert owner.role_id == admin_hierarchy.ROLE_IDS[admin_hierarchy.OWNER]
     assert owner.parent_admin_id is None
-    assert sibling.role_id == admin_hierarchy.ROLE_IDS[admin_hierarchy.SUPER_ADMIN]
+    assert sibling.role_id == admin_hierarchy.ROLE_IDS[admin_hierarchy.ADMIN]
     assert leaf.role_id == admin_hierarchy.ROLE_IDS[admin_hierarchy.ADMIN]
     assert sibling.parent_admin_id == owner.id
     assert leaf.parent_admin_id == owner.id
@@ -376,6 +380,7 @@ def test_credit_transfer_is_idempotent_and_reclaim_is_bounded(db):
         )
     assert conflict.value.code == "idempotency_conflict"
 
+
     with pytest.raises(admin_hierarchy.HierarchyError) as raised:
         admin_hierarchy.transfer_credit(
             db,
@@ -522,6 +527,36 @@ def test_resume_releases_eventless_manual_suspension(db):
     assert settings.suspended_reason_id is None
     assert settings.suspended_at is None
     assert settings.suspended_by_admin_id is None
+
+
+def test_suspended_admin_can_read_users_but_cannot_mutate(db, monkeypatch):
+    _, child, _, _, _ = _legacy_tree(db)
+    settings = db.get(MarzhelpAdminSettings, child.id)
+    settings.account_status_id = admin_hierarchy.ACCOUNT_STATUS_IDS[admin_hierarchy.SUSPENDED]
+    settings.suspended_reason_id = 1
+    db.commit()
+    authenticated = APIAdmin(id=child.id, username=child.username, is_sudo=False)
+    monkeypatch.setattr(
+        APIAdmin,
+        "get_admin",
+        classmethod(lambda cls, token, session: authenticated),
+    )
+
+    readable = APIAdmin.get_current(
+        Request({"type": "http", "method": "GET", "path": "/api/users", "headers": []}),
+        db,
+        "token",
+    )
+    assert readable.username == child.username
+
+    with pytest.raises(HTTPException) as exc:
+        APIAdmin.get_current(
+            Request({"type": "http", "method": "POST", "path": "/api/user", "headers": []}),
+            db,
+            "token",
+        )
+    assert exc.value.status_code == 403
+    assert exc.value.detail["code"] == "account_read_only"
 
 
 def test_authorized_parent_activates_disabled_admin_without_touching_users(db):
@@ -815,3 +850,92 @@ def test_plan_updates_append_immutable_version(db, monkeypatch):
             idempotency_key="plan-replay-0001",
         )
     assert conflict.value.code == "idempotency_conflict"
+
+
+def _money_tree(db):
+    owner, parent, child, _, _ = _legacy_tree(db)
+    parent_settings = db.get(MarzhelpAdminSettings, parent.id)
+    parent_settings.can_create_admins = True
+    admin_hierarchy.reparent_subtree(db, owner, child, parent)
+    child_settings = db.get(MarzhelpAdminSettings, child.id)
+    for settings in (parent_settings, child_settings):
+        settings.money_billing_enabled = True
+        settings.money_balance_toman = 1_000_000
+    db.flush()
+    return owner, parent, child, parent_settings, child_settings
+
+
+def test_plan_money_chain_uses_reseller_prices_and_margin(db):
+    owner, parent, child, parent_settings, child_settings = _money_tree(db)
+    parent_settings.billing_mode = admin_billing.BillingMode.ALLOCATED_TRAFFIC.value
+    child_settings.billing_mode = admin_billing.BillingMode.ALLOCATED_TRAFFIC.value
+    plan = AdminUserPlan(owner_admin_id=owner.id, name="20 GiB")
+    db.add(plan)
+    db.flush()
+    version = AdminUserPlanVersion(
+        plan_id=plan.id, version_number=1, price_toman=50_000,
+        data_limit=20 * 1024 ** 3, duration_days=30, reset_strategy="no_reset",
+        renewal_volume_strategy="replace", renewal_time_strategy="extend_max",
+        created_by_admin_id=owner.id,
+    )
+    db.add(version)
+    db.flush()
+    plan.current_version_id = version.id
+    db.add_all([
+        AdminUserPlanPrice(
+            admin_id=parent.id,
+            plan_id=plan.id,
+            price_toman=50_000,
+            assigned_by_admin_id=owner.id,
+        ),
+        AdminUserPlanPrice(
+            admin_id=child.id,
+            plan_id=plan.id,
+            price_toman=70_000,
+            assigned_by_admin_id=parent.id,
+        ),
+    ])
+    db.flush()
+    assert money_billing.effective_plan_price(db, parent, plan, version) == 50_000
+    assert money_billing.effective_plan_price(db, child, plan, version) == 70_000
+    assert admin_plans.plan_response(db, plan, actor=child).effective_price_toman == 70_000
+    money_billing.charge_plan_purchase(
+        db, buyer=child, actor=child, plan=plan, version=version,
+        operation_type="create", idempotency_key="priced-plan-chain-1",
+    )
+    assert child_settings.money_balance_toman == 930_000
+    assert parent_settings.money_balance_toman == 1_020_000
+    assert db.query(AdminMoneyTransaction).filter(
+        AdminMoneyTransaction.operation_key == "plan-money:priced-plan-chain-1"
+    ).count() == 2
+
+
+def test_used_traffic_money_chain_bills_fractional_gib_and_margin(db):
+    _, parent, child, parent_settings, child_settings = _money_tree(db)
+    parent_settings.billing_mode = admin_billing.BillingMode.USED_TRAFFIC.value
+    parent_settings.used_traffic_price_per_gib_toman = 50_000
+    child_settings.billing_mode = admin_billing.BillingMode.USED_TRAFFIC.value
+    child_settings.used_traffic_price_per_gib_toman = 70_000
+    money_billing.settle_used_traffic(db, {child.id: (1024 ** 3) // 2})
+    assert child_settings.money_balance_toman == 965_000
+    assert parent_settings.money_balance_toman == 1_010_000
+    assert child_settings.usage_billing_remainder == 0
+    assert parent_settings.usage_billing_remainder == 0
+
+
+def test_owner_money_grant_is_idempotent(db):
+    owner, _, child, _, child_settings = _money_tree(db)
+    child.parent_admin_id = owner.id
+    child_settings.money_balance_toman = 0
+    result, created = money_billing.transfer_money(
+        db, actor=owner, parent=owner, child=child, amount_toman=1_000_000,
+        operation_type="grant", idempotency_key="initial-money-1",
+    )
+    replay, replay_created = money_billing.transfer_money(
+        db, actor=owner, parent=owner, child=child, amount_toman=1_000_000,
+        operation_type="grant", idempotency_key="initial-money-1",
+    )
+    assert created is True
+    assert replay_created is False
+    assert result["target_balance_toman"] == 1_000_000
+    assert replay["target_balance_toman"] == 1_000_000

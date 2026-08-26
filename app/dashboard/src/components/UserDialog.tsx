@@ -269,6 +269,7 @@ const fetchAssignableAdmins = async (): Promise<ManagedAdmin[]> => {
 };
 
 const unrestrictedCapabilities: AdminCapabilities = {
+  hierarchy_enabled: false,
   all_inbounds: true,
   allowed_inbounds: [],
   all_user_limits: true,
@@ -285,6 +286,8 @@ const unrestrictedCapabilities: AdminCapabilities = {
   capacity_remaining: null,
   quota: {
     current_users: 0,
+    lifetime_consumed_traffic: 0,
+    lifetime_created_traffic: 0,
     max_users: null,
     remaining_user_slots: null,
     credit_limit: null,
@@ -360,6 +363,12 @@ export const UserDialog: FC<UserDialogProps> = () => {
     { enabled: isOpen, staleTime: 30000 }
   );
   const customCreateAllowed = isEditing || accountQuery.data?.user_creation_mode === "FREE_FORM";
+  const planOnlyEditLocked = Boolean(
+    isEditing
+    && !userData.is_sudo
+    && userData.role !== "OWNER"
+    && accountQuery.data?.user_creation_mode === "PLAN_ONLY"
+  );
   const restrictedCreate = !isEditing && accountQuery.data?.user_creation_mode === "FREE_FORM" && (
     accountQuery.data?.billing_mode === "USED_TRAFFIC" ||
     accountQuery.data?.billing_mode === "ALLOCATED_TRAFFIC"
@@ -827,6 +836,12 @@ export const UserDialog: FC<UserDialogProps> = () => {
                         title={t("userDialog.limitsSection")}
                         description={t("userDialog.limitsSectionHelp")}
                       />
+                      {planOnlyEditLocked && (
+                        <Alert status="info" borderRadius="10px" mb={3} alignItems="start">
+                          <AlertIcon mt={0.5} />
+                          <Text fontSize="sm">حجم، تاریخ پایان و محدودیت دستگاه فقط با تمدید از پلن تغییر می‌کنند.</Text>
+                        </Alert>
+                      )}
                       <FormControl mb={"10px"}>
                         <FormLabel>{t("userDialog.dataLimit")}</FormLabel>
                         <Controller
@@ -841,7 +856,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                                 size="sm"
                                 borderRadius="6px"
                                 onChange={field.onChange}
-                                disabled={disabled}
+                                disabled={disabled || planOnlyEditLocked}
                                 error={
                                   form.formState.errors.data_limit?.message
                                 }
@@ -865,7 +880,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                                 step={1}
                                 size="sm"
                                 borderRadius="6px"
-                                disabled={disabled}
+                                disabled={disabled || planOnlyEditLocked}
                                 value={field.value ? String(field.value) : ""}
                                 onChange={field.onChange}
                                 error={form.formState.errors.concurrent_user_limit?.message}
@@ -877,7 +892,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                                 onChange={(event) => field.onChange(
                                   event.target.value === "" ? null : Number(event.target.value)
                                 )}
-                                isDisabled={disabled}
+                                isDisabled={disabled || planOnlyEditLocked}
                                 dir="ltr"
                                 minH="44px"
                               >
@@ -987,7 +1002,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                                       },
                                     });
                                   }}
-                                  disabled={disabled}
+                                  disabled={disabled || planOnlyEditLocked}
                                   error={
                                     form.formState.errors
                                       .on_hold_expire_duration?.message
@@ -1050,7 +1065,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                                         type="text"
                                         borderRadius="6px"
                                         clearable
-                                        disabled={disabled}
+                                        disabled={disabled || planOnlyEditLocked}
                                         error={
                                           form.formState.errors.expire?.message
                                         }

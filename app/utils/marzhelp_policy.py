@@ -69,6 +69,63 @@ class UserUpdateOperation(str, Enum):
     renew = "renew"
 
 
+PLAN_ONLY_MODE_ID = 2
+
+
+def _is_effective_owner(db: Session, actor: Admin | object | None) -> bool:
+    if actor is None:
+        return False
+    hierarchy_on = bool(
+        db.query(AdminHierarchySettings.enabled)
+        .filter(AdminHierarchySettings.id == 1)
+        .scalar()
+    )
+    if not hierarchy_on:
+        return bool(getattr(actor, "is_sudo", False))
+    return getattr(actor, "id", None) == db.query(SystemOwner.admin_id).filter(SystemOwner.id == 1).scalar()
+
+
+def validate_plan_only_direct_edit(
+    db: Session,
+    dbuser: User,
+    modify: Any,
+    *,
+    actor: Admin | object | None = None,
+    operation: UserUpdateOperation = UserUpdateOperation.edit,
+) -> None:
+    """Block direct quota edits for Plan-only admins; explicit Plan renewals bypass."""
+
+    if UserUpdateOperation(operation) != UserUpdateOperation.edit or _is_effective_owner(db, actor):
+        return
+    fields_set = set(getattr(modify, "model_fields_set", set()))
+    if not fields_set:
+        fields_set = {
+            field
+            for field in ("data_limit", "expire", "concurrent_user_limit")
+            if getattr(modify, field, None) is not None
+        }
+    changed = set()
+    if "data_limit" in fields_set and _effective_data_limit(getattr(modify, "data_limit", None)) != _effective_data_limit(dbuser.data_limit):
+        changed.add("data_limit")
+    if "expire" in fields_set and _effective_expire(getattr(modify, "expire", None)) != _effective_expire(dbuser.expire):
+        changed.add("expire")
+    if "concurrent_user_limit" in fields_set and getattr(modify, "concurrent_user_limit", None) != dbuser.concurrent_user_limit:
+        changed.add("concurrent_user_limit")
+    if not changed:
+        return
+    target_settings = _settings(db, dbuser.admin_id)
+    actor_settings = _settings(db, getattr(actor, "id", None)) if actor is not None else target_settings
+    if not any(
+        settings is not None and settings.user_creation_mode_id == PLAN_ONLY_MODE_ID
+        for settings in (target_settings, actor_settings)
+    ):
+        return
+    raise MarzhelpPolicyError(
+        "plan_only_direct_edit_forbidden",
+        "Plan-only administrators must change traffic, expiry, and device limits through a Plan",
+    )
+
+
 def _base36(value: int) -> str:
     alphabet = "0123456789abcdefghijklmnopqrstuvwxyz"
     encoded = ""
@@ -345,7 +402,14 @@ def _quota_summary_values(
     current_usage: int = 0,
     reset_usage: int = 0,
     deleted_usage: int = 0,
+    current_allocated: int = 0,
+    deleted_allocated: int = 0,
 ) -> dict[str, Any]:
+    lifetime_consumed = int(current_usage) + int(reset_usage) + int(deleted_usage)
+    lifetime_created = max(
+        int(settings.provisioning_volume_used or 0) if settings is not None else 0,
+        int(current_allocated) + int(deleted_allocated),
+    )
     legacy_mode = (settings.calculate_volume if settings is not None else None) or "used_traffic"
     billing_mode = admin_billing.billing_mode(settings).value if settings is not None else "LEGACY_COMPAT"
     if settings is not None and billing_mode == admin_billing.BillingMode.SEAT_CREDIT.value:
@@ -399,6 +463,8 @@ def _quota_summary_values(
     maximum_users = settings.max_users if settings is not None else None
     return {
         "current_users": current_users,
+        "lifetime_consumed_traffic": lifetime_consumed,
+        "lifetime_created_traffic": lifetime_created,
         "max_users": maximum_users,
         "remaining_user_slots": (
             max(int(maximum_users) - current_users, 0)
@@ -443,11 +509,12 @@ def quota_summaries(
     )
 
     user_totals = {
-        int(admin_id): (int(count or 0), int(used or 0))
-        for admin_id, count, used in db.query(
+        int(admin_id): (int(count or 0), int(used or 0), int(allocated or 0))
+        for admin_id, count, used, allocated in db.query(
             User.admin_id,
             func.count(User.id),
             func.coalesce(func.sum(func.coalesce(User.used_traffic, 0)), 0),
+            func.coalesce(func.sum(func.coalesce(User.data_limit, 0)), 0),
         )
         .filter(User.admin_id.in_(ids))
         .group_by(User.admin_id)
@@ -465,10 +532,11 @@ def quota_summaries(
         .all()
     }
     deleted_totals = {
-        int(admin_id): int(used or 0)
-        for admin_id, used in db.query(
+        int(admin_id): (int(used or 0), int(allocated or 0))
+        for admin_id, used, allocated in db.query(
             MarzhelpDeletedUser.admin_id,
             func.coalesce(func.sum(MarzhelpDeletedUser.used_traffic_total), 0),
+            func.coalesce(func.sum(func.coalesce(MarzhelpDeletedUser.allocated_traffic, 0)), 0),
         )
         .filter(MarzhelpDeletedUser.admin_id.in_(ids))
         .group_by(MarzhelpDeletedUser.admin_id)
@@ -534,12 +602,14 @@ def quota_summaries(
         admin_id: _quota_summary_values(
             settings_by_admin.get(admin_id),
             zero_is_finite=zero_is_finite,
-            current_users=user_totals.get(admin_id, (0, 0))[0],
+            current_users=user_totals.get(admin_id, (0, 0, 0))[0],
             current_usage=subtree_current.get(
-                admin_id, user_totals.get(admin_id, (0, 0))[1]
+                admin_id, user_totals.get(admin_id, (0, 0, 0))[1]
             ),
             reset_usage=subtree_reset.get(admin_id, reset_totals.get(admin_id, 0)),
-            deleted_usage=subtree_deleted.get(admin_id, deleted_totals.get(admin_id, 0)),
+            deleted_usage=subtree_deleted.get(admin_id, deleted_totals.get(admin_id, (0, 0))[0]),
+            current_allocated=user_totals.get(admin_id, (0, 0, 0))[2],
+            deleted_allocated=deleted_totals.get(admin_id, (0, 0))[1],
         )
         for admin_id in ids
     }
@@ -960,6 +1030,18 @@ def _record(
     )
 
 
+def record_lifetime_created(
+    settings: MarzhelpAdminSettings | None,
+    allocated_volume: int | None,
+) -> None:
+    """Increase the non-refundable lifetime provisioned-volume counter."""
+
+    if settings is None:
+        return
+    amount = max(int(allocated_volume or 0), 0)
+    settings.provisioning_volume_used = int(settings.provisioning_volume_used or 0) + amount
+
+
 def record_quota_rejection(error: MarzhelpPolicyError, db: Session | None = None) -> None:
     """Persist API quota rejections after the failed request transaction rolls back."""
 
@@ -1024,6 +1106,7 @@ def validate_create(db: Session, admin_id: int | None, user: Any) -> MarzhelpAdm
         allocated_charge=strategy.allocated_charge(None, data_limit, renewal=False),
         unlimited_requested=data_limit is None,
     )
+    record_lifetime_created(settings, data_limit)
 
     next_plan = getattr(user, "next_plan", None)
     if next_plan is not None:
@@ -1090,12 +1173,14 @@ def validate_update(
     dbuser: User,
     modify: Any,
     operation: UserUpdateOperation = UserUpdateOperation.edit,
+    actor: Admin | object | None = None,
 ) -> tuple[bool, bool]:
     settings = _settings(db, dbuser.admin_id, lock=True)
     if settings is None:
         return False, False
 
     operation = UserUpdateOperation(operation)
+    validate_plan_only_direct_edit(db, dbuser, modify, actor=actor, operation=operation)
     renewal = operation == UserUpdateOperation.renew
     fields_set = getattr(modify, "model_fields_set", set())
     expire_requested = "expire" in fields_set if fields_set else modify.expire is not None
@@ -1187,6 +1272,7 @@ def validate_update(
         ),
         unlimited_requested=data_limit is None,
     )
+    record_lifetime_created(settings, data_limit if renewal else max(volume_delta, 0))
     dbuser._marzhelp_volume_delta = volume_delta
     dbuser._marzhelp_is_renewal = renewal
     dbuser._marzhelp_allowance_delta = 0
@@ -1279,6 +1365,7 @@ def validate_next_plan_activation(db: Session, dbuser: User) -> bool:
         ),
         unlimited_requested=next_allocation is None,
     )
+    record_lifetime_created(settings, next_allocation)
     volume_delta = int(data_limit or 0) - int(_effective_data_limit(dbuser.data_limit) or 0)
     _consume_renewal(db, settings)
     limited_allowance = settings.user_limit is not None

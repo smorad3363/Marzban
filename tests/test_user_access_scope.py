@@ -844,6 +844,9 @@ def test_delete_after_usage_reset_and_renewal_preserves_lifetime_and_credit(db):
     assert ledger.allocated_traffic == 15 * 1024**3
     assert ledger.refunded_traffic == 0
     assert child_settings.used_traffic == 15 * 1024**3
+    summary = marzhelp_policy.quota_summary(db, child.id)
+    assert summary["lifetime_consumed_traffic"] == 5 * 1024**3
+    assert summary["lifetime_created_traffic"] == 25 * 1024**3
     assert [entry.operation_type for entry in transactions] == [
         "create",
         "renew",

@@ -58,7 +58,6 @@ const billingModeLabels: Record<string, string> = {
 
 const roleLabels: Record<string, string> = {
   OWNER: "مالک",
-  SUPER_ADMIN: "سوپر ادمین",
   ADMIN: "ادمین",
 };
 
@@ -242,15 +241,6 @@ export const DashboardOverview: FC<Props> = ({ onCreateAdmin, onCreatePlan }) =>
     tooltip: { theme: "dark" },
   };
   const accountData = account.data;
-  const accountUsed = accountData ? accountData.own_spend + accountData.delegated_traffic : 0;
-  const accountLimit = !accountData || accountData.available_traffic === null ? null : accountData.available_traffic + accountUsed;
-  const accountPercent = accountLimit && accountLimit > 0 ? Math.min(100, Math.round((accountUsed / accountLimit) * 100)) : null;
-  const creditValue = (value: number | null) => {
-    if (value === null) return "نامحدود";
-    if (accountData?.billing_mode === "USER_CREDIT") return `${faNumber(value)} اکانت`;
-    if (accountData?.billing_mode === "SEAT_CREDIT") return `${faNumber(value)} واحد`;
-    return String(formatBytes(value));
-  };
   const canCreatePlan = accountData?.role === "OWNER" || Boolean(accountData?.can_manage_plans);
   const memoryPercent = system.data?.mem_total ? Math.min(100, (system.data.mem_used / system.data.mem_total) * 100) : 0;
   const cpuPercent = Math.min(100, Math.max(0, system.data?.cpu_usage || 0));
@@ -271,22 +261,19 @@ export const DashboardOverview: FC<Props> = ({ onCreateAdmin, onCreatePlan }) =>
               <HStack justify="space-between" align="start" gap={3}>
                 <Box minW={0}>
                   <HStack spacing={1.5} flexWrap="wrap">
-                    <Badge colorScheme={accountData.role === "OWNER" ? "purple" : accountData.role === "SUPER_ADMIN" ? "cyan" : "gray"}>{roleLabels[accountData.role]}</Badge>
+                    <Badge colorScheme={accountData.role === "OWNER" ? "purple" : "gray"}>{roleLabels[accountData.role]}</Badge>
                     <Badge colorScheme="yellow">{billingModeLabels[accountData.billing_mode]}</Badge>
                     <Badge colorScheme={accountData.user_creation_mode === "PLAN_ONLY" ? "blue" : "green"}>{accountData.user_creation_mode === "PLAN_ONLY" ? "ساخت فقط با پلن" : "ساخت سفارشی"}</Badge>
                   </HStack>
                   <Text mt={2} color="gray.400" fontSize="xs">{accountData.role === "OWNER" ? "دسترسی مالک" : "اعتبار قابل استفاده"}</Text>
-                  <Text mt={0.5} fontSize="2xl" fontWeight="800">{accountData.role === "OWNER" ? "بدون سقف" : creditValue(accountData.available_traffic)}</Text>
+                  <Text mt={0.5} fontSize="2xl" fontWeight="800">{accountData.role === "OWNER" ? "بدون سقف" : `${faNumber(accountData.money_balance_toman)} تومان`}</Text>
                 </Box>
                 <Box flexShrink={0} p={2} color="primary.300" bg="rgba(255,255,255,.04)" borderWidth="1px" borderColor="var(--panel-border)" borderRadius="10px"><BoltIcon width={20} /></Box>
               </HStack>
               {accountData.role === "OWNER" ? (
                 <Text color="gray.400" fontSize="xs">تمام محدودیت‌های تجاری حساب برای مالک غیرفعال است.</Text>
               ) : (
-                <>
-                  <Text color="gray.400" fontSize="xs">مصرف مستقیم {creditValue(accountData.own_spend)} · واگذارشده {creditValue(accountData.delegated_traffic)}</Text>
-                  {accountPercent !== null && <HStack><Progress value={accountPercent} size="sm" borderRadius="full" colorScheme={accountPercent >= 85 ? "orange" : "green"} flex={1} aria-label="درصد مصرف اعتبار حساب" /><Text color="gray.400" fontSize="xs">{faNumber(accountPercent)}٪</Text></HStack>}
-                </>
+                <Text color="gray.400" fontSize="xs">{accountData.billing_mode === "USED_TRAFFIC" ? `قیمت خرید هر گیگ: ${faNumber(accountData.used_traffic_price_per_gib_toman || 0)} تومان` : "خرید و تمدید از قیمت پلن کسر می‌شود."}</Text>
               )}
             </Stack>
           )}
@@ -367,7 +354,7 @@ export const DashboardOverview: FC<Props> = ({ onCreateAdmin, onCreatePlan }) =>
 
       <HStack color="gray.500" fontSize="10px" justify="end"><ClockIcon width={13} aria-hidden="true" /><Text>آخرین محاسبه: {new Date(data.generated_at).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" })}</Text></HStack>
 
-      <Box position="fixed" left={{ base: 4, md: 6 }} right="auto" bottom={{ base: 4, md: 6 }} zIndex="popover">
+      {accountData?.account_status === "ACTIVE" && <Box position="fixed" left={{ base: 4, md: 6 }} right="auto" bottom={{ base: 4, md: 6 }} zIndex="popover">
         {quickOpen && <Stack mb={2} p={2} minW="190px" bg="var(--panel-nested)" borderWidth="1px" borderColor="var(--panel-border-strong)" borderRadius="14px" boxShadow="0 18px 48px rgba(0,0,0,.5)">
           {accountData?.user_creation_mode === "FREE_FORM"
             ? <QuickAction label="افزودن کاربر" icon={<UserPlusIcon width={25} />} onClick={() => { useDashboard.getState().onCreateUser(true); setQuickOpen(false); }} />
@@ -376,7 +363,7 @@ export const DashboardOverview: FC<Props> = ({ onCreateAdmin, onCreatePlan }) =>
           {canCreatePlan && <QuickAction label="ساخت پلن" icon={<RectangleStackIcon width={25} />} onClick={() => { onCreatePlan(); setQuickOpen(false); }} />}
         </Stack>}
         <IconButton aria-label={quickOpen ? "بستن دسترسی سریع" : "بازکردن دسترسی سریع"} aria-expanded={quickOpen} icon={<BoltIcon width={24} />} onClick={() => setQuickOpen((value) => !value)} boxSize="54px" borderRadius="full" colorScheme="primary" color="#07130e" boxShadow="0 12px 30px rgba(0,0,0,.45)" />
-      </Box>
+      </Box>}
     </Stack>
   );
 };

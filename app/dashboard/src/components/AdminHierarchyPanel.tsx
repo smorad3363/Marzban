@@ -18,7 +18,7 @@ const billingLabels: Record<string, string> = {
   USER_CREDIT: "حجم نامحدود · سقف اکانت", SEAT_CREDIT: "ظرفیت دستگاه قدیمی",
   LEGACY_COMPAT: "قدیمی (فقط مهاجرت)",
 };
-const roleLabels: Record<string, string> = { OWNER: "مالک", SUPER_ADMIN: "سوپر ادمین", ADMIN: "ادمین" };
+const roleLabels: Record<string, string> = { OWNER: "مالک", ADMIN: "ادمین" };
 type FlatNode = HierarchyAdminNode & { visualDepth: number };
 const flatten = (nodes: HierarchyAdminNode[], depth = 0): FlatNode[] => nodes.flatMap((node) => [{ ...node, visualDepth: depth }, ...flatten(node.children || [], depth + 1)]);
 const resource = (mode: string) => mode === "USER_CREDIT" ? "user" : mode === "SEAT_CREDIT" ? "seat" : "traffic";

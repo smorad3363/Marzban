@@ -13,6 +13,7 @@ from app.device_limit.constants import (
     SubscriptionMode,
 )
 from app.utils.admin_billing import BillingMode
+from app.models.admin_hierarchy import AdminPlanPriceInput
 from app.utils.jwt import get_admin_payload
 from config import SUDOERS
 
@@ -29,7 +30,7 @@ class Admin(BaseModel):
     id: Optional[int] = None
     username: str
     is_sudo: bool = False
-    role: Optional[Literal["OWNER", "SUPER_ADMIN", "ADMIN"]] = None
+    role: Optional[Literal["OWNER", "ADMIN"]] = None
     parent_admin_id: Optional[int] = None
     external_api_enabled: bool = False
     auth_method: Literal["session", "automation"] = Field(default="session", exclude=True)
@@ -45,7 +46,8 @@ class Admin(BaseModel):
     @field_validator("role", mode="before")
     @classmethod
     def normalize_role(cls, value):
-        return getattr(value, "code", value)
+        value = getattr(value, "code", value)
+        return "ADMIN" if value == "SUPER_ADMIN" else value
 
     @field_validator("users_usage",  mode='before')
     def cast_to_int(cls, v):
@@ -109,7 +111,21 @@ class Admin(BaseModel):
         if dbadmin is not None and admin_hierarchy.hierarchy_enabled(db):
             state = admin_hierarchy.account_status_code(db, dbadmin.id)
             read_only_paths = {"/api/admin", "/api/admin/logout", "/api/account/summary", "/api/account/activity"}
-            if state != admin_hierarchy.ACTIVE and request.url.path not in read_only_paths:
+            suspended_read_allowed = (
+                state == admin_hierarchy.SUSPENDED
+                and request.method.upper() in {"GET", "HEAD", "OPTIONS"}
+            )
+            disabled_path_allowed = (
+                state == admin_hierarchy.DISABLED
+                and request.url.path in read_only_paths
+            )
+            logout_allowed = request.url.path == "/api/admin/logout"
+            if (
+                state != admin_hierarchy.ACTIVE
+                and not suspended_read_allowed
+                and not disabled_path_allowed
+                and not logout_allowed
+            ):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail={"code": "account_read_only", "message": f"Administrative account is {state.lower()}"},
@@ -247,6 +263,9 @@ class MarzhelpAdminPolicy(BaseModel):
     """Editable MarzHelp limits exposed to sudo admins in the dashboard."""
 
     billing_mode: BillingMode = BillingMode.LEGACY_COMPAT
+    money_billing_enabled: bool = False
+    money_balance_toman: int = Field(default=0)
+    used_traffic_price_per_gib_toman: Optional[int] = Field(default=None, ge=0)
     total_traffic: Optional[int] = Field(default=None, ge=0)
     expiry_date: Optional[date] = None
     user_limit: Optional[int] = Field(default=None, ge=0)
@@ -261,7 +280,7 @@ class MarzhelpAdminPolicy(BaseModel):
     allowed_subscription_modes: list[SubscriptionMode] = Field(
         default_factory=lambda: list(DEFAULT_ADMIN_SUBSCRIPTION_MODES)
     )
-    view_full_client_ip: bool = False
+    view_full_client_ip: bool = True
     max_user_duration_days: Optional[int] = Field(default=None, ge=1)
     calculate_volume: Literal["used_traffic", "created_traffic"] = "used_traffic"
     prevent_user_creation: bool = False
@@ -303,6 +322,8 @@ class MarzhelpAdminPolicy(BaseModel):
 
 class AdminQuotaSummary(BaseModel):
     current_users: int
+    lifetime_consumed_traffic: int = 0
+    lifetime_created_traffic: int = 0
     max_users: Optional[int] = None
     remaining_user_slots: Optional[int] = None
     credit_limit: Optional[int] = None
@@ -330,6 +351,7 @@ class ManagedAdmin(Admin):
     policy: MarzhelpAdminPolicy
     quota: AdminQuotaSummary
     plan_category_ids: list[int] = Field(default_factory=list)
+    plan_prices: list[AdminPlanPriceInput] = Field(default_factory=list)
     user_creation_mode: Literal["FREE_FORM", "PLAN_ONLY"] = "PLAN_ONLY"
     can_manage_plans: bool = False
     can_create_admins: bool = False
@@ -342,6 +364,7 @@ class ManagedAdmin(Admin):
 
 
 class AdminCapabilities(BaseModel):
+    hierarchy_enabled: bool = False
     all_inbounds: bool = True
     allowed_inbounds: list[str] = Field(default_factory=list)
     all_user_limits: bool = True
@@ -349,7 +372,7 @@ class AdminCapabilities(BaseModel):
     allowed_subscription_modes: list[SubscriptionMode] = Field(
         default_factory=lambda: list(DEFAULT_ADMIN_SUBSCRIPTION_MODES)
     )
-    view_full_client_ip: bool = False
+    view_full_client_ip: bool = True
     capacity_used: int = 0
     capacity_limit: Optional[int] = None
     capacity_remaining: Optional[int] = None
@@ -366,7 +389,7 @@ class AdminCapabilities(BaseModel):
     admin_creations_used: int = 0
     delegated_admin_creation_limit: int = 0
     admin_creation_remaining: Optional[int] = None
-    allowed_child_roles: list[Literal["SUPER_ADMIN", "ADMIN"]] = Field(default_factory=list)
+    allowed_child_roles: list[Literal["ADMIN"]] = Field(default_factory=list)
     allowed_child_billing_modes: list[BillingMode] = Field(default_factory=list)
     allowed_child_user_creation_modes: list[Literal["FREE_FORM", "PLAN_ONLY"]] = Field(default_factory=list)
     can_delegate_plan_management: bool = False
@@ -388,6 +411,8 @@ class ManagedAdminCreate(AdminCreate):
     can_delegate_admin_creation: bool = False
     can_create_allocated_children: bool = True
     admin_creation_limit: Optional[int] = Field(default=0, ge=0)
+    initial_money_credit_toman: int = Field(default=0, ge=0)
+    plan_prices: list[AdminPlanPriceInput] = Field(default_factory=list)
 
 
 class ManagedAdminModify(AdminModify):
@@ -399,6 +424,7 @@ class ManagedAdminModify(AdminModify):
     can_delegate_admin_creation: bool = False
     can_create_allocated_children: bool = True
     admin_creation_limit: Optional[int] = Field(default=0, ge=0)
+    plan_prices: Optional[list[AdminPlanPriceInput]] = None
 
 
 class AdminDeleteRequest(BaseModel):

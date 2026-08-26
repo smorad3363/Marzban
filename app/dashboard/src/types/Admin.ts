@@ -6,6 +6,9 @@ export type SubscriptionMode =
 
 export type AdminPolicy = {
   billing_mode: "LEGACY_COMPAT" | "SEAT_CREDIT" | "USED_TRAFFIC" | "ALLOCATED_TRAFFIC" | "USER_CREDIT";
+  money_billing_enabled: boolean;
+  money_balance_toman: number;
+  used_traffic_price_per_gib_toman: number | null;
   total_traffic: number | null;
   expiry_date: string | null;
   user_limit: number | null;
@@ -32,7 +35,7 @@ export type ManagedAdmin = {
   id: number;
   username: string;
   is_sudo: boolean;
-  role: "OWNER" | "SUPER_ADMIN" | "ADMIN";
+  role: "OWNER" | "ADMIN";
   parent_admin_id: number | null;
   external_api_enabled: boolean;
   telegram_id: number | null;
@@ -44,6 +47,7 @@ export type ManagedAdmin = {
   policy: AdminPolicy;
   quota: AdminQuotaSummary;
   plan_category_ids: number[];
+  plan_prices?: Array<{ plan_id: number; price_toman: number }>;
   user_creation_mode: "FREE_FORM" | "PLAN_ONLY";
   can_manage_plans: boolean;
   dashboard_theme: "heisenberg" | "black_gold";
@@ -65,6 +69,8 @@ export type ManagedAdmin = {
 
 export type AdminQuotaSummary = {
   current_users: number;
+  lifetime_consumed_traffic: number;
+  lifetime_created_traffic: number;
   max_users: number | null;
   remaining_user_slots: number | null;
   credit_limit: number | null;
@@ -93,12 +99,13 @@ export type ManagedAdminPayload = Omit<
   | "account_status" | "parent_username" | "active_owner_freeze_event_id" | "trial_quota" | "trial_quota_limit" | "trials_used"
 > & {
   password?: string;
+  initial_money_credit_toman: number;
 };
 
 export type HierarchyAdminNode = {
   id: number;
   username: string;
-  role: "OWNER" | "SUPER_ADMIN" | "ADMIN";
+  role: "OWNER" | "ADMIN";
   parent_admin_id: number | null;
   depth: number;
   external_api_enabled: boolean;
@@ -128,7 +135,7 @@ export type HierarchyAdminNode = {
 export type AccountSummary = {
   username: string;
   user_namespace_prefix: string;
-  role: "OWNER" | "SUPER_ADMIN" | "ADMIN";
+  role: "OWNER" | "ADMIN";
   account_status: "ACTIVE" | "SUSPENDED" | "DISABLED";
   suspended_reason: string | null;
   suspended_at: string | null;
@@ -141,6 +148,9 @@ export type AccountSummary = {
   renewal_enabled: boolean;
   renewal_remaining: number | null;
   billing_mode: "LEGACY_COMPAT" | "SEAT_CREDIT" | "USED_TRAFFIC" | "ALLOCATED_TRAFFIC" | "USER_CREDIT";
+  money_billing_enabled: boolean;
+  money_balance_toman: number;
+  used_traffic_price_per_gib_toman: number | null;
   user_creation_mode: "FREE_FORM" | "PLAN_ONLY";
   can_manage_plans: boolean;
   trial_quota: number;
@@ -155,6 +165,7 @@ export type AccountSummary = {
 };
 
 export type UserPlanVersion = {
+  price_toman: number;
   data_limit: number;
   duration_days: number;
   concurrent_user_limit: number | null;
@@ -193,6 +204,8 @@ export type UserPlan = {
   allowed_admin_ids: number[];
   include_subtree: boolean;
   is_trial: boolean;
+  effective_price_toman: number;
+  base_price_toman: number | null;
 };
 
 export type PlanCategory = {
@@ -205,6 +218,7 @@ export type PlanCategory = {
 };
 
 export type AdminCapabilities = {
+  hierarchy_enabled: boolean;
   all_inbounds: boolean;
   allowed_inbounds: string[];
   all_user_limits: boolean;
@@ -223,7 +237,7 @@ export type AdminCapabilities = {
   admin_creations_used: number;
   delegated_admin_creation_limit: number;
   admin_creation_remaining: number | null;
-  allowed_child_roles: Array<"SUPER_ADMIN" | "ADMIN">;
+  allowed_child_roles: Array<"ADMIN">;
   allowed_child_billing_modes: AdminPolicy["billing_mode"][];
   allowed_child_user_creation_modes: Array<"FREE_FORM" | "PLAN_ONLY">;
   can_delegate_plan_management: boolean;

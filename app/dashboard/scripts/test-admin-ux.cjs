@@ -17,49 +17,65 @@ const auditLogs = read("src/pages/AuditLogs.tsx");
 const header = read("src/components/Header.tsx");
 const http = read("src/service/http.ts");
 
-for (const section of ["مشخصات", "نوع حساب", "اجازه ساخت ادمین", "محدودیت‌های اختیاری", "پلن‌ها و محدوده دسترسی", "گزینه‌های پیشرفته"]) {
+for (const section of ["تنظیمات مدیر", "نوع حساب", "اجازه ساخت زیرمدیر", "محدودیت‌های اختیاری", "پلن‌ها و محدودیت دسترسی"]) {
   assert.ok(drawer.includes(section), `missing compact admin section: ${section}`);
 }
-assert.ok(drawer.includes("h=\"100dvh\""), "drawer must use dynamic viewport height");
-assert.ok(drawer.includes("overflowY=\"auto\""), "drawer body must scroll independently");
-assert.ok(drawer.includes("<DrawerFooter"), "drawer actions must live in persistent footer");
-assert.ok(drawer.includes("<Accordion allowMultiple"), "advanced options must be collapsed by default");
+assert.ok(drawer.includes('<Modal isOpen={isOpen}') && drawer.includes("isCentered"), "Admin form must open as a centered modal");
+assert.ok(drawer.includes('size="5xl"') && drawer.includes('maxH="calc(100dvh - 24px)"'), "Admin modal must fit the desktop and mobile viewport");
+assert.ok(drawer.includes('insetInlineStart={4}') && drawer.includes('insetInlineEnd="auto"') && drawer.includes('<Box pe={12}>'), "RTL Admin modal close button must stay opposite the title");
+assert.ok(drawer.includes("overflowY=\"auto\""), "Admin modal body must scroll independently");
+assert.ok(drawer.includes("<ModalFooter"), "Admin modal actions must live in persistent footer");
+assert.ok(!drawer.includes("<Drawer"), "Admin form must not regress to a side drawer");
+assert.ok(!drawer.includes("<Accordion"), "Admin limits and access sections must stay visible");
+assert.ok(!drawer.includes("گزینه‌های پیشرفته"), "obsolete advanced section must be removed");
 assert.ok(drawer.includes('type="tel"'), "optional phone field must remain a telephone field");
 assert.ok(drawer.includes("^09\\d{9}$"), "phone validation must require 09xxxxxxxxx when supplied");
 assert.ok(drawer.includes('useState<BillingMode | "">("")'), "new Admin billing mode must have no implicit default");
 assert.ok(!drawer.includes('<option value="LEGACY_COMPAT"'), "legacy compatibility mode must be hidden from fresh creation");
-assert.ok(drawer.includes("تعداد اکانت قابل ساخت"), "user-credit mode must use an account-count label");
-assert.ok(drawer.includes("اجازه واگذاری این دسترسی"), "delegated Admin creation must be explicit");
+assert.ok(drawer.includes("اعتبار اولیه (تومان)"), "new Admin flow must accept monetary credit");
+assert.ok(drawer.includes("قیمت خرید هر گیگ (تومان)"), "actual-usage Admin must receive a per-GiB purchase price");
+assert.ok(!drawer.includes("قیمت فروش پلن‌ها") && !drawer.includes("دسته‌های پلن"), "Admin form must not select Plan type or Plan price");
+assert.ok(drawer.includes("اجازه واگذاری ساخت زیرمدیر"), "delegated Admin creation must be explicit");
 assert.ok(drawer.includes('user_creation_mode: "PLAN_ONLY"'), "new Admins must default to Plan-only user creation");
-assert.ok(drawer.includes("ساخت سفارشی"), "free-form user creation must remain an explicit delegated option");
+assert.ok(drawer.includes('role: "ADMIN" as const'), "all saved child accounts must use the single Admin role");
+assert.ok(!drawer.includes("allowed_child_roles.map"), "Admin form must not expose a role selector");
+assert.ok(!drawer.includes("روش ساخت کاربر") && !drawer.includes("ساخت سفارشی"), "Admin form must not expose the backend-derived user creation method");
+assert.ok(drawer.includes("plan_prices: undefined"), "ordinary Admin edits must preserve reseller prices managed by the Plan flow");
 assert.ok(drawer.includes('setQueriesData<ManagedAdminList | undefined>("admin-management"'), "saved Admin response must replace stale list cache before closing");
 assert.ok(drawer.includes("item.id === savedAdmin.id ? savedAdmin : item"), "Admin cache update must use the canonical saved record");
-assert.ok(drawer.includes('aria-pressed={form.user_creation_mode === creationMode}'), "user creation mode buttons must expose their selected state");
+assert.ok(drawer.includes('mode === "USED_TRAFFIC" ? "FREE_FORM" as const : "PLAN_ONLY" as const'), "billing mode must authoritatively choose custom or Plan-only creation");
+assert.ok(drawer.includes("hierarchy_enabled") && drawer.includes("marzban set-owner") && drawer.includes("!hierarchyReady"), "Admin form must fail closed until hierarchy initialization");
 assert.ok(drawer.includes("تغییر سریع اعتبار"), "edit flow must expose a separate credit adjustment section");
-assert.ok(drawer.includes('/credit/${operation}'), "credit adjustment must use the existing ledger endpoint");
+assert.ok(drawer.includes('/money/${operation}'), "credit adjustment must use the monetary ledger endpoint");
 assert.ok(drawer.includes("idempotency_key"), "credit adjustment must send an idempotency key");
-assert.ok(!admins.includes("<Modal"), "legacy one-shot Admin modal must not remain");
-assert.ok(admins.includes("<AdminFormDrawer"), "Admins page must use refactored drawer");
+assert.ok(!admins.includes("<Modal"), "Admins page must not duplicate the shared Admin modal inline");
+assert.ok(admins.includes("<AdminFormDrawer"), "Admins page must use the shared Admin form");
+assert.ok(admins.includes("openAdminForm") && !admins.includes("canCreate, formDisclosure, searchParams"), "Admin create deep-link must not depend on an unstable disclosure object");
+assert.ok(admins.includes("hierarchy_enabled") && admins.includes("marzban set-owner {userData.username}"), "Admins page must explain required owner initialization");
 assert.ok(!admins.includes("<AdminHierarchyPanel"), "Admins page must not render a second competing hierarchy list");
 assert.ok(admins.includes("colSpan={4}"), "Admin desktop list must stay limited to four purposeful data groups");
 assert.ok(admins.includes("statusMeta[item.account_status].background"), "Admin rows must expose status with both text and a distinct surface");
-assert.ok(admins.includes("مصرف اعتبار") && admins.includes("<Progress"), "credit summary must pair the remaining value with an explicit usage indicator");
+assert.ok(admins.includes("کیف پول تومان") && admins.includes("money_balance_toman"), "Admin summary must show the monetary wallet");
 assert.ok(admins.includes("renderMoreActions(item, true)"), "mobile Admin cards must keep secondary actions in a compact accessible menu");
 assert.ok(admins.includes("فیلتر نوع اعتبار"), "Admin list must expose billing-mode filtering");
 assert.ok(admins.includes('item.account_status === "SUSPENDED"'), "Admin freeze state must remain visible");
-assert.ok(admins.includes("mixedSelection"), "bulk operations must reject mixed accounting resources");
+assert.ok(!admins.includes("bulk-credit/jobs"), "obsolete mixed-resource bulk credit must not bypass the Toman wallet");
 assert.ok(admins.includes("trial-quota/reset"), "trial allowance reset must be an inline quick action");
 assert.ok(admins.includes("freezeReason.trim()"), "manual freeze must require a human-readable reason");
 assert.ok(admins.includes('item.account_status === "SUSPENDED"'), "every suspended Admin must expose an unfreeze action");
 assert.ok(admins.includes('item.active_owner_freeze_event_id ? "unfreeze" : "resume"'), "unfreeze action must route owner freezes and manual suspensions correctly");
 assert.ok(admins.includes('operation: "activate"'), "disabled Admins must expose an activation action");
 assert.ok(admins.includes("زیرمجموعهٔ:"), "Admin relationship label must describe the child relationship");
-for (const key of ["admins.preventCreate", "admins.preventDelete", "admins.preventReset", "admins.preventRevoke", "admins.preventUnlimited"]) {
+for (const key of ["admins.preventDelete", "admins.preventReset", "admins.preventUnlimited"]) {
   assert.ok(drawer.includes(key), `advanced Admin policy translation missing: ${key}`);
 }
+assert.ok(!drawer.includes("admins.preventCreate"), "prevent-user-creation switch must be removed");
+assert.ok(!drawer.includes("admins.preventRevoke"), "prevent-revoke switch must be removed");
+assert.ok(!drawer.includes("نمایش کامل IP کاربر"), "full-IP switch must be removed because visibility is always enabled");
+assert.ok(admins.includes("lifetime_consumed_traffic") && admins.includes("lifetime_created_traffic"), "Owner must see both lifetime traffic counters");
 assert.ok(admins.includes('openCredit(item, "grant")'), "Admin rows must expose quick credit grant beside status actions");
 assert.ok(admins.includes('openCredit(item, "reclaim")'), "Admin rows must expose quick credit reclaim beside status actions");
-assert.ok(admins.includes("/credit/${operation}"), "quick credit actions must reuse the existing ledger endpoint");
+assert.ok(admins.includes("/money/${operation}"), "quick credit actions must reuse the monetary ledger endpoint");
 assert.ok(admins.includes("filtersDisclosure.onToggle"), "Admin filters must be collapsed by default");
 
 assert.ok(overview.includes("بازکردن دسترسی سریع"), "AssistiveTouch-style quick actions trigger missing");
@@ -79,10 +95,13 @@ assert.ok(!dashboard.includes("<AdminCreditSummary") && !dashboard.includes("<St
 assert.ok(overview.includes('user_creation_mode === "FREE_FORM"'), "quick create-user action must follow creation mode");
 assert.ok(userDialog.includes('isOpen && customCreateAllowed'), "user dialog must fail closed until free-form creation is explicitly allowed");
 assert.ok(userDialog.includes('user_creation_mode === "FREE_FORM"'), "restricted custom form must only open for explicit free-form creation");
+assert.ok(userDialog.includes("planOnlyEditLocked"), "Plan-only Admin edits must lock traffic, expiry, and device limits");
 assert.ok(!filters.includes('user_creation_mode !== "PLAN_ONLY"'), "user filter actions must not fail open while account policy is loading");
 assert.ok(filters.includes('user_creation_mode === "FREE_FORM"') && filters.includes('user_creation_mode === "PLAN_ONLY"') && filters.includes('to="/plans/"'), "user filter actions must route Plan-only Admins to Plan creation");
 assert.ok(!usersTable.includes('user_creation_mode !== "PLAN_ONLY"'), "empty user state must not fail open while account policy is loading");
 assert.ok(usersTable.includes('user_creation_mode === "FREE_FORM"') && usersTable.includes('user_creation_mode === "PLAN_ONLY"') && usersTable.includes('to="/plans/"'), "empty user state must expose the correct creation path for each policy");
+assert.ok(usersTable.includes('account.data?.account_status === "SUSPENDED"'), "suspended Admin user table must be read-only");
+assert.ok(overview.includes('accountData?.account_status === "ACTIVE"'), "suspended Admin dashboard actions must be hidden");
 assert.ok(userDialog.includes('insetInlineStart={3}'), "RTL modal close button must stay opposite the title");
 assert.ok(userDialog.includes('my="3"'), "user modal must reserve top and bottom viewport margins");
 assert.ok(deviceLimits.includes("removeStage"), "device penalty stages must be removable");

@@ -204,6 +204,25 @@ def create_user_job(
     values: BulkUserJobCreateRequest,
 ) -> tuple[AdminBulkJob, bool]:
     dbactor = _db_actor(db, actor)
+    protected_operations = {
+        BulkUserOperation.add_data,
+        BulkUserOperation.subtract_data,
+        BulkUserOperation.add_days,
+        BulkUserOperation.subtract_days,
+        BulkUserOperation.add_data_and_days,
+    }
+    actor_settings = db.get(MarzhelpAdminSettings, dbactor.id)
+    if (
+        values.operation in protected_operations
+        and not admin_hierarchy.is_owner(db, dbactor)
+        and actor_settings is not None
+        and actor_settings.user_creation_mode_id == admin_hierarchy.USER_CREATION_MODE_IDS[admin_hierarchy.PLAN_ONLY]
+    ):
+        raise BulkOperationError(
+            "plan_only_direct_edit_forbidden",
+            "Plan-only administrators must change traffic and expiry through a Plan",
+            status_code=403,
+        )
     payload = {
         "actor_admin_id": dbactor.id,
         "job_kind": "USER",
@@ -426,6 +445,9 @@ def _next_plan_snapshot(user: User):
 
 
 def _mutate_user(db: Session, job: AdminBulkJob, target: AdminBulkJobTarget) -> tuple[str, dict]:
+    actor = db.get(Admin, job.actor_admin_id)
+    if actor is None:
+        raise BulkOperationError("actor_not_found", "Bulk actor no longer exists")
     user = db.query(User).filter(User.id == target.target_id).with_for_update().one_or_none()
     if user is None:
         return "SKIPPED", {"code": "user_deleted_after_snapshot"}
@@ -484,6 +506,7 @@ def _mutate_user(db: Session, job: AdminBulkJob, target: AdminBulkJobTarget) -> 
         user,
         UserModify(next_plan=_next_plan_snapshot(user), **changes),
         commit=False,
+        actor=actor,
     )
     after = {
         "status": getattr(updated.status, "value", updated.status),

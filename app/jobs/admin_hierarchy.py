@@ -37,17 +37,14 @@ def enforce_admin_account_limits() -> None:
                 actor=owner,
                 target=target,
                 reason_id=reason_id,
-                include_subtree=admin_hierarchy.role_code(target) == admin_hierarchy.SUPER_ADMIN,
+                include_subtree=True,
             )
-            if admin_hierarchy.role_code(target) == admin_hierarchy.SUPER_ADMIN:
-                covered_admin_ids.update(
-                    row[0]
-                    for row in db.query(AdminHierarchy.descendant_id)
-                    .filter(AdminHierarchy.ancestor_id == target.id)
-                    .all()
-                )
-            else:
-                covered_admin_ids.add(target.id)
+            covered_admin_ids.update(
+                row[0]
+                for row in db.query(AdminHierarchy.descendant_id)
+                .filter(AdminHierarchy.ancestor_id == target.id)
+                .all()
+            )
             changed = True
             logger.warning('Admin "%s" was suspended automatically (reason_id=%s)', target.username, reason_id)
 

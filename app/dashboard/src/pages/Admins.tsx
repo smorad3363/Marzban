@@ -1,8 +1,8 @@
 import {
   Alert, AlertDialog, AlertDialogBody, AlertDialogContent, AlertDialogFooter,
   AlertDialogHeader, AlertDialogOverlay, AlertIcon, Badge, Box, Button, Card,
-  Checkbox, Collapse, Divider, FormControl, FormHelperText, FormLabel, HStack, IconButton, Input,
-  InputGroup, InputLeftElement, Menu, MenuButton, MenuItem, MenuList, Progress, Select, SimpleGrid, Skeleton, Stack, Table,
+  Checkbox, Code, Collapse, Divider, FormControl, FormHelperText, FormLabel, HStack, IconButton, Input,
+  InputGroup, InputLeftElement, Menu, MenuButton, MenuItem, MenuList, Select, SimpleGrid, Skeleton, Stack, Table,
   TableContainer, Tbody, Td, Text, Textarea, Th, Thead, Tr, VStack, chakra,
   useDisclosure, useToast,
 } from "@chakra-ui/react";
@@ -30,7 +30,6 @@ const MoreIcon = chakra(EllipsisVerticalIcon, { baseStyle: { w: 5, h: 5 } });
 const AdminsIcon = chakra(UserGroupIcon, { baseStyle: { w: 5, h: 5 } });
 const FilterIcon = chakra(FunnelIcon, { baseStyle: { w: 4, h: 4 } });
 const PAGE_SIZE = 20;
-const GIB = 1024 ** 3;
 
 const billingModeLabels: Record<string, string> = {
   LEGACY_COMPAT: "قدیمی (فقط مهاجرت)",
@@ -40,38 +39,25 @@ const billingModeLabels: Record<string, string> = {
   USER_CREDIT: "حجم نامحدود · سقف اکانت",
 };
 
-const creditResource = (mode: string) => mode === "USER_CREDIT" ? "user" : mode === "SEAT_CREDIT" ? "seat" : "traffic";
-const creditUnit = (mode: string) => mode === "USER_CREDIT" ? "اکانت" : mode === "SEAT_CREDIT" ? "دستگاه" : "گیگابایت";
-const apiCreditAmount = (mode: string, value: number) => creditResource(mode) === "traffic" ? Math.round(value * GIB) : Math.round(value);
-
 const statusMeta = {
   ACTIVE: { label: "فعال", scheme: "green", border: "#48d58b", background: "rgba(16, 92, 60, .18)" },
   SUSPENDED: { label: "فریز", scheme: "orange", border: "#d4af37", background: "rgba(145, 105, 22, .16)" },
   DISABLED: { label: "غیرفعال", scheme: "red", border: "#f05252", background: "rgba(127, 38, 45, .16)" },
 } as const;
 
-const CreditRemaining: FC<{ admin: ManagedAdmin }> = ({ admin }) => {
-  const { t } = useTranslation();
+const CreditRemaining: FC<{ admin: ManagedAdmin; showLifetime?: boolean }> = ({ admin, showLifetime = false }) => {
   const quota = admin.quota;
   return (
     <Stack spacing={1.5} align="stretch" minW={{ lg: "145px" }}>
       <Text fontWeight="700" sx={{ fontVariantNumeric: "tabular-nums" }}>
-        {quota.credit_remaining === null
-          ? t("unlimited")
-          : admin.policy.billing_mode === "SEAT_CREDIT"
-            ? `${quota.credit_remaining} دستگاه`
-            : admin.policy.billing_mode === "USER_CREDIT"
-              ? `${quota.credit_remaining} اکانت`
-            : formatBytes(quota.credit_remaining)}
+        {admin.role === "OWNER" ? "بدون سقف" : `${admin.policy.money_balance_toman.toLocaleString("fa-IR")} تومان`}
       </Text>
-      {quota.credit_usage_percent !== null && (
-        <>
-          <Progress value={Math.min(100, Math.max(0, quota.credit_usage_percent))} size="xs" colorScheme={quota.sudo_warning_active ? "orange" : "green"} bg="whiteAlpha.100" borderRadius="full" aria-label={`مصرف اعتبار ${quota.credit_usage_percent} درصد`} />
-          <HStack spacing={2} justify="space-between">
-          <Text fontSize="xs" color="gray.300">مصرف {quota.credit_usage_percent}%</Text>
-          {quota.sudo_warning_active && <Badge colorScheme="orange" variant="subtle">{t("admins.creditWarning")}</Badge>}
-          </HStack>
-        </>
+      <Text fontSize="xs" color="gray.400">کیف پول تومان</Text>
+      {showLifetime && (
+        <Stack spacing={0.5} pt={1.5} mt={0.5} borderTopWidth="1px" borderColor="whiteAlpha.200">
+          <Text fontSize="xs" color="gray.300">مصرف کل: <Text as="span" color="white" fontWeight="700">{formatBytes(quota.lifetime_consumed_traffic)}</Text></Text>
+          <Text fontSize="xs" color="gray.300">ساخت کل: <Text as="span" color="white" fontWeight="700">{formatBytes(quota.lifetime_created_traffic)}</Text></Text>
+        </Stack>
       )}
     </Stack>
   );
@@ -83,6 +69,7 @@ export const Admins: FC = () => {
   const queryClient = useQueryClient();
   const { userData, getUserIsPending, getUserIsSuccess } = useGetUser();
   const formDisclosure = useDisclosure();
+  const openAdminForm = formDisclosure.onOpen;
   const deleteDisclosure = useDisclosure();
   const filtersDisclosure = useDisclosure();
   const freezeDisclosure = useDisclosure();
@@ -93,13 +80,10 @@ export const Admins: FC = () => {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(0);
-  const [roleFilter, setRoleFilter] = useState("");
   const [billingFilter, setBillingFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [expandedUsername, setExpandedUsername] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
-  const [bulkAmount, setBulkAmount] = useState("");
-  const [bulkBusy, setBulkBusy] = useState(false);
   const [freezeTarget, setFreezeTarget] = useState<ManagedAdmin | null>(null);
   const [freezeReason, setFreezeReason] = useState("");
   const [creditTarget, setCreditTarget] = useState<ManagedAdmin | null>(null);
@@ -113,15 +97,17 @@ export const Admins: FC = () => {
     { enabled: getUserIsSuccess }
   );
   const canManage = Boolean(capabilities.data?.can_manage_admins);
-  const canCreate = Boolean(capabilities.data?.can_create_admins);
+  const isOwner = Boolean(userData.is_sudo || userData.role === "OWNER");
+  const hierarchyReady = capabilities.data?.hierarchy_enabled !== false;
+  const canCreate = Boolean(capabilities.data?.can_create_admins) && hierarchyReady;
 
   useEffect(() => {
     if (canCreate && searchParams.get("create") === "1") {
       setSelected(null);
-      formDisclosure.onOpen();
+      openAdminForm();
       setSearchParams({}, { replace: true });
     }
-  }, [canCreate, formDisclosure, searchParams, setSearchParams]);
+  }, [canCreate, openAdminForm, searchParams, setSearchParams]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -132,14 +118,13 @@ export const Admins: FC = () => {
   }, [searchInput]);
 
   const query = useQuery<ManagedAdminList, Error>(
-    ["admin-management", page, search, roleFilter, billingFilter, statusFilter],
+    ["admin-management", page, search, billingFilter, statusFilter],
     () => {
       const params = new URLSearchParams({
         offset: String(page * PAGE_SIZE),
         limit: String(PAGE_SIZE),
         username: search,
       });
-      if (roleFilter) params.set("role", roleFilter);
       if (billingFilter) params.set("billing_mode", billingFilter);
       if (statusFilter) params.set("account_status", statusFilter);
       return fetch(`/admin-management?${params.toString()}`);
@@ -203,9 +188,9 @@ export const Admins: FC = () => {
 
   const creditMutation = useMutation(
     ({ item, operation, amount, reason }: { item: ManagedAdmin; operation: "grant" | "reclaim"; amount: number; reason?: string }) =>
-      fetch(`/admin-management/${encodeURIComponent(item.username)}/credit/${operation}`, {
+      fetch(`/admin-management/${encodeURIComponent(item.username)}/money/${operation}`, {
         method: "POST",
-        body: { amount: apiCreditAmount(item.policy.billing_mode, amount), idempotency_key: `admin-credit-${crypto.randomUUID()}`, note: reason || undefined },
+        body: { amount_toman: Math.round(amount), idempotency_key: `admin-money-${crypto.randomUUID()}`, note: reason || undefined },
       }),
     {
       onSuccess: () => {
@@ -223,17 +208,15 @@ export const Admins: FC = () => {
   const admins = query.data?.admins || [];
   const total = query.data?.total || 0;
   const selectedAdmins = admins.filter((item) => selectedIds.includes(item.id));
-  const selectedResource = selectedAdmins[0] ? creditResource(selectedAdmins[0].policy.billing_mode) : null;
-  const mixedSelection = selectedAdmins.some((item) => creditResource(item.policy.billing_mode) !== selectedResource);
-  const activeFilterCount = [roleFilter, billingFilter, statusFilter].filter(Boolean).length;
-  const canEdit = (item: ManagedAdmin) => item.role !== "OWNER" || item.username === userData.username;
-  const canAct = (item: ManagedAdmin) => item.role !== "OWNER" && item.username !== userData.username;
+  const activeFilterCount = [billingFilter, statusFilter].filter(Boolean).length;
+  const canEdit = (item: ManagedAdmin) => hierarchyReady && (item.role !== "OWNER" || item.username === userData.username);
+  const canAct = (item: ManagedAdmin) => hierarchyReady && item.role !== "OWNER" && item.username !== userData.username;
   const openCreate = () => { setSelected(null); formDisclosure.onOpen(); };
   const openEdit = (item: ManagedAdmin) => { setSelected(item); formDisclosure.onOpen(); };
   const openDelete = (item: ManagedAdmin) => { setSelected(item); setDeleteStrategy("keep_users"); deleteDisclosure.onOpen(); };
   const openFreeze = (item: ManagedAdmin) => { setFreezeTarget(item); setFreezeReason(""); freezeDisclosure.onOpen(); };
   const openCredit = (item: ManagedAdmin, operation: "grant" | "reclaim") => { setCreditTarget(item); setCreditOperation(operation); setCreditAmount(""); setCreditReason(""); creditDisclosure.onOpen(); };
-  const clearFilters = () => { setRoleFilter(""); setBillingFilter(""); setStatusFilter(""); setPage(0); };
+  const clearFilters = () => { setBillingFilter(""); setStatusFilter(""); setPage(0); };
   const toggleSelection = (item: ManagedAdmin, checked: boolean) => setSelectedIds((current) => checked ? [...new Set([...current, item.id])] : current.filter((id) => id !== item.id));
   const renderStatusAction = (item: ManagedAdmin, compact = false) => {
     if (!canAct(item)) return null;
@@ -255,28 +238,6 @@ export const Admins: FC = () => {
       </Menu>
     );
   };
-  const runBulk = async (operation: "grant_credit" | "reclaim_credit") => {
-    const numeric = Number(bulkAmount);
-    if (!selectedAdmins.length || mixedSelection || !Number.isFinite(numeric) || numeric <= 0) return;
-    setBulkBusy(true);
-    try {
-      const operationId = `bulk-admin-${crypto.randomUUID()}`;
-      await fetch("/admin-management/bulk-credit/jobs", {
-        method: "POST",
-        body: { operation_id: operationId, operation, selected_admin_ids: selectedIds, amount: apiCreditAmount(selectedAdmins[0].policy.billing_mode, numeric) },
-      });
-      let result = await fetch<{ has_more: boolean; success: number; failed: number; skipped: number }>(`/admin-management/bulk-credit/jobs/${operationId}/execute`, { method: "POST", body: { chunk_size: 100 } });
-      while (result.has_more) result = await fetch(`/admin-management/bulk-credit/jobs/${operationId}/execute`, { method: "POST", body: { chunk_size: 100 } });
-      refreshAdminData();
-      setBulkAmount("");
-      toast({ title: `${result.success} انجام شد · ${result.failed + result.skipped} انجام نشد`, status: result.failed ? "warning" : "success" });
-    } catch (error) {
-      toast({ title: "عملیات گروهی انجام نشد", description: localizedApiError(error), status: "error" });
-    } finally {
-      setBulkBusy(false);
-    }
-  };
-
   return (
     <AppShell>
       <Stack direction={{ base: "column", md: "row" }} justify="space-between" align={{ md: "center" }} mb={5} gap={4}>
@@ -286,6 +247,17 @@ export const Admins: FC = () => {
         </Box>
         {canCreate && <Button minH="40px" flexShrink={0} colorScheme="primary" color="#07130e" leftIcon={<AddIcon />} onClick={openCreate}>{t("admins.create")}</Button>}
       </Stack>
+
+      {!hierarchyReady && (
+        <Alert status="warning" mb={5} borderRadius="14px" alignItems="flex-start">
+          <AlertIcon mt={0.5} />
+          <Box>
+            <Text fontWeight="800">ساختار ادمین‌ها روی سرور فعال نشده است.</Text>
+            <Text mt={1} fontSize="sm">تا فعال‌سازی، انتخاب پلن یا ساخت سفارشی ذخیره و اعمال نمی‌شود. روی سرور اجرا کنید:</Text>
+            <Code mt={2} dir="ltr" display="inline-block">marzban set-owner {userData.username}</Code>
+          </Box>
+        </Alert>
+      )}
 
       <Card variant="outline" bg="#111d17" color="gray.100" borderRadius={{ base: "16px", md: "20px" }} borderColor="#33483b" boxShadow="panel" overflow="hidden">
         <Stack direction={{ base: "column", md: "row" }} p={{ base: 3, md: 4 }} justify="space-between" align={{ md: "center" }} borderBottomWidth="1px" borderColor="#33483b" gap={3}>
@@ -303,8 +275,7 @@ export const Admins: FC = () => {
         </Stack>
 
         <Collapse in={filtersDisclosure.isOpen} animateOpacity>
-          <SimpleGrid columns={{ base: 1, sm: 3 }} gap={2} p={3} bg="var(--panel-nested)" borderBottomWidth="1px" borderColor="var(--panel-border)">
-            <Select aria-label="فیلتر نقش" value={roleFilter} size="sm" onChange={(event) => { setRoleFilter(event.target.value); setPage(0); }}><option value="">همه نقش‌ها</option><option value="SUPER_ADMIN">سوپر ادمین</option><option value="ADMIN">ادمین</option></Select>
+          <SimpleGrid columns={{ base: 1, sm: 2 }} gap={2} p={3} bg="var(--panel-nested)" borderBottomWidth="1px" borderColor="var(--panel-border)">
             <Select aria-label="فیلتر نوع اعتبار" value={billingFilter} size="sm" onChange={(event) => { setBillingFilter(event.target.value); setPage(0); }}><option value="">همه اعتبارها</option><option value="USED_TRAFFIC">مصرف واقعی</option><option value="ALLOCATED_TRAFFIC">حجم ساخته‌شده</option><option value="USER_CREDIT">نامحدود با سقف اکانت</option></Select>
             <HStack><Select aria-label="فیلتر وضعیت" value={statusFilter} size="sm" onChange={(event) => { setStatusFilter(event.target.value); setPage(0); }}><option value="">همه وضعیت‌ها</option><option value="ACTIVE">فعال</option><option value="SUSPENDED">فریز</option><option value="DISABLED">غیرفعال</option></Select>{activeFilterCount > 0 && <Button size="sm" variant="ghost" onClick={clearFilters}>پاک‌کردن</Button>}</HStack>
           </SimpleGrid>
@@ -312,12 +283,7 @@ export const Admins: FC = () => {
 
         {selectedAdmins.length > 0 && (
           <HStack p={3} bg="rgba(212,175,55,.08)" borderBottomWidth="1px" borderColor="var(--panel-border)" flexWrap="wrap">
-            <Badge colorScheme={mixedSelection ? "red" : "yellow"}>{selectedAdmins.length} انتخاب</Badge>
-            {mixedSelection ? <Text fontSize="xs" color="red.200">برای عملیات گروهی، واحد اعتبار باید یکسان باشد.</Text> : <>
-              <Input type="number" min={1} step={selectedResource === "traffic" ? 0.1 : 1} value={bulkAmount} onChange={(event) => setBulkAmount(event.target.value)} placeholder={`مقدار (${creditUnit(selectedAdmins[0].policy.billing_mode)})`} maxW="180px" size="sm" />
-              <Button size="sm" colorScheme="primary" isLoading={bulkBusy} isDisabled={Number(bulkAmount) <= 0} onClick={() => runBulk("grant_credit")}>افزودن</Button>
-              <Button size="sm" variant="outline" isLoading={bulkBusy} isDisabled={Number(bulkAmount) <= 0} onClick={() => runBulk("reclaim_credit")}>پس‌گرفتن</Button>
-            </>}
+            <Badge colorScheme="yellow">{selectedAdmins.length} انتخاب</Badge>
             <Button size="xs" ms="auto" variant="ghost" onClick={() => setSelectedIds([])}>لغو انتخاب</Button>
           </HStack>
         )}
@@ -348,12 +314,12 @@ export const Admins: FC = () => {
                       </Td>
                       <Td>
                         <Stack align="start" spacing={1.5}>
-                          <HStack flexWrap="wrap"><Badge colorScheme={item.role === "OWNER" ? "purple" : item.role === "SUPER_ADMIN" ? "cyan" : "gray"}>{t(`admins.role.${item.role}`)}</Badge><Badge variant="outline">{billingModeLabels[item.policy.billing_mode] || item.policy.billing_mode}</Badge></HStack>
+                          <HStack flexWrap="wrap"><Badge colorScheme={item.role === "OWNER" ? "purple" : "gray"}>{t(`admins.role.${item.role}`)}</Badge><Badge variant="outline">{billingModeLabels[item.policy.billing_mode] || item.policy.billing_mode}</Badge></HStack>
                           <Text fontSize="xs" color="gray.300">کاربران: <Text as="span" color="white" fontWeight="700" sx={{ fontVariantNumeric: "tabular-nums" }}>{item.quota.current_users} / {item.quota.max_users ?? t("unlimited")}</Text></Text>
                           <Text fontSize="xs" color="gray.400">{item.user_creation_mode === "PLAN_ONLY" ? "ساخت کاربر فقط از پلن" : "ساخت کاربر سفارشی"}</Text>
                         </Stack>
                       </Td>
-                      <Td><CreditRemaining admin={item} /></Td>
+                      <Td><CreditRemaining admin={item} showLifetime={isOwner} /></Td>
                       <Td>
                         <HStack justify="end" spacing={1} flexWrap="wrap">
                           <Button size="xs" variant="ghost" minH="36px" aria-expanded={expandedUsername === item.username} onClick={() => setExpandedUsername((current) => current === item.username ? null : item.username)}>{expandedUsername === item.username ? "بستن" : "جزئیات"}</Button>
@@ -391,8 +357,8 @@ export const Admins: FC = () => {
                     {renderMoreActions(item, true)}
                   </HStack>
                   <SimpleGrid columns={2} gap={2} mt={3} fontSize="sm">
-                    <Box p={2.5} bg="rgba(0,0,0,.16)" borderRadius="10px"><Text color="gray.400" fontSize="xs">دسترسی</Text><HStack mt={1.5} spacing={1} flexWrap="wrap"><Badge colorScheme={item.role === "OWNER" ? "purple" : item.role === "SUPER_ADMIN" ? "cyan" : "gray"}>{t(`admins.role.${item.role}`)}</Badge><Badge variant="outline">{billingModeLabels[item.policy.billing_mode] || item.policy.billing_mode}</Badge></HStack><Text mt={2} color="gray.300" fontSize="xs">کاربران: <Text as="span" color="white" fontWeight="700">{item.quota.current_users} / {item.quota.max_users ?? t("unlimited")}</Text></Text><Text mt={1} color="gray.400" fontSize="xs">{item.user_creation_mode === "PLAN_ONLY" ? "فقط از پلن" : "ساخت سفارشی"}</Text></Box>
-                    <Box p={2.5} bg="rgba(0,0,0,.16)" borderRadius="10px"><Text color="gray.400" fontSize="xs">{t("admins.creditRemaining")}</Text><Box mt={1.5}><CreditRemaining admin={item} /></Box></Box>
+                    <Box p={2.5} bg="rgba(0,0,0,.16)" borderRadius="10px"><Text color="gray.400" fontSize="xs">دسترسی</Text><HStack mt={1.5} spacing={1} flexWrap="wrap"><Badge colorScheme={item.role === "OWNER" ? "purple" : "gray"}>{t(`admins.role.${item.role}`)}</Badge><Badge variant="outline">{billingModeLabels[item.policy.billing_mode] || item.policy.billing_mode}</Badge></HStack><Text mt={2} color="gray.300" fontSize="xs">کاربران: <Text as="span" color="white" fontWeight="700">{item.quota.current_users} / {item.quota.max_users ?? t("unlimited")}</Text></Text><Text mt={1} color="gray.400" fontSize="xs">{item.user_creation_mode === "PLAN_ONLY" ? "فقط از پلن" : "ساخت سفارشی"}</Text></Box>
+                    <Box p={2.5} bg="rgba(0,0,0,.16)" borderRadius="10px"><Text color="gray.400" fontSize="xs">{t("admins.creditRemaining")}</Text><Box mt={1.5}><CreditRemaining admin={item} showLifetime={isOwner} /></Box></Box>
                   </SimpleGrid>
                   <HStack mt={3} spacing={1} flexWrap="wrap">
                     <Button minH="44px" size="sm" flex="1" variant="ghost" aria-expanded={expandedUsername === item.username} onClick={() => setExpandedUsername((current) => current === item.username ? null : item.username)}>{expandedUsername === item.username ? "بستن جزئیات" : "جزئیات"}</Button>
@@ -470,13 +436,13 @@ export const Admins: FC = () => {
             <AlertDialogHeader>{creditOperation === "grant" ? "افزایش" : "کاهش"} اعتبار {creditTarget?.username}</AlertDialogHeader>
             <AlertDialogBody>
               <Stack spacing={3}>
-                <FormControl isRequired><FormLabel>مقدار ({creditTarget ? creditUnit(creditTarget.policy.billing_mode) : ""})</FormLabel><Input autoFocus type="number" min={creditTarget && creditResource(creditTarget.policy.billing_mode) === "traffic" ? 0.01 : 1} step={creditTarget && creditResource(creditTarget.policy.billing_mode) === "traffic" ? 0.01 : 1} dir="ltr" value={creditAmount} onChange={(event) => setCreditAmount(event.target.value)} /></FormControl>
+                <FormControl isRequired><FormLabel>مقدار (تومان)</FormLabel><Input autoFocus type="number" min={1} step={1000} dir="ltr" value={creditAmount} onChange={(event) => setCreditAmount(event.target.value)} /></FormControl>
                 <FormControl><FormLabel>یادداشت اختیاری</FormLabel><Input maxLength={512} value={creditReason} onChange={(event) => setCreditReason(event.target.value)} /></FormControl>
               </Stack>
             </AlertDialogBody>
             <AlertDialogFooter gap={3} borderTopWidth="1px" borderColor="var(--panel-border)">
               <Button ref={cancelRef} variant="ghost" onClick={creditDisclosure.onClose}>انصراف</Button>
-              <Button colorScheme={creditOperation === "grant" ? "green" : "red"} isLoading={creditMutation.isLoading} isDisabled={!creditTarget || !Number.isFinite(Number(creditAmount)) || Number(creditAmount) <= 0 || (creditTarget && creditResource(creditTarget.policy.billing_mode) !== "traffic" && !Number.isInteger(Number(creditAmount)))} onClick={() => creditTarget && creditMutation.mutate({ item: creditTarget, operation: creditOperation, amount: Number(creditAmount), reason: creditReason.trim() })}>{creditOperation === "grant" ? "افزایش اعتبار" : "کاهش اعتبار"}</Button>
+              <Button colorScheme={creditOperation === "grant" ? "green" : "red"} isLoading={creditMutation.isLoading} isDisabled={!creditTarget || !Number.isInteger(Number(creditAmount)) || Number(creditAmount) <= 0} onClick={() => creditTarget && creditMutation.mutate({ item: creditTarget, operation: creditOperation, amount: Number(creditAmount), reason: creditReason.trim() })}>{creditOperation === "grant" ? "افزایش اعتبار" : "کاهش اعتبار"}</Button>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialogOverlay>

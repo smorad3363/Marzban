@@ -5,7 +5,6 @@ import {
   Box,
   Card,
   HStack,
-  Progress,
   SimpleGrid,
   Skeleton,
   Stack,
@@ -16,11 +15,9 @@ import { FC } from "react";
 import { useQuery } from "react-query";
 import { fetch } from "service/http";
 import { AccountSummary } from "types/Admin";
-import { formatBytes } from "utils/formatByte";
 
 const roleLabels: Record<string, string> = {
   OWNER: "مالک",
-  SUPER_ADMIN: "سوپر ادمین",
   ADMIN: "ادمین",
 };
 const accountStatusLabels: Record<string, string> = {
@@ -45,17 +42,6 @@ export const AdminCreditSummary: FC = () => {
   if (query.isError || !query.data) return <Alert status="error" borderRadius="12px" mb={5}><AlertIcon />اطلاعات حساب بارگذاری نشد.</Alert>;
 
   const account = query.data;
-  const seatMode = account.billing_mode === "SEAT_CREDIT";
-  const userMode = account.billing_mode === "USER_CREDIT";
-  const creditValue = (value: number | null) => value === null
-    ? "نامحدود"
-    : seatMode ? `${value} دستگاه` : userMode ? `${value} اکانت` : String(formatBytes(value));
-  const used = account.own_spend + account.delegated_traffic;
-  const inferredLimit = account.available_traffic === null ? null : account.available_traffic + used;
-  const configuredLimit = userMode || seatMode ? inferredLimit : account.total_traffic;
-  const percent = configuredLimit && configuredLimit > 0
-    ? Math.min(100, Math.round((used / configuredLimit) * 100))
-    : null;
 
   return (
     <Stack spacing={3} mb={5}>
@@ -67,16 +53,15 @@ export const AdminCreditSummary: FC = () => {
       <Card bg="var(--panel-surface)" color="gray.100" borderWidth="1px" borderColor="var(--panel-border)" borderRadius="16px" boxShadow="panel" overflow="hidden">
         <HStack px={{ base: 4, md: 5 }} py={3} spacing={2} flexWrap="wrap" borderBottomWidth="1px" borderColor="#33483b">
           <Text fontSize="sm" fontWeight="750" me={1}>وضعیت حساب</Text>
-          <Badge colorScheme={account.role === "OWNER" ? "purple" : account.role === "SUPER_ADMIN" ? "cyan" : "gray"}>{roleLabels[account.role] || account.role}</Badge>
+          <Badge colorScheme={account.role === "OWNER" ? "purple" : "gray"}>{roleLabels[account.role] || account.role}</Badge>
           <Badge colorScheme={account.account_status === "ACTIVE" ? "green" : "orange"}>{accountStatusLabels[account.account_status] || account.account_status}</Badge>
           <Badge colorScheme={account.user_creation_mode === "PLAN_ONLY" ? "blue" : "gray"}>{creationModeLabels[account.user_creation_mode] || account.user_creation_mode}</Badge>
         </HStack>
         <SimpleGrid columns={{ base: 1, md: 3 }}>
           <Box p={{ base: 4, md: 5 }} borderInlineEndWidth={{ base: 0, md: "1px" }} borderColor="#33483b">
-            <Text color="primary.300" fontSize="xs" fontWeight="750">اعتبار باقی‌مانده</Text>
-            <Text color="white" fontSize={{ base: "2xl", md: "3xl" }} fontWeight="800" mt={2} sx={{ fontVariantNumeric: "tabular-nums" }}>{creditValue(account.available_traffic)}</Text>
-            <Text color="gray.400" fontSize="xs" mt={2}>مصرف خودتان {creditValue(account.own_spend)} · اعتبار داده‌شده {creditValue(account.delegated_traffic)}</Text>
-            {percent !== null && <HStack mt={4}><Progress value={percent} colorScheme={percent >= 80 ? "orange" : "green"} size="sm" borderRadius="full" flex={1} aria-label="درصد مصرف اعتبار" /><Text color="gray.300" fontSize="xs">{percent}%</Text></HStack>}
+            <Text color="primary.300" fontSize="xs" fontWeight="750">اعتبار مالی</Text>
+            <Text color="white" fontSize={{ base: "2xl", md: "3xl" }} fontWeight="800" mt={2} sx={{ fontVariantNumeric: "tabular-nums" }}>{account.role === "OWNER" ? "بدون سقف" : `${account.money_balance_toman.toLocaleString("fa-IR")} تومان`}</Text>
+            <Text color="gray.400" fontSize="xs" mt={2}>{account.billing_mode === "USED_TRAFFIC" ? `قیمت خرید هر گیگ: ${(account.used_traffic_price_per_gib_toman || 0).toLocaleString("fa-IR")} تومان` : "هر ساخت یا تمدید، قیمت همان پلن را از کیف پول کم می‌کند."}</Text>
           </Box>
           <Box p={{ base: 4, md: 5 }} borderTopWidth={{ base: "1px", md: 0 }} borderInlineEndWidth={{ base: 0, md: "1px" }} borderColor="#33483b">
             <Text color="gray.400" fontSize="xs" fontWeight="650">کاربران زیرمجموعه</Text>

@@ -54,8 +54,7 @@ def _settings(db: Session) -> DeviceLimitSettings:
 
 
 def _can_view_full_ip(db: Session, admin: Admin) -> bool:
-    dbadmin = crud.get_admin(db, admin.username)
-    return bool(dbadmin and admin_hierarchy.is_owner(db, dbadmin))
+    return True
 
 
 def _slot_response(username: str, slot: DeviceSlot, full_ip: bool) -> DeviceSlotResponse:
