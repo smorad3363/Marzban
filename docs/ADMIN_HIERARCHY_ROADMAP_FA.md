@@ -2,7 +2,7 @@
 
 آخرین به‌روزرسانی: `2026-08-26`
 
-وضعیت: `V5.0.0-RC.12_PREPUBLICATION_PASS` — ساده‌سازی Admin، حسابداری مالی reseller، enforcement و حذف نمایش روش ساخت کاربر کامل است؛ کاربر انتشار immutable را صریحاً خواسته است.
+وضعیت: `V5.0.0-RC.13_PREPUBLICATION_PASS` — `rc.12` در گیت downgrade روی MySQL 8.0 متوقف شد؛ حذف دستی index پشتیبان FK برداشته شد و isolated downgrade/re-upgrade محلی پاس شد.
 
 ## قانون اجباری شروع هر چت و هر جلسه
 
@@ -830,7 +830,7 @@ reason codeهای حداقلی برای لاگ parent:
 
 ## نقطه دقیق ادامه
 
-> [!todo] حذف نمایش روش ساخت کاربر و انتشار `v5.0.0-rc.12` (`2026-08-26`)
+> [!todo] حذف نمایش روش ساخت کاربر و انتشار سالم `v5.0.0-rc.13` (`2026-08-26`)
 > کاربر صریحاً حذف «روش ساخت کاربر» از فرم ساخت و ویرایش Admin و انتشار نسخهٔ
 > immutable جدید را خواست. backend از `billing_mode` مقدار canonical را تعیین می‌کند:
 > `USED_TRAFFIC=FREE_FORM` و `ALLOCATED_TRAFFIC/USER_CREDIT=PLAN_ONLY`. انتخاب یا
@@ -1244,10 +1244,11 @@ git log -3 --oneline --decorate
 | `2026-08-26` | لانچر تک‌دستوری Dev محلی | static gate=`PASS`؛ integration=`BLOCKED` | PowerShell ایزوله MySQL 8.0، Alembic، seed Owner/Admin/User/Plan، Backend واقعی با Xray/reload، Vite HMR، VS Code و مرورگر را راه‌اندازی می‌کند؛ seed فقط DB دقیق `marzban_dev@33079` را می‌پذیرد | `04048b9` + working tree؛ بدون commit | PowerShell parser=`PASS`؛ Python compile/import=`PASS`؛ DB guard safe/unsafe=`PASS`؛ Docker/MySQL/Xray=`NOT EXECUTED` چون Docker Desktop نصب نیست | نصب Docker Desktop؛ اجرای `powershell -ExecutionPolicy Bypass -File .\scripts\dev-local.ps1`؛ production/schema/migration/dependency/release=`UNCHANGED` |
 | `2026-08-26` | رفع اجرای نخست لانچر Dev | integration=`PASS`؛ Dev روشن | probe image با `docker image ls --quiet`؛ pull صریح `mysql:8.0`؛ حذف `.test-*`/`.codex`/`graphify-out` از build context؛ `scripts/Dockerfile.dev` برای CRLF ویندوز؛ اجرای module-based seed؛ root صحیح Vite؛ URL دقیق `dashboard/index.html`؛ روش canonical Shadowsocks و repair idempotent داده نمونه | `04048b9` + working tree؛ بدون commit | PowerShell parser=`PASS`؛ image build=`PASS`؛ Alembic MySQL 8.0 تا `c2f4a8d6e913`=`PASS`؛ seed دوباره=`PASS`؛ MySQL=`healthy`؛ Frontend=`200`؛ Owner و سه Admin login=`PASS`؛ `/api/users` شش ردیف و `/api/admin-management` چهار ردیف=`PASS`؛ Browser Owner/Dashboard/User list و console=`PASS` | Dev روشن بماند؛ production/schema/migration/query/index/dependency/version/release=`UNCHANGED`؛ بدون commit/push/tag/release/deploy |
 | `2026-08-26 10:44 +03:30` | آماده‌سازی `v5.0.0-rc.12` | local gate=`PASS` | نمایش «روش ساخت کاربر» از create/edit حذف شد؛ mapping canonical backend و payload حفظ شد؛ Owner در mode مصرف واقعی همچنان می‌تواند Plan/Trial بسازد؛ قیمت override هر reseller در پاسخ Plan و زنجیرهٔ خرید اعمال می‌شود و edit عادی Admin آن را پاک نمی‌کند؛ نسخه، build و release docs به rc.12 رسید | `04048b9` + working tree؛ بدون commit | frontend contracts=`PASS`؛ TypeScript/Vite=`1773 modules`؛ Browser create/edit بدون گزینه و console error=`PASS`؛ backend/migration/release targeted=`67 passed`؛ full discovery=`228 passed, 8 failed, 9 skipped` و failureهای سازگاری repair=`11 passed, 1 skipped`؛ money/trial/release retest=`16 passed, 1 skipped`؛ MySQL 8.0 head=`c2f4a8d6e913` و index/EXPLAIN=`PASS`؛ Graphify code-only=`4535/11226/509` | manifest/secret/diff review؛ commit/push/tag immutable rc.12؛ انتظار CI full/MySQL/GHCR/Release؛ سپس تست installer/update؛ بدون deploy |
+| `2026-08-26` | گیت `rc.12` و آماده‌سازی `rc.13` | `rc.12 CI=FAIL` فقط downgrade MySQL 8.0؛ fix محلی=`PASS` | MySQL indexهای مرکب ledger را پشتیبان FK انتخاب کرد؛ downgrade پیش از drop table آن‌ها را دستی drop می‌کرد و با error `1553` شکست می‌خورد؛ drop دستی indexها حذف شد تا `DROP TABLE` خود MySQL همه index/FKهای همان جدول را اتمیک پاک کند | `4ccf813` + working tree | Actions `32943326038`: MySQL latest و existing-volume=`PASS`؛ MySQL 8.0 Stage8=`FAIL`؛ Docker/Release=`SKIPPED`؛ isolated MySQL 8.0 downgrade/re-upgrade پس از fix=`1 passed` | bump immutable `rc.13`؛ CI کامل/GHCR/Release؛ بدون deploy |
 
-### گزارش DB پیش از انتشار `v5.0.0-rc.12`
+### گزارش DB پیش از انتشار `v5.0.0-rc.13`
 
-- source: `v5.0.0-rc.11@04048b90ce27fd77d0ca3f936faca26da932ef90`؛ target محلی: `v5.0.0-rc.12`.
+- source: `v5.0.0-rc.12@4ccf813e66b93b870ca2034f87caad27e68b2abf`؛ target محلی: `v5.0.0-rc.13`.
 - migration: `c2f4a8d6e913` روی `8b7d3e5f1a24`؛ چهار ستون مالی افزایشی، قیمت نسخهٔ Plan، جدول قیمت reseller و ledger immutable اضافه می‌شوند.
 - MySQL: fresh Dev روی `mysql:8.0` تا head اجرا و seed idempotent پاس شد؛ production DB لمس نشد. matrix کامل 8.0/latest/existing-volume و backup/restore در CI release گیت نهایی است.
 - index: ledger دارای `(admin_id, created_at, id)` و `(user_id, created_at, id)`؛ قیمت reseller دارای PK `(admin_id, plan_id)` و index معکوس `(plan_id, admin_id)` است.

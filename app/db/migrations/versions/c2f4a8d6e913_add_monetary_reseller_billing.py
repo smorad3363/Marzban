@@ -111,14 +111,11 @@ def upgrade() -> None:
 def downgrade() -> None:
     tables = _tables()
     if "admin_money_transactions" in tables:
-        indexes = _indexes("admin_money_transactions")
-        for name in ("ix_admin_money_user_created", "ix_admin_money_admin_created"):
-            if name in indexes:
-                op.drop_index(name, table_name="admin_money_transactions")
+        # MySQL may select these composite indexes to support the table's
+        # foreign keys. Dropping the table removes its indexes atomically;
+        # dropping them first fails with error 1553 on MySQL 8.0.
         op.drop_table("admin_money_transactions")
     if "admin_user_plan_prices" in tables:
-        if "ix_admin_user_plan_prices_plan_admin" in _indexes("admin_user_plan_prices"):
-            op.drop_index("ix_admin_user_plan_prices_plan_admin", table_name="admin_user_plan_prices")
         op.drop_table("admin_user_plan_prices")
     if "admin_user_plan_versions" in tables and "price_toman" in _columns("admin_user_plan_versions"):
         op.drop_column("admin_user_plan_versions", "price_toman")

@@ -10,7 +10,7 @@ The `latest` tag is only a moving pointer to the newest stable tagged release.
 Prereleases never move `latest`. Older version and SHA tags remain available and
 are not replaced by a later release.
 
-## v5.0.0-rc.12 Admin simplification and reseller billing candidate
+## v5.0.0-rc.13 Admin simplification and reseller billing candidate
 
 This candidate reduces the product roles to Owner and Admin, simplifies the Admin
 form, and derives User creation mode from the commercial billing mode instead of
@@ -22,11 +22,11 @@ ledger entries, monotonic lifetime traffic totals, Plan-only edit enforcement, a
 read-only access for suspended Admins. Full client IP visibility is always enabled.
 
 ```bash
-marzban update --version v5.0.0-rc.12
+marzban update --version v5.0.0-rc.13
 ```
 
 ```bash
-sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.0.0-rc.12/scripts/marzban.sh)" @ install --version v5.0.0-rc.12 --database mysql
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.0.0-rc.13/scripts/marzban.sh)" @ install --version v5.0.0-rc.13 --database mysql
 ```
 
 ## v5.0.0-rc.11 Plan-only creation and User-list recovery candidate
