@@ -10,6 +10,7 @@ from app.db import crud
 from app.db.base import Base
 from app.db.models import Admin, AdminHierarchySettings, User
 from app.models.admin import Admin as APIAdmin
+from app.models import user as user_models
 from app.models.user import UserStatus, UsersResponse
 from app.routers.user import get_users as route_get_users
 from app.utils import marzhelp_policy
@@ -21,6 +22,7 @@ def db(tmp_path, monkeypatch):
     Base.metadata.create_all(engine)
     session = sessionmaker(bind=engine, expire_on_commit=False)()
     monkeypatch.setattr(marzhelp_policy, "allowed_inbound_tags", lambda *_args: None)
+    monkeypatch.setattr(user_models, "create_subscription_token", lambda username: f"token-{username}")
     try:
         yield session
     finally:
