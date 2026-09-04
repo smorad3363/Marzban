@@ -1510,6 +1510,7 @@ def suspend_admin(
     reason_id: int = 1,
     include_subtree: bool = True,
     batch_size: int = 500,
+    commit: bool = True,
 ) -> AdminSuspensionEvent:
     if not admin_in_scope(db, actor, target.id) or actor.id == target.id:
         raise HierarchyError("suspension_scope_forbidden", "Target admin is outside actor scope")
@@ -1568,8 +1569,11 @@ def suspend_admin(
         synchronize_session=False,
     )
     event.status = "complete"
-    db.commit()
-    db.refresh(event)
+    if commit:
+        db.commit()
+        db.refresh(event)
+    else:
+        db.flush()
     return event
 
 

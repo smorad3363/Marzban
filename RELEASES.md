@@ -10,6 +10,27 @@ The `latest` tag is only a moving pointer to the newest stable tagged release.
 Prereleases never move `latest`. Older version and SHA tags remain available and
 are not replaced by a later release.
 
+## v5.1.0 Admin hierarchy, billing, network scope, and reliability
+
+This stable release completes the Owner/Admin hierarchy workflow, reseller Plans
+and Toman billing, atomic Host and Inbound synchronization, scoped subscriptions,
+native device-limit controls, localized API errors, and Admin dashboard usability.
+It also fixes multi-node usage settlement, prepaid zero-crossing suspension, Node
+startup state synchronization, MySQL rollback index safety, and dashboard query
+count growth.
+
+Update to this release:
+
+```bash
+marzban update --version v5.1.0
+```
+
+Fresh-install this release with MySQL:
+
+```bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.1.0/scripts/marzban.sh)" @ install --version v5.1.0 --database mysql
+```
+
 ## v5.0.0-rc.13 Admin simplification and reseller billing candidate
 
 This candidate reduces the product roles to Owner and Admin, simplifies the Admin

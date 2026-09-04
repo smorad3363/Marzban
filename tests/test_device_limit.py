@@ -36,7 +36,19 @@ from app.models.user import UserCreate
 from app.models.device_limit import DeviceLimitSettingsUpdate
 from app.models.admin import Admin as AdminSchema
 from app.models.proxy import ProxyTypes
-from app.routers.device_limit import delete_warning, get_diagnostics
+from app.routers.device_limit import (
+    delete_warning,
+    get_diagnostics,
+    get_penalty_stages,
+    get_settings,
+    list_incidents,
+    modify_slot,
+    reset_strikes,
+    unblock_user,
+    update_penalty_stages,
+    update_settings,
+    user_summary,
+)
 from app.xray import operations
 from app.utils import marzhelp_policy
 
@@ -251,6 +263,27 @@ def test_xray_parser_diagnostics_are_bounded_and_reasoned(monkeypatch):
 
 def test_device_limit_diagnostics_endpoint_is_sudo_protected():
     dependency = inspect.signature(get_diagnostics).parameters["_"].default.dependency
+    assert dependency.__func__ is AdminSchema.check_sudo_admin.__func__
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "parameter"),
+    [
+        (get_settings, "_"),
+        (get_diagnostics, "_"),
+        (update_settings, "admin"),
+        (get_penalty_stages, "_"),
+        (update_penalty_stages, "admin"),
+        (list_incidents, "admin"),
+        (user_summary, "admin"),
+        (modify_slot, "admin"),
+        (reset_strikes, "admin"),
+        (delete_warning, "admin"),
+        (unblock_user, "admin"),
+    ],
+)
+def test_every_device_limit_api_is_owner_protected(endpoint, parameter):
+    dependency = inspect.signature(endpoint).parameters[parameter].default.dependency
     assert dependency.__func__ is AdminSchema.check_sudo_admin.__func__
 
 

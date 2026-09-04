@@ -37,7 +37,9 @@ import useGetUser from "hooks/useGetUser";
 import { FC, FormEvent, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "react-query";
+import { Navigate } from "react-router-dom";
 import { fetch } from "service/http";
+import { localizedApiError } from "utils/apiError";
 import {
   DeviceLimitIncidentList,
   DeviceLimitPenaltyStage,
@@ -78,7 +80,7 @@ const SettingsSection: FC<{
       onError: (error: any) => {
         toast({
           title: t("deviceLimit.saveFailed"),
-          description: error?.data?.detail || error?.message,
+          description: localizedApiError(error),
           status: "error",
           duration: 5000,
         });
@@ -99,7 +101,7 @@ const SettingsSection: FC<{
       onError: (error: any) => {
         toast({
           title: t("deviceLimit.saveFailed"),
-          description: error?.data?.detail || error?.message,
+          description: localizedApiError(error),
           status: "error",
           duration: 5000,
         });
@@ -359,6 +361,8 @@ export const DeviceLimits: FC = () => {
   const isOwner = userData.is_sudo || userData.role === "OWNER";
   const settings = useQuery<DeviceLimitSettings, Error>("device-limit-settings", () => fetch("/device-limit/settings"), { enabled: !getUserIsPending && isOwner });
   const stages = useQuery<DeviceLimitPenaltyStage[], Error>("device-limit-stages", () => fetch("/device-limit/penalty-stages"), { enabled: !getUserIsPending && isOwner });
+
+  if (!getUserIsPending && !isOwner) return <Navigate to="/" replace />;
 
   return (
     <AppShell>

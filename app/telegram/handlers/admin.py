@@ -36,7 +36,7 @@ from app.telegram.utils.shared import (
     statuses,
     time_to_string
 )
-from app.utils import marzhelp_policy
+from app.utils import admin_plans, marzhelp_policy
 from app.utils.store import MemoryStorage
 from app.utils.system import cpu_usage, memory_usage, readable_size, realtime_bandwidth
 from config import TELEGRAM_DEFAULT_VLESS_FLOW, TELEGRAM_LOGGER_CHANNEL_ID
@@ -333,7 +333,7 @@ def edit_command(call: types.CallbackQuery):
                 '❌ User not found.',
                 show_alert=True
             )
-        user = UserResponse.model_validate(db_user)
+        user = admin_plans.scoped_user_response(db, db_user)
     mem_store.set(f'{call.message.chat.id}:username', username)
     mem_store.set(f'{call.message.chat.id}:data_limit', db_user.data_limit)
 
@@ -621,7 +621,7 @@ def edit_note_step(message: types.Message):
         last_note = db_user.note
         modify = UserModify(note=note)
         db_user = crud.update_user(db, db_user, modify)
-        user = UserResponse.model_validate(db_user)
+        user = admin_plans.scoped_user_response(db, db_user)
         bot.reply_to(
             message, get_user_info_text(db_user), parse_mode="html",
             reply_markup=BotKeyboard.user_menu(user_info={'status': user.status, 'username': user.username}))
@@ -649,7 +649,7 @@ def user_command(call: types.CallbackQuery):
         db_user = crud.get_user(db, username)
         if not db_user:
             return bot.answer_callback_query(call.id, '❌ User not found.', show_alert=True)
-        user = UserResponse.model_validate(db_user)
+        user = admin_plans.scoped_user_response(db, db_user)
         bot.edit_message_text(
             get_user_info_text(db_user),
             call.message.chat.id, call.message.message_id, parse_mode="HTML",
@@ -676,7 +676,7 @@ def links_command(call: types.CallbackQuery):
         if not db_user:
             return bot.answer_callback_query(call.id, "User not found!", show_alert=True)
 
-        user = UserResponse.model_validate(db_user)
+        user = admin_plans.scoped_user_response(db, db_user)
 
     text = f"<code>{user.subscription_url}</code>\n\n\n"
     for link in user.links:
@@ -704,7 +704,7 @@ def genqr_command(call: types.CallbackQuery):
         if not db_user:
             return bot.answer_callback_query(call.id, "User not found!", show_alert=True)
 
-        user = UserResponse.model_validate(db_user)
+        user = admin_plans.scoped_user_response(db, db_user)
 
         bot.answer_callback_query(call.id, "Generating QR code...")
 
@@ -790,7 +790,7 @@ def template_charge_command(call: types.CallbackQuery):
         db_user = crud.get_user(db, username)
         if not db_user:
             return bot.answer_callback_query(call.id, "User not found!", show_alert=True)
-        user = UserResponse.model_validate(db_user)
+        user = admin_plans.scoped_user_response(db, db_user)
         if (user.data_limit and not user.expire) or (not user.data_limit and user.expire):
             expire = (datetime.fromtimestamp(db_user.expire) if db_user.expire else today)
             expire += relativedelta(seconds=template.expire_duration)
@@ -1577,7 +1577,7 @@ def confirm_user_command(call: types.CallbackQuery):
             crud.reset_user_data_usage(db, db_user)
             if db_user.status in [UserStatus.active, UserStatus.on_hold]:
                 xray.operations.add_user(db_user)
-            user = UserResponse.model_validate(db_user)
+            user = admin_plans.scoped_user_response(db, db_user)
             bot.edit_message_text(
                 get_user_info_text(db_user),
                 call.message.chat.id,
@@ -1620,7 +1620,7 @@ def confirm_user_command(call: types.CallbackQuery):
             db_user = crud.get_user(db, username)
             if not db_user:
                 return bot.answer_callback_query(call.id, "User not found!", show_alert=True)
-            user = UserResponse.model_validate(db_user)
+            user = admin_plans.scoped_user_response(db, db_user)
 
             inbounds = template.inbounds
             proxies = {p.type.value: p.settings for p in db_user.proxies}
@@ -1743,10 +1743,10 @@ def confirm_user_command(call: types.CallbackQuery):
                     proxies=proxies,
                     inbounds=inbounds
                 )
-            last_user = UserResponse.model_validate(db_user)
+            last_user = admin_plans.scoped_user_response(db, db_user)
             db_user = crud.update_user(db, db_user, modify)
 
-            user = UserResponse.model_validate(db_user)
+            user = admin_plans.scoped_user_response(db, db_user)
 
             if user.status == UserStatus.active:
                 xray.operations.update_user(db_user)
@@ -1885,7 +1885,7 @@ def confirm_user_command(call: types.CallbackQuery):
                         )
                     db_user = crud.create_user(db, new_user, admin=creator)
                     proxies = db_user.proxies
-                    user = UserResponse.model_validate(db_user)
+                    user = admin_plans.scoped_user_response(db, db_user)
                     xray.operations.add_user(db_user)
                     if mem_store.get(f"{call.message.chat.id}:is_bulk", False):
                         schedule_delete_message(call.message.chat.id, call.message.id)
@@ -2144,7 +2144,7 @@ def confirm_user_command(call: types.CallbackQuery):
             if not db_user:
                 return bot.answer_callback_query(call.id, text=f"User not found!", show_alert=True)
             db_user = crud.revoke_user_sub(db, db_user)
-            user = UserResponse.model_validate(db_user)
+            user = admin_plans.scoped_user_response(db, db_user)
             bot.answer_callback_query(call.id, "✅ Subscription Successfully Revoked!")
             bot.edit_message_text(
                 get_user_info_text(db_user),
@@ -2185,7 +2185,7 @@ def search_user(message: types.Message):
             if not db_user:
                 bot.reply_to(message, f'❌ User «{username}» not found.')
                 continue
-            user = UserResponse.model_validate(db_user)
+            user = admin_plans.scoped_user_response(db, db_user)
             bot.reply_to(
                 message,
                 get_user_info_text(db_user),

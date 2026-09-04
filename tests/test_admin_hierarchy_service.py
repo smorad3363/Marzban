@@ -923,6 +923,31 @@ def test_used_traffic_money_chain_bills_fractional_gib_and_margin(db):
     assert parent_settings.usage_billing_remainder == 0
 
 
+def test_used_traffic_zero_crossing_suspends_account_and_active_users_atomically(db):
+    _, parent, child, parent_settings, child_settings = _money_tree(db)
+    parent_settings.billing_mode = admin_billing.BillingMode.USED_TRAFFIC.value
+    parent_settings.used_traffic_price_per_gib_toman = 50_000
+    child_settings.billing_mode = admin_billing.BillingMode.USED_TRAFFIC.value
+    child_settings.used_traffic_price_per_gib_toman = 70_000
+    child_settings.money_balance_toman = 10_000
+    user = User(username="prepaid-crossing", admin_id=child.id, status=UserStatus.active)
+    db.add(user)
+    db.flush()
+
+    suspended = money_billing.settle_used_traffic(db, {child.id: 1024 ** 3})
+    db.refresh(child_settings)
+
+    assert suspended == {child.id}
+    assert child_settings.money_balance_toman == -60_000
+    assert child_settings.account_status_id == admin_hierarchy.ACCOUNT_STATUS_IDS[admin_hierarchy.SUSPENDED]
+    assert child_settings.suspended_reason_id == 2
+    assert user.status == UserStatus.disabled
+    assert db.query(AdminMoneyTransaction).filter(
+        AdminMoneyTransaction.admin_id == child.id,
+        AdminMoneyTransaction.operation_type == "usage_settlement",
+    ).count() == 1
+
+
 def test_owner_money_grant_is_idempotent(db):
     owner, _, child, _, child_settings = _money_tree(db)
     child.parent_admin_id = owner.id

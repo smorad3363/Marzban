@@ -1,8 +1,8 @@
 # نقشه راه Owner، Super Admin، Admin، سلسله‌مراتب و انتقال اعتبار
 
-آخرین به‌روزرسانی: `2026-08-26`
+آخرین به‌روزرسانی: `2026-09-04`
 
-وضعیت: `V5.0.0-RC.13_PREPUBLICATION_PASS` — `rc.12` در گیت downgrade روی MySQL 8.0 متوقف شد؛ حذف دستی index پشتیبان FK برداشته شد و isolated downgrade/re-upgrade محلی پاس شد.
+وضعیت: `V5.1.0_RELEASE_IN_PROGRESS` — پیاده‌سازی و gate محلی کامل است؛ commit، tag، CI، GHCR و تست نصب/آپدیت انتشار در حال انجام است.
 
 ## قانون اجباری شروع هر چت و هر جلسه
 
@@ -830,6 +830,43 @@ reason codeهای حداقلی برای لاگ parent:
 
 ## نقطه دقیق ادامه
 
+> [!todo] انتشار پایدار `v5.1.0` (`2026-09-04`)
+> مراحل `0` تا `7` نقشه‌راه اجرای Codex کامل‌اند. MySQL 8 migration matrix،
+> backup/restore، سناریوی زنده Master + Node A + Node B، backend با
+> `275 passed, 9 skipped` و frontend production build پاس شدند. نقطه ادامه:
+> commit و tag تغییرناپذیر `v5.1.0`، انتظار برای CI/GHCR/GitHub Release، سپس smoke
+> test نصب و update از artifact منتشرشده.
+
+> [!todo] مرحلهٔ `2` نقشه‌راه اجرای Codex (`2026-09-04`)
+> مرحلهٔ `1` کامل است. Host ID اکنون در edit حفظ می‌شود و commit داخل loop حذف شده؛
+> Impact Analysis read-only تعداد Plan/version/User و Plan نامعتبر را گزارش می‌کند؛
+> mutation بدون تصمیم صریح با قرارداد فارسی `409` رد می‌شود و DB تغییر نمی‌کند؛ regression
+> network-only Plan revision شرایط مالی قبلی را حفظ می‌کند و migration افزایشی
+> `d3a5c7e9f102` Host تاریخی را برای runtime نگه می‌دارد. actionها اتمیک متصل‌اند؛
+> `future_only` snapshot جاری را نگه می‌دارد و `detach`
+> کاربران فعال را با assignment نوع `network_sync` منتقل می‌کند؛ `10 passed`. نقطهٔ ادامه:
+> Modal فارسی Impact Analysis کامل و TypeScript/UX contract پاس شد. نقطهٔ ادامه: `2.4`،
+> یکسان‌سازی Host scope در User API، Subscription، QR و Copy Config. Graphify دوباره scan نمی‌شود.
+
+> [!success] مرحلهٔ `1` نقشه‌راه اجرای Codex (`2026-09-04`)
+> password از مسیر report ورود حذف شد؛ self-edit فیلدهای تجاری Admin در backend با
+> `403 self_commercial_edit_forbidden` بسته شد؛ تمام API/UI مربوط به Device Limit
+> Owner-only شد؛ activation عادی هنگام penalty فعال با `403 device_limit_penalty_active`
+> مسدود و restore وضعیت قبلی فقط در flow Owner انجام شد. تست backend هدفمند، قرارداد UI،
+> TypeScript و compile پاس شدند. schema/migration/dependency/commit/push/tag/release/deploy
+> انجام نشد. نقطهٔ ادامه: مرحلهٔ `2 — Host / Inbound / Plan Synchronization`.
+
+> [!success] مرحلهٔ `0` نقشه‌راه اجرای Codex (`2026-09-04`)
+> workspace، branch، HEAD، tag/release/GHCR، migration head و اسناد تحویلی تطبیق داده شدند.
+> baseline جاری `v5.0.0-rc.13@69e105fcebf627f0b9dfe588a9f7e3205767b01a`،
+> migration head برابر `c2f4a8d6e913` و rollback تأییدشده
+> `v5.0.0-rc.11@04048b90ce27fd77d0ca3f936faca26da932ef90` است. Graphify فقط برای
+> navigation/dependency روی HEAD تازه شد. findings در
+> [[CODEX_IMPLEMENTATION_CHECKPOINT_FA]] به چهار دستهٔ قطعی، سند منقضی، نیازمند
+> بررسی زنده و نیازمندی محصول تفکیک شدند. هیچ feature، schema، migration، dependency،
+> commit، push، tag، release یا deploy انجام نشد. نقطهٔ ادامه: مرحلهٔ `1`؛ فرمان دقیق
+> `مرحله 1 را شروع کن`.
+
 > [!todo] حذف نمایش روش ساخت کاربر و انتشار سالم `v5.0.0-rc.13` (`2026-08-26`)
 > کاربر صریحاً حذف «روش ساخت کاربر» از فرم ساخت و ویرایش Admin و انتشار نسخهٔ
 > immutable جدید را خواست. backend از `billing_mode` مقدار canonical را تعیین می‌کند:
@@ -1245,6 +1282,9 @@ git log -3 --oneline --decorate
 | `2026-08-26` | رفع اجرای نخست لانچر Dev | integration=`PASS`؛ Dev روشن | probe image با `docker image ls --quiet`؛ pull صریح `mysql:8.0`؛ حذف `.test-*`/`.codex`/`graphify-out` از build context؛ `scripts/Dockerfile.dev` برای CRLF ویندوز؛ اجرای module-based seed؛ root صحیح Vite؛ URL دقیق `dashboard/index.html`؛ روش canonical Shadowsocks و repair idempotent داده نمونه | `04048b9` + working tree؛ بدون commit | PowerShell parser=`PASS`؛ image build=`PASS`؛ Alembic MySQL 8.0 تا `c2f4a8d6e913`=`PASS`؛ seed دوباره=`PASS`؛ MySQL=`healthy`؛ Frontend=`200`؛ Owner و سه Admin login=`PASS`؛ `/api/users` شش ردیف و `/api/admin-management` چهار ردیف=`PASS`؛ Browser Owner/Dashboard/User list و console=`PASS` | Dev روشن بماند؛ production/schema/migration/query/index/dependency/version/release=`UNCHANGED`؛ بدون commit/push/tag/release/deploy |
 | `2026-08-26 10:44 +03:30` | آماده‌سازی `v5.0.0-rc.12` | local gate=`PASS` | نمایش «روش ساخت کاربر» از create/edit حذف شد؛ mapping canonical backend و payload حفظ شد؛ Owner در mode مصرف واقعی همچنان می‌تواند Plan/Trial بسازد؛ قیمت override هر reseller در پاسخ Plan و زنجیرهٔ خرید اعمال می‌شود و edit عادی Admin آن را پاک نمی‌کند؛ نسخه، build و release docs به rc.12 رسید | `04048b9` + working tree؛ بدون commit | frontend contracts=`PASS`؛ TypeScript/Vite=`1773 modules`؛ Browser create/edit بدون گزینه و console error=`PASS`؛ backend/migration/release targeted=`67 passed`؛ full discovery=`228 passed, 8 failed, 9 skipped` و failureهای سازگاری repair=`11 passed, 1 skipped`؛ money/trial/release retest=`16 passed, 1 skipped`؛ MySQL 8.0 head=`c2f4a8d6e913` و index/EXPLAIN=`PASS`؛ Graphify code-only=`4535/11226/509` | manifest/secret/diff review؛ commit/push/tag immutable rc.12؛ انتظار CI full/MySQL/GHCR/Release؛ سپس تست installer/update؛ بدون deploy |
 | `2026-08-26` | گیت `rc.12` و آماده‌سازی `rc.13` | `rc.12 CI=FAIL` فقط downgrade MySQL 8.0؛ fix محلی=`PASS` | MySQL indexهای مرکب ledger را پشتیبان FK انتخاب کرد؛ downgrade پیش از drop table آن‌ها را دستی drop می‌کرد و با error `1553` شکست می‌خورد؛ drop دستی indexها حذف شد تا `DROP TABLE` خود MySQL همه index/FKهای همان جدول را اتمیک پاک کند | `4ccf813` + working tree | Actions `32943326038`: MySQL latest و existing-volume=`PASS`؛ MySQL 8.0 Stage8=`FAIL`؛ Docker/Release=`SKIPPED`؛ isolated MySQL 8.0 downgrade/re-upgrade پس از fix=`1 passed` | bump immutable `rc.13`؛ CI کامل/GHCR/Release؛ بدون deploy |
+| `2026-09-04` | مرحلهٔ `0` نقشه‌راه اجرای Codex | `PASS` | تطبیق workspace/Git/ZIP و اسناد؛ تأیید انتشار `rc.13`، digestهای GHCR و rollback؛ تازه‌سازی Graphify روی HEAD؛ طبقه‌بندی findings و ساخت checkpoint فارسی/انگلیسی | `69e105fcebf627f0b9dfe588a9f7e3205767b01a` + working tree؛ بدون commit | `alembic heads`=`c2f4a8d6e913`؛ Graphify=`4869 nodes/12081 edges/516 communities`؛ بررسی ایستای هدفمند؛ full/backend/frontend/MySQL live=`NOT RUN` طبق scope مرحلهٔ `0` | `مرحله 1 را شروع کن`؛ بدون feature/schema/migration/commit/push/tag/release/deploy |
+| `2026-09-04` | مرحلهٔ `1` نقشه‌راه اجرای Codex | `PASS` | حذف password از report؛ بستن self-edit تجاری Admin؛ Owner-only شدن Device Limit در backend/UI؛ منع activation عادی هنگام penalty و restore کنترل‌شدهٔ وضعیت قبلی | `69e105fcebf627f0b9dfe588a9f7e3205767b01a` + working tree؛ بدون commit | pre-fix=`12 failed, 5 passed`؛ backend هدفمند=`21 passed`؛ Admin UX contract=`PASS`؛ TypeScript=`PASS`؛ compileall=`PASS` | مرحلهٔ `2 — Host / Inbound / Plan Synchronization`؛ schema/migration/dependency/commit/push/tag/release/deploy=`UNCHANGED` |
+| `2026-09-04` | آماده‌سازی انتشار پایدار `v5.1.0` | `IN_PROGRESS` | تکمیل مراحل `0` تا `7`؛ انتخاب نسخه بعد از `v5.0.0-rc.13`؛ جداسازی `.codex/` و `graphify-out/` از Git؛ ثبت release metadata | `69e105f` + working tree | backend=`275 passed, 9 skipped`؛ frontend build=`PASS`؛ MySQL migration/downgrade/re-upgrade و backup/restore=`PASS`؛ `git diff --check`=`PASS` | build همسان با Node 20؛ secret/staging review؛ commit/tag/push؛ انتظار CI و smoke نصب/update |
 
 ### گزارش DB پیش از انتشار `v5.0.0-rc.13`
 

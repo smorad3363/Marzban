@@ -196,7 +196,7 @@ export const DashboardOverview: FC<Props> = ({ onCreateAdmin, onCreatePlan }) =>
   const data = query.data;
   const chartText = "#a8b0aa";
   const trafficModes = useMemo(
-    () => (data?.billing_modes || []).filter((item) => item.current_used_traffic > 0 || item.allocated_quota > 0),
+    () => (data?.billing_modes || []).filter((item) => item.current_used_traffic !== null && (item.current_used_traffic > 0 || item.allocated_quota > 0)),
     [data],
   );
   const barOptions = useMemo<ApexOptions>(() => ({
@@ -331,7 +331,7 @@ export const DashboardOverview: FC<Props> = ({ onCreateAdmin, onCreatePlan }) =>
         <Card p={3.5} bg="var(--panel-surface)" color="gray.100" borderWidth="1px" borderColor="var(--panel-border)" borderRadius="14px" minW={0}>
           <HStack justify="space-between" align="start" gap={3} flexWrap="wrap"><Box><Text as="h2" fontWeight="800">ترافیک به تفکیک نوع اعتبار</Text><Text mt={1} color="gray.400" fontSize="xs">فقط مدل‌هایی نمایش داده می‌شوند که مصرف یا حجم تعریف‌شده دارند.</Text></Box><Badge colorScheme="yellow">GB</Badge></HStack>
           <Box h={{ base: "190px", md: "220px" }} minW={0} dir="ltr" aria-label="نمودار ترافیک بر اساس نوع اعتبار"><Chart type="bar" height="100%" options={barOptions} series={[
-            { name: "مصرف ثبت‌شده", data: trafficModes.map((item) => Number((item.current_used_traffic / 1073741824).toFixed(2))) },
+            { name: "مصرف ثبت‌شده", data: trafficModes.map((item) => Number(((item.current_used_traffic ?? 0) / 1073741824).toFixed(2))) },
             { name: "حجم تعریف‌شده", data: trafficModes.map((item) => Number((item.allocated_quota / 1073741824).toFixed(2))) },
           ]} /></Box>
         </Card>

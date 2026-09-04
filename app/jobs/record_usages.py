@@ -129,6 +129,15 @@ def get_outbounds_stats(api: XRayAPI):
         return []
 
 
+def aggregate_user_usages(api_params, usage_coefficient):
+    users_usage = defaultdict(int)
+    for node_id, params in api_params.items():
+        coefficient = usage_coefficient.get(node_id, 1)
+        for param in params:
+            users_usage[param['uid']] += int(param['value'] * coefficient)
+    return [{"uid": uid, "value": value} for uid, value in users_usage.items()]
+
+
 def record_user_usages():
     api_instances = {None: xray.api}
     usage_coefficient = {None: 1}  # default usage coefficient for the main api instance
@@ -142,17 +151,15 @@ def record_user_usages():
         futures = {node_id: executor.submit(get_users_stats, api) for node_id, api in api_instances.items()}
     api_params = {node_id: future.result() for node_id, future in futures.items()}
 
-    users_usage = defaultdict(int)
-    for node_id, params in api_params.items():
-        coefficient = usage_coefficient.get(node_id, 1)  # get the usage coefficient for the node
-        for param in params:
-            users_usage[param['uid']] += int(param['value'] * coefficient)  # apply the usage coefficient
-    users_usage = list({"uid": uid, "value": value} for uid, value in users_usage.items())
+    users_usage = aggregate_user_usages(api_params, usage_coefficient)
     if not users_usage:
         return
 
     with GetDB() as db:
-        user_admin_map = dict(db.query(User.id, User.admin_id).all())
+        user_ids = [int(item["uid"]) for item in users_usage]
+        user_admin_map = dict(
+            db.query(User.id, User.admin_id).filter(User.id.in_(user_ids)).all()
+        )
 
     admin_usage = defaultdict(int)
     for user_usage in users_usage:
@@ -180,7 +187,7 @@ def record_user_usages():
                 db.connection().execute(stmt, users_usage)
                 if admin_data:
                     db.connection().execute(admin_update_stmt, admin_data)
-                money_billing.settle_used_traffic(db, dict(admin_usage))
+                suspended_admin_ids = money_billing.settle_used_traffic(db, dict(admin_usage))
                 db.commit()
                 break
             except (OperationalError, IntegrityError) as err:
@@ -189,6 +196,9 @@ def record_user_usages():
                     tries += 1
                     continue
                 raise
+
+    if suspended_admin_ids:
+        xray.operations.restart_all_cores()
 
     if DISABLE_RECORDING_NODE_USAGE:
         return

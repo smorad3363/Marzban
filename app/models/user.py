@@ -331,8 +331,8 @@ class UserUsageResetResponse(BaseModel):
 class UserResponse(User):
     username: str
     status: UserStatus
-    used_traffic: int
-    lifetime_used_traffic: int = 0
+    used_traffic: Optional[int]
+    lifetime_used_traffic: Optional[int] = 0
     created_at: datetime
     links: List[str] = []
     subscription_url: str = ""
@@ -424,8 +424,8 @@ class UserUsageResponse(BaseModel):
 
 class UserUsagesResponse(BaseModel):
     username: str
-    usages: List[UserUsageResponse]
+    usages: Optional[List[UserUsageResponse]]
 
 
 class UsersUsagesResponse(BaseModel):
-    usages: List[UserUsageResponse]
+    usages: Optional[List[UserUsageResponse]]

@@ -1,6 +1,7 @@
 import json
 import re
 from enum import Enum
+from enum import Enum
 from typing import Optional, Union
 from uuid import UUID, uuid4
 
@@ -139,6 +140,7 @@ class FormatVariables(dict):
 
 
 class ProxyHost(BaseModel):
+    id: Optional[int] = None
     remark: str
     address: str
     port: Optional[int] = Field(None, nullable=True)
@@ -149,12 +151,12 @@ class ProxyHost(BaseModel):
     alpn: ProxyHostALPN = ProxyHostALPN.none
     fingerprint: ProxyHostFingerprint = ProxyHostFingerprint.none
     allowinsecure: Union[bool, None] = None
-    is_disabled: Union[bool, None] = None
-    mux_enable: Union[bool, None] = None
+    is_disabled: bool = False
+    mux_enable: bool = False
     fragment_setting: Optional[str] = Field(None, nullable=True)
     noise_setting: Optional[str] = Field(None, nullable=True)
-    random_user_agent: Union[bool, None] = None
-    use_sni_as_host: Union[bool, None] = None
+    random_user_agent: bool = False
+    use_sni_as_host: bool = False
     model_config = ConfigDict(from_attributes=True)
 
     @field_validator("remark", mode="after")
@@ -165,6 +167,7 @@ class ProxyHost(BaseModel):
             raise ValueError("Invalid formatting variables")
 
         return v
+
 
     @field_validator("address", mode="after")
     def validate_address(cls, v):
@@ -197,6 +200,27 @@ class ProxyHost(BaseModel):
                     "Noise can't be longer that 2000 character"
                 )
         return v
+
+
+class HostUpdateImpact(BaseModel):
+    affected_plan_count: int
+    affected_plan_version_count: int
+    active_user_count: int
+    affected_plan_ids: list[int]
+    affected_version_ids: list[int]
+    invalid_plan_ids: list[int]
+    changed_host_ids: list[int]
+    removed_host_ids: list[int]
+
+    @property
+    def requires_confirmation(self) -> bool:
+        return bool(self.affected_plan_count or self.active_user_count)
+
+
+class HostUpdateAction(str, Enum):
+    apply_current = "apply_current"
+    future_only = "future_only"
+    detach = "detach"
 
 
 class ProxyInbound(BaseModel):

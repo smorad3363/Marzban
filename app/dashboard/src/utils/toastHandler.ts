@@ -1,5 +1,6 @@
 import { CreateToastFnReturn } from "@chakra-ui/react";
 import { UseFormReturn } from "react-hook-form";
+import { localizedApiError } from "./apiError";
 
 export const generateErrorMessage = (
   e: any,
@@ -7,26 +8,16 @@ export const generateErrorMessage = (
   form?: UseFormReturn<any>
 ) => {
   if (e.response && e.response._data) {
-    if (typeof e.response._data.detail === "string")
-      return toast({
-        title: e.response._data.detail,
-        status: "error",
-        isClosable: true,
-        position: "top",
-        duration: 3000,
-      });
-    if (typeof e.response._data.detail === "object")
-      if (form) {
-        Object.keys(e.response._data.detail).forEach((errorKey) =>
-          form.setError(errorKey, {
-            message: e.response._data.detail[errorKey],
-          })
-        );
-        return;
-      }
+    const detail = e.response._data.detail;
+    if (form && detail && typeof detail === "object" && detail.fields) {
+      Object.entries(detail.fields).forEach(([field, message]) =>
+        form.setError(field, { message: String(message) })
+      );
+      return;
+    }
   }
   return toast({
-    title: "Something went wrong!",
+    title: localizedApiError(e),
     status: "error",
     isClosable: true,
     position: "top",

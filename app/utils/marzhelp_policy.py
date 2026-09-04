@@ -16,7 +16,7 @@ from sqlalchemy import case, func, or_, update
 from sqlalchemy.orm import Session
 
 from app import logger, xray
-from app.device_limit.constants import SubscriptionMode
+from app.device_limit.constants import PenaltyStatus, SubscriptionMode
 from app.db.models import (
     Admin,
     AdminHierarchy,
@@ -1175,6 +1175,8 @@ def validate_update(
     operation: UserUpdateOperation = UserUpdateOperation.edit,
     actor: Admin | object | None = None,
 ) -> tuple[bool, bool]:
+    if getattr(getattr(modify, "status", None), "value", getattr(modify, "status", None)) == "active":
+        validate_no_active_penalty(dbuser)
     settings = _settings(db, dbuser.admin_id, lock=True)
     if settings is None:
         return False, False
@@ -1339,6 +1341,7 @@ def resulting_next_plan_data_limit(dbuser: User) -> int | None:
 def validate_next_plan_activation(db: Session, dbuser: User) -> bool:
     if dbuser.next_plan is None:
         return False
+    validate_no_active_penalty(dbuser)
     settings = _settings(db, dbuser.admin_id, lock=True)
     if settings is None:
         return False
@@ -1391,6 +1394,7 @@ def validate_revoke(db: Session, dbuser: User) -> None:
 def validate_activation(db: Session, dbuser: User) -> None:
     """Revalidate the effective plan before any alternate activation path."""
 
+    validate_no_active_penalty(dbuser)
     settings = _settings(db, dbuser.admin_id, lock=True)
     if settings is None:
         return
@@ -1411,6 +1415,18 @@ def validate_activation(db: Session, dbuser: User) -> None:
         settings,
         unlimited_requested=_effective_data_limit(dbuser.data_limit) is None,
     )
+
+
+def validate_no_active_penalty(dbuser: User) -> None:
+    state = dbuser.device_limit_state
+    if state is not None and state.penalty_status in {
+        PenaltyStatus.temporarily_disabled.value,
+        PenaltyStatus.permanently_disabled.value,
+    }:
+        raise MarzhelpPolicyError(
+            "device_limit_penalty_active",
+            "Active Device Limit penalty must be released by the Owner",
+        )
 
 
 def validate_start_expiration(db: Session, dbuser: User, expire: int) -> None:

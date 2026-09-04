@@ -28,7 +28,7 @@ from app.models.user import (
     UsersUsagesResponse,
     UserUsagesResponse,
 )
-from app.utils import admin_billing, admin_hierarchy, marzhelp_policy, report, responses
+from app.utils import admin_billing, admin_hierarchy, admin_plans, marzhelp_policy, report, responses
 from app.utils.audit import (
     AuditLogService,
     changed_fields,
@@ -107,7 +107,7 @@ def add_user(
         raise HTTPException(status_code=409, detail="User already exists")
 
     bg.add_task(xray.operations.add_user_by_id, user_id=dbuser.id)
-    user = UserResponse.model_validate(dbuser)
+    user = admin_plans.scoped_user_response(db, dbuser, actor=dbadmin or admin)
     report.user_created(user=user, user_id=dbuser.id, by=admin, user_admin=dbuser.admin)
     AuditLogService.log(
         db,
@@ -125,9 +125,15 @@ def add_user(
 
 
 @router.get("/user/{username}", response_model=UserResponse, responses={403: responses._403, 404: responses._404})
-def get_user(dbuser: UserResponse = Depends(get_validated_user)):
+def get_user(
+    db: Session = Depends(get_db),
+    dbuser: UserResponse = Depends(get_validated_user),
+    admin: Admin = Depends(Admin.get_current),
+):
     """Get user information"""
-    return dbuser
+    return admin_plans.scoped_user_response(
+        db, dbuser, actor=crud.get_admin(db, admin.username) or admin
+    )
 
 
 @router.put("/user/{username}", response_model=UserResponse, responses={400: responses._400, 403: responses._403, 404: responses._404})
@@ -168,7 +174,7 @@ def modify_user(
     old_status = dbuser.status
     dbactor = crud.get_admin(db, admin.username) or admin
     dbuser = crud.update_user(db, dbuser, modified_user, actor=dbactor)
-    user = UserResponse.model_validate(dbuser)
+    user = admin_plans.scoped_user_response(db, dbuser, actor=dbactor)
     new_value = user_audit_state(dbuser)
     audit_action = classify_user_change(previous_value, new_value)
 
@@ -267,7 +273,9 @@ def reset_user_data_usage(
     if dbuser.status in [UserStatus.active, UserStatus.on_hold]:
         bg.add_task(xray.operations.add_user, dbuser=dbuser)
 
-    user = UserResponse.model_validate(dbuser)
+    user = admin_plans.scoped_user_response(
+        db, dbuser, actor=crud.get_admin(db, admin.username) or admin
+    )
     bg.add_task(
         report.user_data_usage_reset, user=user, user_admin=dbuser.admin, by=admin
     )
@@ -285,7 +293,7 @@ def reset_user_data_usage(
     )
 
     logger.info(f'User "{dbuser.username}"\'s usage was reset')
-    return dbuser
+    return user
 
 
 @router.post("/user/{username}/revoke_sub", response_model=UserResponse, responses={403: responses._403, 404: responses._404})
@@ -301,7 +309,9 @@ def revoke_user_subscription(
 
     if dbuser.status in [UserStatus.active, UserStatus.on_hold]:
         bg.add_task(xray.operations.update_user, dbuser=dbuser)
-    user = UserResponse.model_validate(dbuser)
+    user = admin_plans.scoped_user_response(
+        db, dbuser, actor=crud.get_admin(db, admin.username) or admin
+    )
     bg.add_task(
         report.user_subscription_revoked, user=user, user_admin=dbuser.admin, by=admin
     )
@@ -394,7 +404,9 @@ def get_users(
 
     page = offset // limit + 1
     return {
-        "users": users,
+        "users": admin_plans.scoped_user_responses(
+            db, users, actor=dbadmin or admin
+        ),
         "total": count,
         "page": page,
         "page_size": limit,
@@ -540,7 +552,7 @@ def bulk_user_action(
 
     for dbuser, old_status in updated_users:
         db.refresh(dbuser)
-        user = UserResponse.model_validate(dbuser)
+        user = admin_plans.scoped_user_response(db, dbuser, actor=effective_admin)
         if user.status in [UserStatus.active, UserStatus.on_hold]:
             bg.add_task(xray.operations.update_user_by_id, user_id=dbuser.id)
         elif payload.operation != BulkUserOperation.deactivate:
@@ -616,11 +628,17 @@ def get_user_usage(
     start: str = "",
     end: str = "",
     db: Session = Depends(get_db),
+    admin: Admin = Depends(Admin.get_current),
 ):
     """Get users usage"""
     start, end = validate_dates(start, end)
 
-    usages = crud.get_user_usages(db, dbuser, start, end)
+    actor = crud.get_admin(db, admin.username) or admin
+    usages = (
+        crud.get_user_usages(db, dbuser, start, end)
+        if admin_plans.usage_is_visible(db, actor)
+        else None
+    )
 
     return {"usages": usages, "username": dbuser.username}
 
@@ -646,7 +664,9 @@ def active_next_plan(
     if dbuser.status in [UserStatus.active, UserStatus.on_hold]:
         bg.add_task(xray.operations.add_user, dbuser=dbuser)
 
-    user = UserResponse.model_validate(dbuser)
+    user = admin_plans.scoped_user_response(
+        db, dbuser, actor=crud.get_admin(db, admin.username) or admin
+    )
     bg.add_task(
         report.user_data_reset_by_next, user=user, user_admin=dbuser.admin,
     )
@@ -664,7 +684,7 @@ def active_next_plan(
     )
 
     logger.info(f'User "{dbuser.username}"\'s usage was reset by next plan')
-    return dbuser
+    return user
 
 
 @router.get("/users/usage", response_model=UsersUsagesResponse)
@@ -699,15 +719,17 @@ def get_users_usage(
         )
     else:
         selected_admins = owner
-    usages = crud.get_all_users_usages(
-        db=db,
-        start=start,
-        end=end,
-        admin=selected_admins,
-        allowed_inbounds=marzhelp_policy.allowed_inbound_tags(
-            db, crud.get_admin(db, admin.username) or admin
-        ),
-    )
+    usages = None
+    if admin_plans.usage_is_visible(db, actor or admin):
+        usages = crud.get_all_users_usages(
+            db=db,
+            start=start,
+            end=end,
+            admin=selected_admins,
+            allowed_inbounds=marzhelp_policy.allowed_inbound_tags(
+                db, actor or admin
+            ),
+        )
 
     return {"usages": usages}
 
@@ -730,7 +752,9 @@ def set_owner(
     )
     try:
         dbuser = crud.set_owner(db, dbuser, new_admin, commit=False)
-        user = UserResponse.model_validate(dbuser)
+        user = admin_plans.scoped_user_response(
+            db, dbuser, actor=crud.get_admin(db, admin.username) or admin
+        )
         AuditLogService.log(
             db,
             admin,

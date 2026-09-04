@@ -3,16 +3,14 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import exists
 from app import xray
-from app.db import Session, crud, get_db
+from app.db import Session, get_db
 from app.db.models import (
     DeviceLimitIncident,
     DeviceLimitPenaltyStage,
     DeviceLimitSettings,
     DeviceLimitUserState,
     DeviceSlot,
-    AdminHierarchy,
     MarzhelpAdminSettings,
     User,
 )
@@ -36,7 +34,6 @@ from app.models.device_limit import (
     DeviceSlotResponse,
 )
 from app.models.user import UserStatus
-from app.utils import admin_hierarchy
 from app.utils.audit import AuditLogService
 
 
@@ -212,19 +209,9 @@ def list_incidents(
     username: str | None = None,
     unresolved_only: bool = False,
     db: Session = Depends(get_db),
-    admin: Admin = Depends(Admin.get_current),
+    admin: Admin = Depends(Admin.check_sudo_admin),
 ):
     query = db.query(DeviceLimitIncident)
-    dbadmin = crud.get_admin(db, admin.username)
-    if dbadmin is None:
-        return DeviceLimitIncidentList(incidents=[], total=0, offset=offset, limit=limit)
-    if not admin_hierarchy.is_owner(db, dbadmin):
-        query = query.filter(
-            exists().where(
-                (AdminHierarchy.ancestor_id == dbadmin.id)
-                & (AdminHierarchy.descendant_id == DeviceLimitIncident.admin_id)
-            )
-        )
     if username:
         query = query.filter(DeviceLimitIncident.username.ilike(f"%{username.strip()}%"))
     if unresolved_only:
@@ -256,7 +243,7 @@ def list_incidents(
 def user_summary(
     dbuser=Depends(get_validated_user),
     db: Session = Depends(get_db),
-    admin: Admin = Depends(Admin.get_current),
+    admin: Admin = Depends(Admin.check_sudo_admin),
 ):
     settings = _settings(db)
     addresses, sources, _ = engine.live_snapshot(
@@ -308,7 +295,7 @@ def modify_slot(
     request: Request,
     dbuser=Depends(get_validated_user),
     db: Session = Depends(get_db),
-    admin: Admin = Depends(Admin.get_current),
+    admin: Admin = Depends(Admin.check_sudo_admin),
 ):
     slot = (
         db.query(DeviceSlot)
@@ -341,7 +328,7 @@ def reset_strikes(
     request: Request,
     dbuser=Depends(get_validated_user),
     db: Session = Depends(get_db),
-    admin: Admin = Depends(Admin.get_current),
+    admin: Admin = Depends(Admin.check_sudo_admin),
 ):
     state = db.get(DeviceLimitUserState, dbuser.id)
     if state is None:
@@ -384,16 +371,13 @@ def delete_warning(
     incident_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    admin: Admin = Depends(Admin.get_current),
+    admin: Admin = Depends(Admin.check_sudo_admin),
 ):
+    if not admin.is_sudo:
+        raise HTTPException(status_code=403, detail="You're not allowed")
     incident = db.get(DeviceLimitIncident, incident_id)
     if incident is None or incident.event_state != DeviceEventState.warning.value:
         raise HTTPException(status_code=404, detail="Device warning not found")
-    dbadmin = crud.get_admin(db, admin.username)
-    if dbadmin is None or incident.admin_id is None or not admin_hierarchy.admin_in_scope(
-        db, dbadmin, incident.admin_id
-    ):
-        raise HTTPException(status_code=403, detail="You're not allowed")
     user_id = incident.user_id
     username = incident.username
     db.delete(incident)
@@ -431,7 +415,7 @@ def unblock_user(
     request: Request,
     dbuser=Depends(get_validated_user),
     db: Session = Depends(get_db),
-    admin: Admin = Depends(Admin.get_current),
+    admin: Admin = Depends(Admin.check_sudo_admin),
 ):
     state = db.get(DeviceLimitUserState, dbuser.id)
     if state is None:
@@ -441,11 +425,14 @@ def unblock_user(
         PenaltyStatus.temporarily_disabled.value,
         PenaltyStatus.permanently_disabled.value,
     ):
-        dbuser.status = UserStatus.active
-        dbuser.last_status_change = datetime.utcnow()
-        xray.operations.add_user(dbuser)
+        previous_status = state.status_before_penalty
+        if previous_status in (UserStatus.active.value, UserStatus.on_hold.value):
+            dbuser.status = UserStatus(previous_status)
+            dbuser.last_status_change = datetime.utcnow()
+            xray.operations.add_user(dbuser)
     state.penalty_status = PenaltyStatus.clear.value
     state.blocked_until = None
+    state.status_before_penalty = None
     db.query(DeviceLimitIncident).filter(
         DeviceLimitIncident.user_id == dbuser.id,
         DeviceLimitIncident.resolved_at.is_(None),

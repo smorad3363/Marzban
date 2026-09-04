@@ -93,6 +93,8 @@ export const Plans: FC = () => {
   const [archiveTarget, setArchiveTarget] = useState<UserPlan | null>(null);
   const [draft, setDraft] = useState<PlanDraft>(emptyDraft());
   const [newCategoryName, setNewCategoryName] = useState("");
+  const [editingCategoryId, setEditingCategoryId] = useState<number | null>(null);
+  const [editingCategoryName, setEditingCategoryName] = useState("");
   const [usernames, setUsernames] = useState<Record<number, string>>({});
   const account = useQuery<AccountSummary, Error>("account-summary", () => fetch("/account/summary"), { enabled: !getUserIsPending });
   const plans = useQuery<UserPlan[], Error>("user-plans", () => fetch("/user-plans"), { enabled: !getUserIsPending });
@@ -167,6 +169,33 @@ export const Plans: FC = () => {
       onError: (error) => {
         toast({ title: "ساخت دسته‌بندی انجام نشد", description: errorText(error), status: "error", duration: 5000 });
       },
+    }
+  );
+
+  const updateCategory = useMutation(
+    ({ category, name }: { category: PlanCategory; name: string }) => fetch(`/plan-categories/${category.id}`, {
+      method: "PUT",
+      body: { name: name.trim(), description: category.description },
+    }),
+    {
+      onSuccess: () => {
+        setEditingCategoryId(null);
+        setEditingCategoryName("");
+        queryClient.invalidateQueries("plan-categories");
+        toast({ title: "دسته‌بندی ویرایش شد", status: "success", duration: 3000 });
+      },
+      onError: (error) => { toast({ title: "ویرایش دسته‌بندی انجام نشد", description: errorText(error), status: "error", duration: 5000 }); },
+    }
+  );
+
+  const archiveCategory = useMutation(
+    (category: PlanCategory) => fetch(`/plan-categories/${category.id}`, { method: "DELETE" }),
+    {
+      onSuccess: () => {
+        queryClient.invalidateQueries("plan-categories");
+        toast({ title: "دسته‌بندی بایگانی شد", status: "success", duration: 3000 });
+      },
+      onError: (error) => { toast({ title: "بایگانی دسته‌بندی انجام نشد", description: errorText(error), status: "error", duration: 5000 }); },
     }
   );
 
@@ -247,10 +276,37 @@ export const Plans: FC = () => {
             </FormControl>
             <Button minH="40px" isDisabled={!newCategoryName.trim()} isLoading={createCategory.isLoading} onClick={() => createCategory.mutate()}>افزودن دسته</Button>
           </HStack>
-          <HStack mt={4} spacing={2} flexWrap="wrap">
-            {(categories.data || []).map((category) => <Badge key={category.id} colorScheme="purple" px={3} py={1.5}>{category.name} · {category.plan_count}</Badge>)}
+          <Stack mt={4} spacing={2}>
+            {(categories.data || []).map((category) => (
+              <HStack key={category.id} p={2} borderWidth="1px" borderColor="whiteAlpha.200" borderRadius="md" flexWrap="wrap">
+                {editingCategoryId === category.id ? (
+                  <Input flex="1" minW="180px" value={editingCategoryName} maxLength={128} onChange={(event) => setEditingCategoryName(event.target.value)} />
+                ) : (
+                  <Badge colorScheme="purple" px={3} py={1.5}>{category.name} · {category.plan_count}</Badge>
+                )}
+                <HStack ms="auto" spacing={1}>
+                  {editingCategoryId === category.id ? (
+                    <>
+                      <Button size="xs" isDisabled={!editingCategoryName.trim()} isLoading={updateCategory.isLoading} onClick={() => updateCategory.mutate({ category, name: editingCategoryName })}>ذخیره</Button>
+                      <Button size="xs" variant="ghost" onClick={() => setEditingCategoryId(null)}>انصراف</Button>
+                    </>
+                  ) : (
+                    <Button size="xs" variant="ghost" onClick={() => { setEditingCategoryId(category.id); setEditingCategoryName(category.name); }}>ویرایش</Button>
+                  )}
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    colorScheme="red"
+                    isLoading={archiveCategory.isLoading}
+                    onClick={() => category.plan_count > 0
+                      ? toast({ title: "این دسته‌بندی پلن فعال دارد", description: "ابتدا پلن‌های فعال را منتقل یا بایگانی کنید.", status: "warning", duration: 5000 })
+                      : archiveCategory.mutate(category)}
+                  >بایگانی</Button>
+                </HStack>
+              </HStack>
+            ))}
             {!categories.isLoading && (categories.data || []).length === 0 && <Text color="gray.400" fontSize="sm">ابتدا یک دسته‌بندی بسازید.</Text>}
-          </HStack>
+          </Stack>
         </Card>
       )}
       {categories.isError && <Alert status="error" mb={4}><AlertIcon />دسته‌بندی‌ها دریافت نشدند.</Alert>}

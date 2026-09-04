@@ -160,3 +160,7 @@ xray-core
 *-dev.yml
 *-dev.yaml
 *-debug.*
+
+# Local Codex, review, and generated knowledge-graph artifacts
+.codex/
+graphify-out/

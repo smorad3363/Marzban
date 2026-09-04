@@ -12,7 +12,7 @@ export type DashboardOverview = {
   expired_users: number;
   limited_users: number;
   on_hold_users: number;
-  current_used_traffic: number;
+  current_used_traffic: number | null;
   allocated_quota: number;
   new_users: { current: number; previous: number; change_percent: number | null };
   billing_modes: Array<{
@@ -20,7 +20,7 @@ export type DashboardOverview = {
     admin_count: number;
     user_count: number;
     active_users: number;
-    current_used_traffic: number;
+    current_used_traffic: number | null;
     allocated_quota: number;
   }>;
 };

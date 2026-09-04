@@ -65,6 +65,7 @@ import { AccountSummary, UserPlan } from "types/Admin";
 import { User } from "types/User";
 import { formatBytes } from "utils/formatByte";
 import { localizedApiError } from "utils/apiError";
+import useGetUser from "hooks/useGetUser";
 import { BulkUserActions } from "./BulkUserActions";
 import { OnlineBadge } from "./OnlineBadge";
 import { Pagination } from "./Pagination";
@@ -183,11 +184,12 @@ type UsageRingProps = {
 const UsageRing: FC<UsageRingProps> = ({ user, visualState }) => {
   const { t } = useTranslation();
   const visual = visualStatePalette[visualState];
+  const usedTraffic = user.used_traffic ?? 0;
   const isUnlimited = !user.data_limit;
   const percent = isUnlimited
     ? 100
     : Math.min(
-        Math.max((user.used_traffic / Math.max(user.data_limit || 1, 1)) * 100, 0),
+        Math.max((usedTraffic / Math.max(user.data_limit || 1, 1)) * 100, 0),
         100
       );
   const displayValue = isUnlimited ? "∞" : `${Math.round(percent)}%`;
@@ -204,7 +206,7 @@ const UsageRing: FC<UsageRingProps> = ({ user, visualState }) => {
         color={visual.accent}
         trackColor="rgba(148, 163, 184, .12)"
         capIsRound
-        aria-label={`${formatBytes(user.used_traffic)} / ${limitText}`}
+        aria-label={`${formatBytes(usedTraffic)} / ${limitText}`}
         sx={{
           "svg circle:last-of-type": {
             filter: `drop-shadow(0 0 5px ${visual.glow})`,
@@ -540,6 +542,7 @@ type UserCardProps = {
   onOpen: () => void;
   onRenew: () => void;
   readOnly: boolean;
+  isOwner: boolean;
 };
 
 const UserCard: FC<UserCardProps> = ({
@@ -549,6 +552,7 @@ const UserCard: FC<UserCardProps> = ({
   onOpen,
   onRenew,
   readOnly,
+  isOwner,
 }) => {
   const { t, i18n } = useTranslation();
   const reduceMotion = usePrefersReducedMotion();
@@ -602,7 +606,7 @@ const UserCard: FC<UserCardProps> = ({
 
       <Stack spacing={3} p={{ base: 3.5, md: 3 }} pt={{ base: 4, md: 3.5 }} h="full">
         <HStack align="start" justify="space-between" spacing={3} minW={0}>
-          <UsageRing user={user} visualState={visualState} />
+          {user.used_traffic !== null && <UsageRing user={user} visualState={visualState} />}
 
           <Stack flex="1" minW={0} spacing={2} align="stretch">
             <HStack justify="space-between" align="start" gap={2} minW={0}>
@@ -639,7 +643,7 @@ const UserCard: FC<UserCardProps> = ({
             </HStack>
 
             <HStack spacing={2} flexWrap="wrap" minW={0}>
-              <Text
+              {user.used_traffic !== null && <Text
                 dir="ltr"
                 textAlign="start"
                 fontFamily="mono"
@@ -650,7 +654,7 @@ const UserCard: FC<UserCardProps> = ({
                 sx={{ unicodeBidi: "isolate" }}
               >
                 {formatBytes(user.used_traffic)} / {trafficLimit}
-              </Text>
+              </Text>}
               <Tooltip label={t("userDialog.concurrentUserLimit")} placement="top">
                 <HStack
                   dir="ltr"
@@ -790,7 +794,7 @@ const UserCard: FC<UserCardProps> = ({
           wrap="wrap"
         >
           <ActionButtons user={user} onEdit={onOpen} onRenew={onRenew} accent={visual.accent} readOnly={readOnly} />
-          {!readOnly && <UserDeviceLimit user={user} />}
+          {!readOnly && isOwner && <UserDeviceLimit user={user} />}
         </Flex>
       </Stack>
     </Card>
@@ -801,6 +805,8 @@ const EmptySection: FC<{ isFiltered: boolean; readOnly: boolean }> = ({ isFilter
   const { onCreateUser } = useDashboard();
   const { t } = useTranslation();
   const account = useQuery<AccountSummary, Error>("account-summary", () => fetch("/account/summary"));
+  const { userData, getUserIsSuccess } = useGetUser();
+  const isOwner = getUserIsSuccess && (userData.is_sudo || userData.role === "OWNER");
 
   return (
     <VStack px={5} py={12} spacing={4} textAlign="center">
@@ -847,6 +853,8 @@ export const UsersTable: FC<UsersTableProps> = (props) => {
   const queryClient = useQueryClient();
   const renewalModal = useDisclosure();
   const account = useQuery<AccountSummary, Error>("account-summary", () => fetch("/account/summary"));
+  const { userData, getUserIsSuccess } = useGetUser();
+  const isOwner = getUserIsSuccess && (userData.is_sudo || userData.role === "OWNER");
   const readOnly = account.data?.account_status === "SUSPENDED";
   const [renewalUser, setRenewalUser] = useState<User | null>(null);
   const [renewalPlanId, setRenewalPlanId] = useState("");
@@ -966,6 +974,7 @@ export const UsersTable: FC<UsersTableProps> = (props) => {
                 selected={selectedUsernames.has(user.username)}
                 onSelectedChange={(selected) => setUserSelected(user.username, selected)}
                 readOnly={readOnly}
+                isOwner={isOwner}
                 onOpen={() => onEditingUser(user)}
                 onRenew={() => {
                   setRenewalUser(user);

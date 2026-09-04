@@ -21,6 +21,7 @@ import {
   ModalBody,
   ModalCloseButton,
   ModalContent,
+  ModalFooter,
   ModalHeader,
   ModalOverlay,
   Popover,
@@ -50,9 +51,9 @@ import {
   proxyFingerprint,
   proxyHostSecurity,
 } from "constants/Proxies";
-import { useHosts } from "contexts/HostsContext";
+import { HostImpactAction, HostsSchema, HostUpdateImpact, useHosts } from "contexts/HostsContext";
 import { motion } from "framer-motion";
-import { FC, useEffect, useState } from "react";
+import { FC, Fragment, useEffect, useState } from "react";
 import {
   Controller,
   FormProvider,
@@ -63,6 +64,7 @@ import {
 import { Trans, useTranslation } from "react-i18next";
 import "slick-carousel/slick/slick-theme.css";
 import "slick-carousel/slick/slick.css";
+import { localizedApiError } from "utils/apiError";
 import { z } from "zod";
 import { useDashboard } from "../contexts/DashboardContext";
 import { DeleteIcon } from "./DeleteUserModal";
@@ -128,6 +130,7 @@ const hostsSchema = z.record(
   z.string().min(1),
   z.array(
     z.object({
+      id: z.number().int().positive().optional(),
       remark: z.string().min(1, "Remark is required"),
       address: z.string().min(1, "Address is required"),
       port: z
@@ -1201,10 +1204,20 @@ const AccordionInbound: FC<AccordionInboundType> = ({
 export const HostsDialog: FC = () => {
   const { isEditingHosts, onEditingHosts, refetchUsers, inbounds } =
     useDashboard();
-  const { isLoading, hosts, fetchHosts, isPostLoading, setHosts } = useHosts();
+  const {
+    isLoading,
+    hosts,
+    fetchHosts,
+    isPostLoading,
+    isImpactLoading,
+    previewHosts,
+    setHosts,
+  } = useHosts();
   const toast = useToast();
   const { t } = useTranslation();
   const [openAccordions, setOpenAccordions] = useState<any>({});
+  const [pendingHosts, setPendingHosts] = useState<HostsSchema | null>(null);
+  const [impact, setImpact] = useState<HostUpdateImpact | null>(null);
 
   useEffect(() => {
     if (isEditingHosts) fetchHosts();
@@ -1223,8 +1236,8 @@ export const HostsDialog: FC = () => {
     setOpenAccordions({});
     onEditingHosts(false);
   };
-  const handleFormSubmit = (hosts: z.infer<typeof hostsSchema>) => {
-    setHosts(hosts)
+  const saveHosts = (hosts: HostsSchema, action?: HostImpactAction) => {
+    setHosts(hosts, action)
       .then(() => {
         toast({
           title: t("hostsDialog.savedSuccess"),
@@ -1234,29 +1247,54 @@ export const HostsDialog: FC = () => {
           duration: 3000,
         });
         refetchUsers();
+        fetchHosts();
+        setPendingHosts(null);
+        setImpact(null);
       })
       .catch((err) => {
-        if (err?.response?.status === 409 || err?.response?.status === 400) {
-          toast({
-            title: err.response?._data?.detail,
-            status: "error",
-            isClosable: true,
-            position: "top",
-            duration: 3000,
-          });
-        }
-        if (err?.response?.status === 422) {
-          Object.keys(err.response._data.detail).forEach((key) => {
-            toast({
-              title: err.response._data.detail[key] + " (" + key + ")",
-              status: "error",
-              isClosable: true,
-              position: "top",
-              duration: 3000,
-            });
-          });
-        }
+        toast({
+          title: localizedApiError(err),
+          status: "error",
+          isClosable: true,
+          position: "top",
+          duration: 3000,
+        });
       });
+  };
+
+  const handleFormSubmit = async (values: z.infer<typeof hostsSchema>) => {
+    try {
+      const preview = await previewHosts(values);
+      if (preview.invalid_plan_ids.length) {
+        toast({
+          title: "این تغییر یک یا چند پلن را بدون اتصال معتبر باقی می‌گذارد.",
+          description: `پلن‌های نیازمند Host جایگزین: ${preview.invalid_plan_ids.join("، ")}`,
+          status: "error",
+          isClosable: true,
+          position: "top",
+          duration: 5000,
+        });
+        return;
+      }
+      if (preview.affected_plan_count || preview.active_user_count) {
+        setPendingHosts(values);
+        setImpact(preview);
+        return;
+      }
+      saveHosts(values);
+    } catch (err: any) {
+      toast({
+        title: localizedApiError(err),
+        status: "error",
+        isClosable: true,
+        position: "top",
+        duration: 4000,
+      });
+    }
+  };
+
+  const confirmImpact = (action: HostImpactAction) => {
+    if (pendingHosts) saveHosts(pendingHosts, action);
   };
 
   const toggleAccordion = (index: number) => {
@@ -1268,6 +1306,7 @@ export const HostsDialog: FC = () => {
   };
 
   return (
+    <Fragment>
     <Modal isOpen={isEditingHosts} onClose={onClose} scrollBehavior="inside">
       <ModalOverlay bg="blackAlpha.300" backdropFilter="blur(10px)" />
       <ModalContent mx="3" w={{ base: "calc(100% - 24px)", md: "fit-content" }} maxW="3xl">
@@ -1318,8 +1357,8 @@ export const HostsDialog: FC = () => {
                   colorScheme="primary"
                   size="sm"
                   px={5}
-                  isLoading={isPostLoading}
-                  disabled={isPostLoading}
+                  isLoading={isPostLoading || isImpactLoading}
+                  disabled={isPostLoading || isImpactLoading}
                 >
                   {t("hostsDialog.apply")}
                 </Button>
@@ -1329,5 +1368,36 @@ export const HostsDialog: FC = () => {
         </ModalBody>
       </ModalContent>
     </Modal>
+    <Modal isOpen={Boolean(impact)} onClose={() => { setImpact(null); setPendingHosts(null); }} isCentered>
+      <ModalOverlay bg="blackAlpha.500" />
+      <ModalContent mx={3} dir="rtl" maxW="lg">
+        <ModalHeader fontSize="lg">اثر تغییر Host روی پلن‌ها و کاربران</ModalHeader>
+        <ModalCloseButton insetInlineStart={3} insetInlineEnd="auto" />
+        <ModalBody>
+          <Text mb={4}>
+            این تغییر روی <b>{impact?.affected_plan_count || 0} پلن</b>، <b>{impact?.affected_plan_version_count || 0} نسخه پلن</b> و <b>{impact?.active_user_count || 0} کاربر فعال</b> اثر می‌گذارد. روش اعمال را انتخاب کنید.
+          </Text>
+          <VStack align="stretch" spacing={3}>
+            <Button h="auto" py={3} whiteSpace="normal" onClick={() => confirmImpact("apply_current")} isLoading={isPostLoading}>
+              اعمال روی پلن‌ها و کاربران فعلی
+            </Button>
+            <Text fontSize="sm" color="gray.400">network revision ساخته می‌شود؛ قیمت و سابقه خرید تغییر نمی‌کند.</Text>
+            <Button h="auto" py={3} whiteSpace="normal" variant="outline" onClick={() => confirmImpact("future_only")} isLoading={isPostLoading}>
+              فقط کاربران جدید یا تمدید بعدی
+            </Button>
+            <Text fontSize="sm" color="gray.400">کاربران فعلی snapshot قبلی را حفظ می‌کنند.</Text>
+            {Boolean(impact?.removed_host_ids.length) && (
+              <Button h="auto" py={3} whiteSpace="normal" colorScheme="orange" variant="outline" onClick={() => confirmImpact("detach")} isLoading={isPostLoading}>
+                حذف Host از پلن‌های مرتبط و همگام‌سازی کاربران فعلی
+              </Button>
+            )}
+          </VStack>
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="ghost" onClick={() => { setImpact(null); setPendingHosts(null); }} disabled={isPostLoading}>لغو عملیات</Button>
+        </ModalFooter>
+      </ModalContent>
+    </Modal>
+    </Fragment>
   );
 };

@@ -54,9 +54,9 @@ export type User = {
   data_limit: number | null;
   data_limit_reset_strategy: DataLimitResetStrategy;
   on_hold_expire_duration: number | null;
-  lifetime_used_traffic: number;
+  lifetime_used_traffic: number | null;
   username: string;
-  used_traffic: number;
+  used_traffic: number | null;
   status: Status;
   links: string[];
   subscription_url: string;

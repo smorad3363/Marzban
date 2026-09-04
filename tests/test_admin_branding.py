@@ -16,13 +16,15 @@ def test_admin_branding_theme_logo_upload_and_reset(tmp_path, monkeypatch):
     Base.metadata.create_all(engine)
     db = sessionmaker(bind=engine, expire_on_commit=False)()
     row = Admin(username="brand-admin", hashed_password="x")
-    db.add(row)
+    other = Admin(username="other-admin", hashed_password="x")
+    db.add_all([row, other])
     db.commit()
     actor = APIAdmin(username=row.username, is_sudo=False)
     monkeypatch.setattr(branding, "BRANDING_LOGO_DIRECTORY", str(tmp_path / "logos"))
 
     changed = branding.update_branding(BrandingUpdate(dashboard_theme="black_gold"), db, actor)
     assert changed.dashboard_theme == "black_gold"
+    assert other.dashboard_theme == "heisenberg"
 
     uploaded = asyncio.run(
         branding.upload_logo(
@@ -33,6 +35,7 @@ def test_admin_branding_theme_logo_upload_and_reset(tmp_path, monkeypatch):
     )
     assert uploaded.logo_url == f"/api/branding/logo/{row.id}"
     assert (tmp_path / "logos" / f"admin-{row.id}.png").is_file()
+    assert other.logo_filename is None
 
     removed = branding.remove_logo(db, actor)
     assert removed.logo_url is None

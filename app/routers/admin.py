@@ -185,7 +185,7 @@ def admin_token(
 
     authenticated_admin = validate_admin(db, form_data.username, form_data.password)
     if not authenticated_admin:
-        report.login(form_data.username, form_data.password, client_ip, False)
+        report.login(form_data.username, client_ip, False)
         AuditLogService.log(
             db,
             form_data.username,
@@ -203,7 +203,7 @@ def admin_token(
         )
 
     if client_ip not in LOGIN_NOTIFY_WHITE_LIST:
-        report.login(form_data.username, "🔒", client_ip, True)
+        report.login(form_data.username, client_ip, True)
 
     dbadmin = crud.get_admin(db, authenticated_admin.username)
     AuditLogService.log(
@@ -949,6 +949,82 @@ def modify_managed_admin(
         )
 
     current_settings = db.get(MarzhelpAdminSettings, dbadmin.id)
+    if (
+        actor is not None
+        and actor.id == dbadmin.id
+        and not admin_hierarchy.is_owner(db, actor)
+        and current_settings is not None
+    ):
+        current_contract = managed_admin_response(db, dbadmin, current_settings)
+        forbidden_changes = []
+        fields_set = modified_admin.model_fields_set
+        if (
+            "policy" in fields_set
+            and modified_admin.policy.model_dump(mode="json")
+            != current_contract.policy.model_dump(mode="json")
+        ):
+            forbidden_changes.append("policy")
+        for field in (
+            "plan_category_ids",
+            "user_creation_mode",
+            "can_manage_plans",
+            "can_create_admins",
+            "can_delegate_admin_creation",
+            "can_create_allocated_children",
+            "admin_creation_limit",
+            "plan_prices",
+        ):
+            if field not in fields_set:
+                continue
+            requested = getattr(modified_admin, field)
+            current = getattr(current_contract, field)
+            if field == "plan_category_ids":
+                requested = sorted(requested or [])
+                current = sorted(current or [])
+            elif field == "plan_prices":
+                requested = sorted(
+                    (item.plan_id, item.price_toman) for item in (requested or [])
+                )
+                current = sorted(
+                    (item.plan_id, item.price_toman) for item in (current or [])
+                )
+            if requested != current:
+                forbidden_changes.append(field)
+        if forbidden_changes:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "self_commercial_edit_forbidden",
+                    "message": "Commercial and delegated access are controlled by the parent",
+                    "fields": sorted(forbidden_changes),
+                },
+            )
+        previous_value = admin_audit_state(dbadmin, current_contract.policy)
+        dbadmin = crud.update_admin(db, dbadmin, modified_admin, commit=False)
+        db.commit()
+        db.refresh(dbadmin)
+        db.refresh(current_settings)
+        response = managed_admin_response(
+            db,
+            dbadmin,
+            current_settings,
+            db.query(func.count(User.id)).filter(User.admin_id == dbadmin.id).scalar() or 0,
+            marzhelp_policy.capacity_used(db, dbadmin.id),
+        )
+        AuditLogService.log(
+            db,
+            current_admin,
+            "admin.update",
+            "admin",
+            f"Admin {current_admin.username} updated managed admin {dbadmin.username}",
+            target_id=dbadmin.id,
+            target_name=dbadmin.username,
+            previous_value=previous_value,
+            new_value=admin_audit_state(dbadmin, response.policy),
+            details={"password_changed": modified_admin.password is not None},
+            request=request,
+        )
+        return response
     previous_calculation_mode = (
         current_settings.calculate_volume if current_settings is not None else None
     )

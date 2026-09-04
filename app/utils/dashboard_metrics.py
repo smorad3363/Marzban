@@ -37,10 +37,16 @@ def _week_bounds(now: datetime, offset_minutes: int) -> tuple[datetime, datetime
     return previous, current, following
 
 
-def _visible_users(db: Session, actor: Admin) -> Query:
+def _visible_users(
+    db: Session,
+    actor: Admin,
+    *,
+    hierarchy_on: bool,
+    actor_is_owner: bool,
+    allowed_inbounds: set[str] | None,
+) -> Query:
     query = db.query(User)
-    hierarchy_on = admin_hierarchy.hierarchy_enabled(db)
-    if hierarchy_on and not admin_hierarchy.is_owner(db, actor):
+    if hierarchy_on and not actor_is_owner:
         query = query.filter(
             exists().where(
                 and_(
@@ -53,13 +59,19 @@ def _visible_users(db: Session, actor: Admin) -> Query:
         query = query.filter(User.admin_id == actor.id)
     return crud.apply_inbound_access_filter(
         query,
-        marzhelp_policy.allowed_inbound_tags(db, actor),
+        allowed_inbounds,
     )
 
 
-def _visible_admins(db: Session, actor: Admin) -> Query:
+def _visible_admins(
+    db: Session,
+    actor: Admin,
+    *,
+    hierarchy_on: bool,
+    actor_is_owner: bool,
+) -> Query:
     query = db.query(Admin)
-    if admin_hierarchy.hierarchy_enabled(db) and not admin_hierarchy.is_owner(db, actor):
+    if hierarchy_on and not actor_is_owner:
         query = query.filter(
             exists().where(
                 and_(
@@ -68,7 +80,7 @@ def _visible_admins(db: Session, actor: Admin) -> Query:
                 )
             )
         )
-    elif not admin_hierarchy.hierarchy_enabled(db) and not actor.is_sudo:
+    elif not hierarchy_on and not actor.is_sudo:
         query = query.filter(Admin.id == actor.id)
     return query
 
@@ -89,7 +101,34 @@ def overview(
     previous_week, current_week, next_week = _week_bounds(
         normalized_now, timezone_offset_minutes
     )
-    visible = _visible_users(db, actor)
+    hierarchy_on = admin_hierarchy.hierarchy_enabled(db)
+    actor_is_owner = (
+        bool(actor.is_sudo)
+        if not hierarchy_on
+        else (
+            admin_hierarchy.role_code(actor) == admin_hierarchy.OWNER
+            and actor.id == admin_hierarchy.owner_id(db)
+        )
+    )
+    allowed_inbounds = marzhelp_policy.allowed_inbound_tags(db, actor)
+    visible = _visible_users(
+        db,
+        actor,
+        hierarchy_on=hierarchy_on,
+        actor_is_owner=actor_is_owner,
+        allowed_inbounds=allowed_inbounds,
+    )
+    actor_billing_mode = (
+        db.query(MarzhelpAdminSettings.billing_mode)
+        .filter(MarzhelpAdminSettings.admin_id == actor.id)
+        .scalar()
+    )
+    usage_visible = bool(
+        actor_is_owner
+        or actor_billing_mode is None
+        or BillingMode(actor_billing_mode or BillingMode.LEGACY_COMPAT.value)
+        not in {BillingMode.SEAT_CREDIT, BillingMode.USER_CREDIT}
+    )
     aggregate = visible.with_entities(
         func.count(User.id),
         func.coalesce(func.sum(case((User.status == UserStatus.active, 1), else_=0)), 0),
@@ -123,7 +162,12 @@ def overview(
 
     mode_expression = func.coalesce(MarzhelpAdminSettings.billing_mode, BillingMode.LEGACY_COMPAT.value)
     admin_rows = (
-        _visible_admins(db, actor)
+        _visible_admins(
+            db,
+            actor,
+            hierarchy_on=hierarchy_on,
+            actor_is_owner=actor_is_owner,
+        )
         .join(MarzhelpAdminSettings, MarzhelpAdminSettings.admin_id == Admin.id)
         .with_entities(mode_expression.label("mode"), func.count(Admin.id))
         .group_by(mode_expression)
@@ -132,7 +176,13 @@ def overview(
     admin_counts = {str(mode): int(count) for mode, count in admin_rows}
 
     user_rows = (
-        _visible_users(db, actor)
+        _visible_users(
+            db,
+            actor,
+            hierarchy_on=hierarchy_on,
+            actor_is_owner=actor_is_owner,
+            allowed_inbounds=allowed_inbounds,
+        )
         .join(MarzhelpAdminSettings, MarzhelpAdminSettings.admin_id == User.admin_id)
         .with_entities(
             mode_expression.label("mode"),
@@ -170,7 +220,7 @@ def overview(
         limited_users=int(aggregate[4]),
         on_hold_users=int(aggregate[5]),
         online_users=int(aggregate[6]),
-        current_used_traffic=int(aggregate[7]),
+        current_used_traffic=int(aggregate[7]) if usage_visible else None,
         allocated_quota=int(aggregate[8]),
         new_users=DashboardWeekTrend(
             current=current_new,
@@ -183,7 +233,11 @@ def overview(
                 admin_count=admin_counts.get(mode, 0),
                 user_count=user_by_mode.get(mode, (0, 0, 0, 0))[0],
                 active_users=user_by_mode.get(mode, (0, 0, 0, 0))[1],
-                current_used_traffic=user_by_mode.get(mode, (0, 0, 0, 0))[2],
+                current_used_traffic=(
+                    user_by_mode.get(mode, (0, 0, 0, 0))[2]
+                    if usage_visible
+                    else None
+                ),
                 allocated_quota=user_by_mode.get(mode, (0, 0, 0, 0))[3],
             )
             for mode in MODES

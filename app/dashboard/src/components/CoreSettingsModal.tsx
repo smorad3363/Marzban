@@ -39,6 +39,7 @@ import { useMutation } from "react-query";
 import { ReadyState } from "react-use-websocket";
 import { useWebSocket } from "react-use-websocket/dist/lib/use-websocket";
 import { getAuthToken } from "utils/authStorage";
+import { localizedApiError } from "utils/apiError";
 import { Icon } from "./Icon";
 import { JsonEditor } from "./JsonEditor";
 import "./JsonEditor/themes.js";
@@ -210,15 +211,8 @@ const CoreSettingModalContent: FC = () => {
         });
       })
       .catch((e) => {
-        let message = t("core.generalErrorMessage");
-        if (typeof e.response._data.detail === "object")
-          message =
-            e.response._data.detail[Object.keys(e.response._data.detail)[0]];
-        if (typeof e.response._data.detail === "string")
-          message = e.response._data.detail;
-
         toast({
-          title: message,
+          title: localizedApiError(e),
           status: "error",
           isClosable: true,
           position: "top",

@@ -1407,9 +1407,9 @@ class ProxyInbound(Base):
 
 class ProxyHost(Base):
     __tablename__ = "hosts"
-    # __table_args__ = (
-    #     UniqueConstraint('inbound_tag', 'remark'),
-    # )
+    __table_args__ = (
+        Index("ix_hosts_inbound_legacy_id", "inbound_tag", "is_legacy", "id"),
+    )
 
     id = Column(Integer, primary_key=True)
     remark = Column(String(256), unique=False, nullable=False)
@@ -1441,6 +1441,9 @@ class ProxyHost(Base):
 
     inbound_tag = Column(String(256), ForeignKey("inbounds.tag"), nullable=False)
     inbound = relationship("ProxyInbound", back_populates="hosts")
+    # Future-only network revisions keep historical User snapshots routable while
+    # hiding retired Hosts from normal editing and new Plan selection.
+    is_legacy = Column(Boolean, nullable=False, default=False, server_default="0")
     allowinsecure = Column(Boolean, nullable=True)
     is_disabled = Column(Boolean, nullable=True, default=False)
     mux_enable = Column(Boolean, nullable=False, default=False, server_default='0')

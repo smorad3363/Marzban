@@ -359,10 +359,10 @@ def charge_plan_purchase(
         )
 
 
-def settle_used_traffic(db: Session, usage_by_admin: dict[int, int]) -> None:
+def settle_used_traffic(db: Session, usage_by_admin: dict[int, int]) -> set[int]:
     usage_by_admin = {int(k): int(v) for k, v in usage_by_admin.items() if int(v) > 0}
     if not usage_by_admin:
-        return
+        return set()
     relevant_ids = set(usage_by_admin)
     relevant_ids.update(
         row[0]
@@ -394,7 +394,7 @@ def settle_used_traffic(db: Session, usage_by_admin: dict[int, int]) -> None:
             billable[current.id] += byte_count
             current = admins.get(current.parent_admin_id)
     if not billable:
-        return
+        return set()
 
     involved = set(billable)
     for admin_id in billable:
@@ -454,3 +454,41 @@ def settle_used_traffic(db: Session, usage_by_admin: dict[int, int]) -> None:
             ledger.delta_toman = int(ledger.delta_toman) + deltas[admin_id]
             ledger.balance_after = after
             ledger.details = details
+    crossed = {
+        admin_id
+        for admin_id in billable
+        if int(locked[admin_id].money_balance_toman or 0) <= 0
+        and locked[admin_id].account_status_id
+        == admin_hierarchy.ACCOUNT_STATUS_IDS[admin_hierarchy.ACTIVE]
+    }
+    if not crossed:
+        return set()
+    covered = {
+        descendant_id
+        for ancestor_id, descendant_id in db.query(
+            AdminHierarchy.ancestor_id, AdminHierarchy.descendant_id
+        )
+        .filter(
+            AdminHierarchy.ancestor_id.in_(sorted(crossed)),
+            AdminHierarchy.descendant_id.in_(sorted(crossed)),
+            AdminHierarchy.depth > 0,
+        )
+        .all()
+    }
+    owner = admins.get(admin_hierarchy.owner_id(db))
+    if owner is None:
+        raise admin_hierarchy.HierarchyError(
+            "owner_missing", "Owner is required for prepaid usage suspension"
+        )
+    suspended: set[int] = set()
+    for admin_id in sorted(crossed - covered):
+        admin_hierarchy.suspend_admin(
+            db,
+            actor=owner,
+            target=admins[admin_id],
+            reason_id=2,
+            include_subtree=True,
+            commit=False,
+        )
+        suspended.add(admin_id)
+    return suspended

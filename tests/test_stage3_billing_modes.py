@@ -25,7 +25,16 @@ from app.db.models import (
     UserUsageResetLogs,
 )
 from app.models.user import UserStatus
-from app.utils import admin_billing, admin_hierarchy, billing_service, marzhelp_policy
+from app.models import user as user_models
+from app.utils import (
+    admin_billing,
+    admin_hierarchy,
+    admin_plans,
+    billing_service,
+    dashboard_metrics,
+    marzhelp_policy,
+    money_billing,
+)
 
 
 def _seed(db):
@@ -142,6 +151,61 @@ def test_used_traffic_is_derived_incrementally_and_reset_is_not_duplicate(db):
     db.commit()
     assert admin_hierarchy.own_credit_spend(db, settings) == 15
     assert admin_hierarchy.own_credit_spend(db, settings) == 15
+
+
+def test_reseller_usage_price_respects_parent_floor_and_existing_child_prices(db):
+    _, parent, _ = _seed(db)
+    parent_settings = db.get(MarzhelpAdminSettings, parent.id)
+    parent_settings.billing_mode = "USED_TRAFFIC"
+    parent_settings.used_traffic_price_per_gib_toman = 50_000
+    reseller = Admin(
+        username="stage3-reseller",
+        hashed_password="x",
+        parent_admin_id=parent.id,
+    )
+    db.add(reseller)
+    db.flush()
+    db.add(
+        MarzhelpAdminSettings(
+            admin_id=reseller.id,
+            billing_mode="USED_TRAFFIC",
+            money_billing_enabled=True,
+            used_traffic_price_per_gib_toman=60_000,
+        )
+    )
+    db.commit()
+
+    with pytest.raises(admin_hierarchy.HierarchyError) as below_floor:
+        money_billing.validate_child_usage_price(
+            db, parent=parent, child_price_per_gib_toman=49_999
+        )
+    assert below_floor.value.code == "usage_price_below_parent"
+    money_billing.validate_child_usage_price(
+        db, parent=parent, child_price_per_gib_toman=50_000
+    )
+    with pytest.raises(admin_hierarchy.HierarchyError) as above_child:
+        money_billing.validate_existing_usage_resale_floor(
+            db, admin=parent, new_price_per_gib_toman=60_001
+        )
+    assert above_child.value.code == "usage_price_above_child_resale"
+
+
+@pytest.mark.parametrize("mode", ["SEAT_CREDIT", "USER_CREDIT"])
+def test_non_traffic_billing_modes_hide_usage_in_api_and_dashboard(db, mode, monkeypatch):
+    _, child, user = _seed(db)
+    settings = db.get(MarzhelpAdminSettings, child.id)
+    settings.billing_mode = mode
+    db.add(UserUsageResetLogs(user_id=user.id, used_traffic_at_reset=5))
+    db.commit()
+    monkeypatch.setattr(user_models, "create_subscription_token", lambda username: "token")
+
+    response = admin_plans.scoped_user_response(db, user, actor=child)
+    overview = dashboard_metrics.overview(db, child, timezone_offset_minutes=0)
+    assert response.used_traffic is None
+    assert response.lifetime_used_traffic is None
+    assert response.reset_history == []
+    assert overview.current_used_traffic is None
+    assert all(item.current_used_traffic is None for item in overview.billing_modes)
 
 
 def test_allocated_strategy_charges_create_and_positive_increase_only():

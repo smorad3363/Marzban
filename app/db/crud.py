@@ -25,6 +25,7 @@ from app.db.models import (
     AdminRole,
     AdminUserPlanAccess,
     AdminUsageLogs,
+    DeviceLimitUserState,
     MarzhelpAdminSettings,
     MarzhelpAdminInboundPermission,
     MarzhelpAdminSubscriptionModePermission,
@@ -106,7 +107,7 @@ def get_or_create_inbound(db: Session, inbound_tag: str) -> ProxyInbound:
     return inbound
 
 
-def get_hosts(db: Session, inbound_tag: str) -> List[ProxyHost]:
+def get_hosts(db: Session, inbound_tag: str, *, include_legacy: bool = True) -> List[ProxyHost]:
     """
     Retrieves hosts for a given inbound tag.
 
@@ -118,7 +119,10 @@ def get_hosts(db: Session, inbound_tag: str) -> List[ProxyHost]:
         List[ProxyHost]: List of hosts for the inbound.
     """
     inbound = get_or_create_inbound(db, inbound_tag)
-    return inbound.hosts
+    query = db.query(ProxyHost).filter(ProxyHost.inbound_tag == inbound.tag)
+    if not include_legacy:
+        query = query.filter(ProxyHost.is_legacy.is_(False))
+    return query.order_by(ProxyHost.id).all()
 
 
 def add_host(db: Session, inbound_tag: str, host: ProxyHostModify) -> List[ProxyHost]:
@@ -166,28 +170,34 @@ def update_hosts(db: Session, inbound_tag: str, modified_hosts: List[ProxyHostMo
         List[ProxyHost]: Updated list of hosts for the inbound.
     """
     inbound = get_or_create_inbound(db, inbound_tag)
-    inbound.hosts = [
-        ProxyHost(
-            remark=host.remark,
-            address=host.address,
-            port=host.port,
-            path=host.path,
-            sni=host.sni,
-            host=host.host,
-            inbound=inbound,
-            security=host.security,
-            alpn=host.alpn,
-            fingerprint=host.fingerprint,
-            allowinsecure=host.allowinsecure,
-            is_disabled=host.is_disabled,
-            mux_enable=host.mux_enable,
-            fragment_setting=host.fragment_setting,
-            noise_setting=host.noise_setting,
-            random_user_agent=host.random_user_agent,
-            use_sni_as_host=host.use_sni_as_host,
-        ) for host in modified_hosts
-    ]
-    db.commit()
+    existing_by_id = {host.id: host for host in inbound.hosts if not host.is_legacy}
+    retained_ids: set[int] = set()
+    created: list[tuple[ProxyHostModify, ProxyHost]] = []
+    fields = (
+        "remark", "address", "port", "path", "sni", "host", "security", "alpn",
+        "fingerprint", "allowinsecure", "is_disabled", "mux_enable",
+        "fragment_setting", "noise_setting", "random_user_agent", "use_sni_as_host",
+    )
+    for modified in modified_hosts:
+        if modified.id is not None:
+            dbhost = existing_by_id.get(modified.id)
+            if dbhost is None:
+                raise ValueError(f"Host {modified.id} does not belong to inbound {inbound_tag}")
+            if modified.id in retained_ids:
+                raise ValueError(f"Host {modified.id} is duplicated")
+            retained_ids.add(modified.id)
+        else:
+            dbhost = ProxyHost(inbound=inbound)
+            db.add(dbhost)
+            created.append((modified, dbhost))
+        for field in fields:
+            setattr(dbhost, field, getattr(modified, field))
+    for host_id, dbhost in existing_by_id.items():
+        if host_id not in retained_ids:
+            db.delete(dbhost)
+    db.flush()
+    for modified, dbhost in created:
+        modified.id = dbhost.id
     db.refresh(inbound)
     return inbound.hosts
 
@@ -607,7 +617,10 @@ def update_user(
             == UserStatus.disabled.value
             and device_limit_state is not None
             and device_limit_state.penalty_status
-            == PenaltyStatus.temporarily_disabled.value
+            in {
+                PenaltyStatus.temporarily_disabled.value,
+                PenaltyStatus.permanently_disabled.value,
+            }
         ):
             # An explicit disable during a temporary device penalty is an
             # operator lock, not a state the penalty timer may undo.
@@ -882,7 +895,21 @@ def activate_all_disabled_users(db: Session, admin: Optional[Admin] = None):
         and_(
             User.status == UserStatus.disabled, User.expire.is_(
                 None), User.on_hold_expire_duration.isnot(None), User.online_at.is_(None)
-        ))
+        )
+    )
+    active_penalty = exists().where(
+        and_(
+            DeviceLimitUserState.user_id == User.id,
+            DeviceLimitUserState.penalty_status.in_(
+                (
+                    PenaltyStatus.temporarily_disabled.value,
+                    PenaltyStatus.permanently_disabled.value,
+                )
+            ),
+        )
+    )
+    query_for_active_users = query_for_active_users.filter(~active_penalty)
+    query_for_on_hold_users = query_for_on_hold_users.filter(~active_penalty)
     if admin:
         query_for_active_users = query_for_active_users.filter(User.admin == admin)
         query_for_on_hold_users = query_for_on_hold_users.filter(User.admin == admin)
@@ -1171,10 +1198,12 @@ def update_admin(
     if modified_admin.password is not None and dbadmin.hashed_password != modified_admin.hashed_password:
         dbadmin.hashed_password = modified_admin.hashed_password
         dbadmin.password_reset_at = datetime.utcnow()
-    dbadmin.telegram_id = modified_admin.telegram_id
+    if "telegram_id" in modified_admin.model_fields_set:
+        dbadmin.telegram_id = modified_admin.telegram_id
     if "phone" in modified_admin.model_fields_set:
         dbadmin.phone = modified_admin.phone
-    dbadmin.discord_webhook = modified_admin.discord_webhook
+    if "discord_webhook" in modified_admin.model_fields_set:
+        dbadmin.discord_webhook = modified_admin.discord_webhook
 
     if commit:
         db.commit()
@@ -1451,7 +1480,7 @@ def get_admins(db: Session,
     Returns:
         List[Admin]: A list of admin objects.
     """
-    query = db.query(Admin).order_by(Admin.username.asc())
+    query = db.query(Admin).order_by(Admin.created_at.desc(), Admin.id.desc())
     if scope_admin_id is not None:
         query = query.filter(
             exists().where(
@@ -1514,7 +1543,7 @@ def get_admins_with_count(
             )
         )
     total = query.count()
-    admins = query.order_by(Admin.username.asc()).offset(offset).limit(limit).all()
+    admins = query.order_by(Admin.created_at.desc(), Admin.id.desc()).offset(offset).limit(limit).all()
     return admins, total
 
 

@@ -15,7 +15,22 @@ const usersTable = read("src/components/UsersTable.tsx");
 const deviceLimits = read("src/pages/DeviceLimits.tsx");
 const auditLogs = read("src/pages/AuditLogs.tsx");
 const header = read("src/components/Header.tsx");
+const hostsDialog = read("src/components/HostsDialog.tsx");
+const hostsContext = read("src/contexts/HostsContext.tsx");
 const http = read("src/service/http.ts");
+const apiError = read("src/utils/apiError.ts");
+const toastHandler = read("src/utils/toastHandler.ts");
+const onlineBadge = read("src/components/OnlineBadge.tsx");
+const plans = read("src/pages/Plans.tsx");
+
+assert.ok(apiError.includes("detail.message_fa"), "frontend error mapper must prefer backend Persian messages");
+assert.ok(apiError.includes("detail.error_code"), "frontend error mapper must understand stable error_code");
+assert.ok(apiError.includes("detail.request_id"), "frontend error mapper must expose safe tracking IDs");
+assert.ok(toastHandler.includes("localizedApiError(e)"), "shared toast handler must use the central error mapper");
+assert.ok(onlineBadge.includes("الان آنلاین") && onlineBadge.includes("آخرین فعالیت:"), "user cards must show Persian last-activity semantics");
+assert.ok(onlineBadge.includes("exactTimestamp") && onlineBadge.includes("<Tooltip"), "last activity must expose its exact timestamp in a tooltip");
+assert.ok(plans.includes("editingCategoryId") && plans.includes("/plan-categories/${category.id}"), "Plan category UI must support editing");
+assert.ok(plans.includes("این دسته‌بندی پلن فعال دارد") && plans.includes("archiveCategory.mutate(category)"), "Plan category UI must safely explain and perform logical archive");
 
 for (const section of ["تنظیمات مدیر", "نوع حساب", "اجازه ساخت زیرمدیر", "محدودیت‌های اختیاری", "پلن‌ها و محدودیت دسترسی"]) {
   assert.ok(drawer.includes(section), `missing compact admin section: ${section}`);
@@ -105,6 +120,9 @@ assert.ok(overview.includes('accountData?.account_status === "ACTIVE"'), "suspen
 assert.ok(userDialog.includes('insetInlineStart={3}'), "RTL modal close button must stay opposite the title");
 assert.ok(userDialog.includes('my="3"'), "user modal must reserve top and bottom viewport margins");
 assert.ok(deviceLimits.includes("removeStage"), "device penalty stages must be removable");
+assert.ok(deviceLimits.includes('<Navigate to="/" replace />'), "non-Owner direct Device Limit navigation must redirect");
+assert.ok(header.includes("{isOwner && (") && header.includes('to="/device-limits/"'), "Device Limit navigation must be Owner-only");
+assert.ok(usersTable.includes("isOwner") && usersTable.includes("isOwner && <UserDeviceLimit"), "per-user Device Limit controls must be Owner-only");
 assert.ok(auditLogs.includes("localizeAction"), "audit actions must be localized");
 assert.ok(auditLogs.includes("advancedFiltersOpen"), "audit advanced filters must be collapsible");
 assert.ok(header.includes("mobileMenuOpen"), "mobile navigation must be collapsed by default");
@@ -113,5 +131,13 @@ assert.ok(overview.includes("منابع سرور"), "dashboard Owner resource gr
 assert.ok(dashboard.includes("mobileUsersOpen") && dashboard.includes("نمایش کاربران"), "mobile user list must be collapsed behind an explicit toggle");
 assert.ok(http.includes('import.meta.env.VITE_BASE_API || "/api/"'), "production login must retain the /api/ fallback");
 assert.ok(dashboard.includes("{isOwner && ("), "Owner-only infrastructure dialogs must not query restricted APIs for children");
+assert.ok(hostsContext.includes('fetch<HostUpdateImpact>("/hosts/impact"'), "Host save must preview Plan/User impact");
+assert.ok(hostsContext.includes("impact_action=${encodeURIComponent(action)}"), "confirmed Host action must be sent explicitly");
+assert.ok(hostsDialog.includes("اثر تغییر Host روی پلن‌ها و کاربران"), "Host impact confirmation must be Persian and explicit");
+assert.ok(hostsDialog.includes("affected_plan_count") && hostsDialog.includes("active_user_count"), "Host impact modal must show Plan/User counts");
+for (const action of ["apply_current", "future_only", "detach"]) {
+  assert.ok(hostsDialog.includes(`confirmImpact("${action}")`), `Host impact action missing: ${action}`);
+}
+assert.ok(hostsDialog.includes("لغو عملیات"), "Host impact modal must offer cancellation");
 
 console.log("admin UX contract: assertions passed");

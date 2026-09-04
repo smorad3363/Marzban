@@ -19,7 +19,10 @@ from app.db.models import (
     User,
 )
 from app.device_limit.engine import DeviceLimitEngine
+from app.device_limit.constants import PenaltyStatus
 from app.jobs import review_users
+from app import marzhelp_policy_exception_handler
+from app.utils.marzhelp_policy import MarzhelpPolicyError
 from app.models import user as user_models
 from app.models.admin import Admin as APIAdmin
 from app.models.proxy import ProxyTypes
@@ -29,6 +32,7 @@ from app.routers.user import (
     modify_user,
     reset_user_data_usage as reset_user_data_usage_route,
 )
+from app.routers.device_limit import unblock_user
 
 
 @pytest.fixture()
@@ -222,6 +226,61 @@ def test_explicit_authorized_activation_still_updates_xray(db):
     assert response.status == UserStatus.active
     assert user.status == UserStatus.active
     assert _has_background_task(background, xray.operations.update_user_by_id)
+
+
+def test_active_penalty_blocks_ordinary_activation_until_owner_release(db, monkeypatch):
+    admin = _admin(db)
+    penalty_at = datetime.utcnow() - timedelta(minutes=1)
+    user = _user(db, admin, "penalty-activation-blocked", UserStatus.disabled)
+    user.last_status_change = penalty_at
+    state = DeviceLimitUserState(
+        user=user,
+        penalty_status=PenaltyStatus.temporarily_disabled.value,
+        blocked_until=datetime.utcnow() + timedelta(minutes=10),
+        status_before_penalty=UserStatus.on_hold.value,
+        updated_at=penalty_at,
+    )
+    db.add(state)
+    db.commit()
+    background = BackgroundTasks()
+
+    with pytest.raises(MarzhelpPolicyError) as raised:
+        modify_user(
+            request=_request("PUT", f"/api/user/{user.username}"),
+            modified_user=UserModify(status=UserStatus.active),
+            bg=background,
+            db=db,
+            dbuser=user,
+            admin=APIAdmin.model_validate(admin),
+        )
+
+    assert raised.value.code == "device_limit_penalty_active"
+    response = marzhelp_policy_exception_handler(
+        _request("PUT", f"/api/user/{user.username}"),
+        raised.value,
+    )
+    assert response.status_code == 403
+    db.refresh(user)
+    db.refresh(state)
+    assert user.status == UserStatus.disabled
+    assert state.penalty_status == PenaltyStatus.temporarily_disabled.value
+    assert background.tasks == []
+
+    added = []
+    monkeypatch.setattr(xray.operations, "add_user", added.append)
+    unblock_user(
+        request=_request("POST", f"/api/device-limit/users/{user.username}/unblock"),
+        dbuser=user,
+        db=db,
+        admin=APIAdmin.model_validate(admin),
+    )
+
+    db.refresh(user)
+    db.refresh(state)
+    assert user.status == UserStatus.on_hold
+    assert state.penalty_status == PenaltyStatus.clear.value
+    assert state.status_before_penalty is None
+    assert added == [user]
 
 
 def test_disabled_user_is_not_eligible_for_automatic_next_plan_activation(db, monkeypatch):

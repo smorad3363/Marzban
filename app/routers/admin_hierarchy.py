@@ -1860,7 +1860,7 @@ def create_user_from_plan(
             request=request,
         )
         bg.add_task(xray.operations.add_user_by_id, user_id=user.id)
-    return UserResponse.model_validate(user)
+    return admin_plans.scoped_user_response(db, user, actor=actor)
 
 
 @router.post("/users/{username}/renew-from-plan", response_model=UserResponse)
@@ -1899,7 +1899,7 @@ def renew_user_from_plan(
             request=request,
         )
         bg.add_task(xray.operations.update_user_by_id, user_id=user.id)
-    return UserResponse.model_validate(user)
+    return admin_plans.scoped_user_response(db, user, actor=actor)
 
 
 @router.get("/trials/cleanup/preview", response_model=TrialCleanupResponse)

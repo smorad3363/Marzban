@@ -36,7 +36,7 @@ class DashboardBillingModeMetric(BaseModel):
     admin_count: int = 0
     user_count: int = 0
     active_users: int = 0
-    current_used_traffic: int = 0
+    current_used_traffic: int | None = 0
     allocated_quota: int = 0
 
 
@@ -52,7 +52,7 @@ class DashboardOverview(BaseModel):
     expired_users: int
     limited_users: int
     on_hold_users: int
-    current_used_traffic: int
+    current_used_traffic: int | None
     allocated_quota: int
     new_users: DashboardWeekTrend
     billing_modes: list[DashboardBillingModeMetric]

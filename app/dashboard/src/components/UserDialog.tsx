@@ -43,6 +43,7 @@ import { resetStrategy } from "constants/UserSettings";
 import { FilterUsageType, useDashboard } from "contexts/DashboardContext";
 import dayjs from "dayjs";
 import useGetUser from "hooks/useGetUser";
+import { localizedApiError } from "utils/apiError";
 import { FC, useEffect, useState } from "react";
 import ReactApexChart from "react-apexcharts";
 import ReactDatePicker from "react-datepicker";
@@ -577,20 +578,20 @@ export const UserDialog: FC<UserDialogProps> = () => {
         onClose();
       })
       .catch((err) => {
-        if (err?.response?.status === 409 || err?.response?.status === 400)
-          setError(err?.response?._data?.detail);
-        if (err?.response?.status === 422) {
-          Object.keys(err.response._data.detail).forEach((key) => {
-            setError(err?.response._data.detail[key] as string);
+        const detail = err?.response?._data?.detail;
+        const fields = detail && typeof detail === "object" ? detail.fields : undefined;
+        if (fields && typeof fields === "object") {
+          Object.keys(fields).forEach((key) => {
             form.setError(
               key as "proxies" | "username" | "data_limit" | "expire",
               {
                 type: "custom",
-                message: err.response._data.detail[key],
+                message: String(fields[key]),
               }
             );
           });
         }
+        setError(localizedApiError(err));
       })
       .finally(() => {
         setLoading(false);
@@ -1167,7 +1168,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                     </FormControl>
                   </Stack>
                 </GridItem>}
-                {isEditing && usageVisible && (
+                {isEditing && editingUser?.used_traffic !== null && usageVisible && (
                   <GridItem pt={2} colSpan={{ base: 1, xl: 2 }} minW={0}>
                     <VStack gap={4}>
                       <UsageFilter
@@ -1235,7 +1236,7 @@ export const UserDialog: FC<UserDialogProps> = () => {
                           <DeleteIcon />
                         </IconButton>
                       </Tooltip>
-                      <Tooltip label={t("userDialog.usage")} placement="top">
+                      {editingUser?.used_traffic !== null && <Tooltip label={t("userDialog.usage")} placement="top">
                         <IconButton
                           aria-label={t("userDialog.usage")}
                           minW="44px"
@@ -1244,10 +1245,10 @@ export const UserDialog: FC<UserDialogProps> = () => {
                         >
                           <UserUsageIcon />
                         </IconButton>
-                      </Tooltip>
-                      <Button onClick={handleResetUsage} size="sm" whiteSpace="normal" minH="44px" variant="outline" borderColor="#475f50">
+                      </Tooltip>}
+                      {editingUser?.used_traffic !== null && <Button onClick={handleResetUsage} size="sm" whiteSpace="normal" minH="44px" variant="outline" borderColor="#475f50">
                         {t("userDialog.resetUsage")}
-                      </Button>
+                      </Button>}
                       <Button onClick={handleRevokeSubscription} size="sm" whiteSpace="normal" minH="44px" variant="outline" borderColor="#475f50">
                         {t("userDialog.revokeSubscription")}
                       </Button>

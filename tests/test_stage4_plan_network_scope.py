@@ -226,6 +226,10 @@ def test_subscription_emits_only_explicit_active_plan_hosts(db, monkeypatch):
     assert len(response.links) == 1
     assert "one.example" in response.links[0]
     assert "two.example" not in response.links[0]
+    api_response = admin_plans.scoped_user_response(session, user)
+    list_response = admin_plans.scoped_user_responses(session, [user])[0]
+    assert api_response.links == response.links
+    assert list_response.links == response.links
     proxies = {
         ProxyTypes(proxy.type): ProxySettings.from_dict(ProxyTypes(proxy.type), proxy.settings)
         for proxy in user.proxies

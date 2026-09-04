@@ -185,7 +185,7 @@ export const Header: FC = () => {
             aria-current={isAdminsPage ? "page" : undefined}
           >{t("admins.nav")}</Button>
         )}
-        {(
+        {isOwner && (
           <Button
             as={Link}
             to="/device-limits/"
@@ -220,7 +220,7 @@ export const Header: FC = () => {
         <Button as={Link} to="/" size="md" variant={isUsersPage ? "solid" : "ghost"} colorScheme={isUsersPage ? "primary" : "gray"} color={isUsersPage ? "#07130e" : "gray.200"} leftIcon={<UsersNavIcon />} justifyContent="flex-start" aria-current={isUsersPage ? "page" : undefined}>{t("users")}</Button>
         <Button as={Link} to="/plans/" size="md" variant={isPlansPage ? "solid" : "ghost"} colorScheme={isPlansPage ? "primary" : "gray"} color={isPlansPage ? "#07130e" : "gray.200"} leftIcon={<PlansNavIcon />} justifyContent="flex-start" aria-current={isPlansPage ? "page" : undefined}>پلن‌ها</Button>
         {canManage && <Button as={Link} to="/admins/" size="md" variant={isAdminsPage ? "solid" : "ghost"} colorScheme={isAdminsPage ? "primary" : "gray"} color={isAdminsPage ? "#07130e" : "gray.200"} leftIcon={<AdminsNavIcon />} justifyContent="flex-start" aria-current={isAdminsPage ? "page" : undefined}>{t("admins.nav")}</Button>}
-        <Button as={Link} to="/device-limits/" size="md" variant={isDeviceLimitPage ? "solid" : "ghost"} colorScheme={isDeviceLimitPage ? "primary" : "gray"} color={isDeviceLimitPage ? "#07130e" : "gray.200"} leftIcon={<DeviceLimitNavIcon />} justifyContent="flex-start" aria-current={isDeviceLimitPage ? "page" : undefined}>{t("deviceLimit.nav")}</Button>
+        {isOwner && <Button as={Link} to="/device-limits/" size="md" variant={isDeviceLimitPage ? "solid" : "ghost"} colorScheme={isDeviceLimitPage ? "primary" : "gray"} color={isDeviceLimitPage ? "#07130e" : "gray.200"} leftIcon={<DeviceLimitNavIcon />} justifyContent="flex-start" aria-current={isDeviceLimitPage ? "page" : undefined}>{t("deviceLimit.nav")}</Button>}
         <Button as={Link} to="/audit-logs/" size="md" variant={isAuditPage ? "solid" : "ghost"} colorScheme={isAuditPage ? "cyan" : "gray"} color={isAuditPage ? "#06161a" : "gray.200"} leftIcon={<AuditNavIcon />} justifyContent="flex-start" aria-current={isAuditPage ? "page" : undefined}>{t("audit.nav")}</Button>
       </SimpleGrid>
 

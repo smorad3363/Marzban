@@ -18,8 +18,10 @@ from app.db.models import (
     AdminRole,
     AdminSuspensionReason,
     AdminUserCreationMode,
+    MarzhelpAdminSubscriptionModePermission,
     MarzhelpAdminSettings,
 )
+from app.device_limit.constants import DEFAULT_ADMIN_SUBSCRIPTION_MODES
 from app.models.admin import Admin as APIAdmin
 from app.models.admin import ManagedAdminCreate, ManagedAdminModify, MarzhelpAdminPolicy
 from app.models.admin_hierarchy import CreditTransferRequest, RenewalPolicyUpdate
@@ -323,6 +325,75 @@ def test_managed_admin_modify_fails_closed_instead_of_ignoring_plan_only(db):
     assert child_settings.user_creation_mode_id == admin_hierarchy.USER_CREATION_MODE_IDS[
         admin_hierarchy.FREE_FORM
     ]
+
+
+def test_admin_self_edit_allows_personal_fields_without_commercial_changes(db):
+    _, child, _ = _seed(db)
+    settings = db.get(MarzhelpAdminSettings, child.id)
+    settings.subscription_mode_permissions = [
+        MarzhelpAdminSubscriptionModePermission(admin_id=child.id, mode=mode.value)
+        for mode in DEFAULT_ADMIN_SUBSCRIPTION_MODES
+    ]
+    db.commit()
+    policy_before = MarzhelpAdminPolicy.model_validate(settings).model_dump()
+
+    response = modify_managed_admin(
+        _request(f"/api/admin-management/{child.username}", "PUT"),
+        ManagedAdminModify(
+            phone="09123456789",
+            policy=MarzhelpAdminPolicy.model_validate(settings),
+        ),
+        child,
+        db,
+        APIAdmin.model_validate(child),
+    )
+
+    db.refresh(child)
+    db.refresh(settings)
+    assert response.phone == "09123456789"
+    assert child.phone == "09123456789"
+    assert MarzhelpAdminPolicy.model_validate(settings).model_dump() == policy_before
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        lambda settings: ManagedAdminModify(
+            policy=MarzhelpAdminPolicy.model_validate(settings).model_copy(
+                update={"user_limit": 1}
+            ),
+        ),
+        lambda settings: ManagedAdminModify(
+            policy=MarzhelpAdminPolicy.model_validate(settings),
+            plan_category_ids=[999],
+        ),
+    ],
+)
+def test_admin_self_edit_rejects_parent_controlled_fields_without_db_changes(db, payload):
+    _, child, _ = _seed(db)
+    settings = db.get(MarzhelpAdminSettings, child.id)
+    settings.subscription_mode_permissions = [
+        MarzhelpAdminSubscriptionModePermission(admin_id=child.id, mode=mode.value)
+        for mode in DEFAULT_ADMIN_SUBSCRIPTION_MODES
+    ]
+    db.commit()
+    policy_before = MarzhelpAdminPolicy.model_validate(settings).model_dump()
+
+    with pytest.raises(HTTPException) as raised:
+        modify_managed_admin(
+            _request(f"/api/admin-management/{child.username}", "PUT"),
+            payload(settings),
+            child,
+            db,
+            APIAdmin.model_validate(child),
+        )
+
+    assert raised.value.status_code == 403
+    assert raised.value.detail["code"] == "self_commercial_edit_forbidden"
+    db.expire_all()
+    assert MarzhelpAdminPolicy.model_validate(
+        db.get(MarzhelpAdminSettings, child.id)
+    ).model_dump() == policy_before
 
 
 def test_renewal_policy_is_visible_and_parent_or_owner_authorized(db):

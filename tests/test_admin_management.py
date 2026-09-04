@@ -84,7 +84,7 @@ def test_management_list_is_stable_and_counted(session):
     admins, total = crud.get_admins_with_count(session, offset=0, limit=2)
 
     assert total == 3
-    assert [admin.username for admin in admins] == ["alpha", "middle"]
+    assert [admin.username for admin in admins] == ["middle", "alpha"]
 
 
 def test_policy_rejects_negative_or_unknown_volume_rules():

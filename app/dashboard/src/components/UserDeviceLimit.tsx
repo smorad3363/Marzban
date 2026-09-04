@@ -35,6 +35,7 @@ import CopyToClipboard from "react-copy-to-clipboard";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 import { fetch } from "service/http";
+import { localizedApiError } from "utils/apiError";
 import { DeviceClientObservation, DeviceLimitState, DeviceLimitUserSummary } from "types/DeviceLimit";
 import { User } from "types/User";
 
@@ -96,7 +97,7 @@ export const UserDeviceLimit: FC<{ user: User }> = ({ user }) => {
       onError: (error: any) => {
         toast({
           title: t("deviceLimit.saveFailed"),
-          description: error?.data?.detail || error?.message,
+          description: localizedApiError(error),
           status: "error",
           duration: 5000,
         });

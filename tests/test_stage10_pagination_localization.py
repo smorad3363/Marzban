@@ -121,7 +121,8 @@ def test_response_contract_and_farsi_error_unlimited_sources():
     credit = Path("app/dashboard/src/components/AdminCreditSummary.tsx").read_text(encoding="utf-8")
     assert '"unlimited": "نامحدود"' in locale
     assert 'errors.codes.pagination_size_invalid' in locale
-    assert "detail.message" not in error_utility
+    assert "return detail.message;" not in error_utility
+    assert "detail.message_fa" in error_utility
     assert "errors.unknownCode" in error_utility
     assert "<option>10</option>" in pagination
     assert "<option>25</option>" in pagination

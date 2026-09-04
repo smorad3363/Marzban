@@ -25,6 +25,7 @@ import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import { fetch } from "service/http";
 import { removeAuthToken, setAuthToken } from "utils/authStorage";
+import { localizedApiError } from "utils/apiError";
 import { z } from "zod";
 
 const schema = z.object({
@@ -70,9 +71,7 @@ export const Login: FC = () => {
         resetDashboardState();
         navigate("/");
       })
-      .catch((err) =>
-        setError(err?.response?._data?.detail ?? err?.message ?? "Login failed")
-      )
+      .catch((err) => setError(localizedApiError(err)))
       .finally(setLoading.bind(null, false));
   };
 
