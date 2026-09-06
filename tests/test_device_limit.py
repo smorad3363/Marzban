@@ -50,6 +50,57 @@ def test_xray_access_parser_is_bounded_and_requires_hit_threshold():
     assert mask_ip("8.8.8.8") == "8.8.***.***"
 
 
+def test_xray_parser_accepts_node_from_prefix_and_ipv4_mapped_ipv6():
+    tracker = DeviceLimitEngine()
+    tracker.configure(True, "hybrid")
+    lines = "\n".join(
+        (
+            "2026/08/16 12:00:00 from [::ffff:8.8.8.8]:51000 accepted tcp:example.com:443 [vless >> direct] email: 42.demo",
+            "2026/08/16 12:00:01 from [::ffff:8.8.8.8]:51001 accepted tcp:example.com:443 [vless >> direct] email: 42.demo",
+        )
+    )
+
+    assert tracker.record_log(lines, "node:9") == 2
+    addresses, sources, per_slot = tracker.live_snapshot(42, 300, 2)
+    assert addresses == {"8.8.8.8"}
+    assert sources == {"node:9"}
+    assert per_slot == {1: {"8.8.8.8"}}
+
+
+def test_shared_slot_is_violation_even_when_total_ip_count_equals_user_limit():
+    addresses = {"8.8.8.8", "1.1.1.1"}
+    per_slot = {1: set(addresses)}
+
+    violated, shared_slots = DeviceLimitEngine.violation_details(
+        2, addresses, per_slot
+    )
+
+    assert violated is True
+    assert shared_slots == {1: addresses}
+
+
+def test_one_ip_per_slot_is_allowed_up_to_user_limit():
+    addresses = {"8.8.8.8", "1.1.1.1"}
+    per_slot = {1: {"8.8.8.8"}, 2: {"1.1.1.1"}}
+
+    violated, shared_slots = DeviceLimitEngine.violation_details(
+        2, addresses, per_slot
+    )
+
+    assert violated is False
+    assert shared_slots == {}
+
+
+def test_reenable_does_not_keep_disabled_empty_user_cache():
+    tracker = DeviceLimitEngine()
+    tracker._limited_user_ids = {42}
+    tracker.configure(False, "hybrid")
+    assert tracker._limited_user_ids == set()
+
+    tracker.configure(True, "hybrid")
+    assert tracker._limited_user_ids is None
+
+
 def test_finite_limit_creates_independent_standard_credentials(session):
     base_id = str(uuid4())
     user = User(
