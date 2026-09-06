@@ -22,7 +22,6 @@ from app.db.models import (
     DeviceLimitPenaltyStage,
     DeviceLimitSettings,
     DeviceLimitUserState,
-    DeviceSlot,
     User,
 )
 from app.device_limit.constants import PenaltyAction, PenaltyStatus
@@ -30,26 +29,63 @@ from app.models.user import UserStatus
 from app.utils.audit import AuditLogService
 
 
+# Xray access logs have existed in a few slightly different forms across core
+# and marzban-node releases, for example:
+#   1.2.3.4:12345 accepted ...
+#   from 1.2.3.4:12345 accepted ...
+#   [2001:db8::1]:12345 accepted ...
+#   from [::ffff:1.2.3.4]:12345 accepted ...
+# Keep this parser deliberately independent from the destination part of the
+# line so newer transports do not silently disable device-limit detection.
 SOURCE_RE = re.compile(
-    r"(?:^|\s)(?:\[([0-9a-fA-F:]+)\]|(\d{1,3}(?:\.\d{1,3}){3})):\d+\s+accepted\b"
+    r"(?:^|\s)(?:from\s+)?(?:\[([0-9a-fA-F:.]+)\]|([0-9a-fA-F:.]+)):\d+\s+accepted\b",
+    re.IGNORECASE,
 )
 EMAIL_RE = re.compile(
-    r"email:\s*(\d+)\.([A-Za-z0-9_@+%\-.]+?)(?:\.slot(\d+))?(?:\s|$)"
+    r"email:\s*(\d+)\.([A-Za-z0-9_@+%\-.]+?)(?:\.slot(\d+))?(?=\s|$)",
+    re.IGNORECASE,
 )
 MAX_IPS_PER_SLOT = 64
+USER_CACHE_TTL_SECONDS = 10
 
 
 def utc_now() -> datetime:
     return datetime.utcnow()
 
 
-def mask_ip(value: str) -> str:
+def normalize_public_ip(value: str) -> str | None:
+    """Return one canonical public IP representation or ``None``.
+
+    IPv4-mapped IPv6 addresses are normalized to IPv4 so the same client is not
+    counted twice when different Xray/node versions format its source address
+    differently.
+    """
+
     try:
-        parsed = ipaddress.ip_address(value)
+        parsed = ipaddress.ip_address(value.strip())
     except ValueError:
-        return "***"
+        return None
+
+    if isinstance(parsed, ipaddress.IPv6Address) and parsed.ipv4_mapped:
+        parsed = parsed.ipv4_mapped
+
+    if parsed.is_private or parsed.is_loopback or parsed.is_unspecified:
+        return None
+    return parsed.compressed
+
+
+def mask_ip(value: str) -> str:
+    normalized = normalize_public_ip(value)
+    if normalized is None:
+        try:
+            parsed = ipaddress.ip_address(value)
+        except ValueError:
+            return "***"
+    else:
+        parsed = ipaddress.ip_address(normalized)
+
     if parsed.version == 4:
-        parts = value.split(".")
+        parts = parsed.compressed.split(".")
         return f"{parts[0]}.{parts[1]}.***.***"
     groups = parsed.exploded.split(":")
     return ":".join(groups[:3] + ["****"] * 5)
@@ -162,28 +198,28 @@ class DeviceLimitEngine:
     def record_log(self, raw: str, source_name: str = "master") -> int:
         if not self._runtime_enabled or self._enforcement_mode == "slots":
             return 0
+
         recorded = 0
         now = time.time()
         for line in str(raw).splitlines():
-            if "accepted" not in line or "BLOCK]" in line:
+            if "accepted" not in line.lower() or "BLOCK]" in line:
                 continue
+
             source_match = SOURCE_RE.search(line)
             email_match = EMAIL_RE.search(line)
             if not source_match or not email_match:
                 continue
-            address = source_match.group(1) or source_match.group(2)
-            try:
-                parsed = ipaddress.ip_address(address)
-            except ValueError:
+
+            address = normalize_public_ip(source_match.group(1) or source_match.group(2))
+            if address is None:
                 continue
-            if parsed.is_private or parsed.is_loopback or parsed.is_unspecified:
-                continue
+
             user_id = int(email_match.group(1))
-            if (
-                self._limited_user_ids is not None
-                and user_id not in self._limited_user_ids
-            ):
+            # None means the cache is warming after enable/reconfigure. During
+            # that short window collect records instead of losing the evidence.
+            if self._limited_user_ids is not None and user_id not in self._limited_user_ids:
                 continue
+
             slot_index = int(email_match.group(3) or 1)
             with self._lock:
                 slot = self._activity[user_id][slot_index]
@@ -223,6 +259,7 @@ class DeviceLimitEngine:
                 self._activity.pop(user_id, None)
                 self._sources.pop(user_id, None)
             sources = set(self._sources.get(user_id, set()))
+
         all_addresses = set().union(*per_slot.values()) if per_slot else set()
         return all_addresses, sources, per_slot
 
@@ -234,6 +271,29 @@ class DeviceLimitEngine:
     ) -> tuple[set[str], set[str], dict[int, set[str]]]:
         return self._snapshot_user(user_id, window_seconds, hit_threshold)
 
+    @staticmethod
+    def violation_details(
+        limit: int,
+        addresses: set[str],
+        per_slot: dict[int, set[str]],
+    ) -> tuple[bool, dict[int, set[str]]]:
+        """Return whether activity violates a limit and shared slot details.
+
+        A finite limit creates one credential per device slot. Consequently each
+        slot may be active from at most one public IP at a time. Checking only
+        the total number of unique IPs misses the common case where slot 1 is
+        copied to two devices while another configured slot is unused.
+        """
+
+        if limit < 1:
+            return False, {}
+        shared_slots = {
+            slot_index: set(slot_addresses)
+            for slot_index, slot_addresses in per_slot.items()
+            if len(slot_addresses) > 1
+        }
+        return bool(shared_slots or len(addresses) > limit), shared_slots
+
     def evaluate(self) -> None:
         with GetDB() as db:
             settings = db.get(DeviceLimitSettings, 1)
@@ -243,14 +303,17 @@ class DeviceLimitEngine:
             )
             if settings is None or not settings.enabled:
                 return
+
             self._refresh_limited_users(db)
             if settings.enforcement_mode == "slots":
                 self._release_due_penalties(db, settings, force=True)
                 return
+
             now_monotonic = time.monotonic()
             if now_monotonic - self._last_evaluation < settings.check_interval_seconds:
                 return
             self._last_evaluation = now_monotonic
+
             with self._lock:
                 active_ids = list(self._activity)
             if not active_ids:
@@ -281,8 +344,10 @@ class DeviceLimitEngine:
                         settings.hit_threshold,
                     )
                     limit = int(user.concurrent_user_limit or 0)
-                    if limit < 1 or len(addresses) <= limit:
+                    violated, shared_slots = self.violation_details(limit, addresses, per_slot)
+                    if not violated:
                         continue
+
                     state = db.get(DeviceLimitUserState, user.id)
                     if state and state.last_violation_at:
                         cooldown = timedelta(seconds=settings.active_window_seconds)
@@ -295,6 +360,7 @@ class DeviceLimitEngine:
                     if state is None:
                         state = DeviceLimitUserState(user_id=user.id)
                         db.add(state)
+
                     state.violation_count = int(state.violation_count or 0) + 1
                     stage = self._stage_for(stages, state.violation_count)
                     self._apply_penalty(
@@ -306,6 +372,7 @@ class DeviceLimitEngine:
                         addresses,
                         sources,
                         per_slot,
+                        shared_slots,
                         now,
                     )
             db.commit()
@@ -313,7 +380,7 @@ class DeviceLimitEngine:
 
     def _refresh_limited_users(self, db, force: bool = False) -> None:
         now = time.monotonic()
-        if not force and now - self._last_user_cache_refresh < 60:
+        if not force and now - self._last_user_cache_refresh < USER_CACHE_TTL_SECONDS:
             return
         limited_ids = {
             row[0]
@@ -349,15 +416,29 @@ class DeviceLimitEngine:
         addresses: set[str],
         sources: set[str],
         per_slot: dict[int, set[str]],
+        shared_slots: dict[int, set[str]],
         now: datetime,
     ) -> None:
         action = PenaltyAction(stage.action) if stage else PenaltyAction.warn
         if action == PenaltyAction.delete and not settings.auto_delete_enabled:
             action = PenaltyAction.permanent_disable
-        reason = (
-            f"Observed {len(addresses)} active public IPs for configured device limit "
-            f"{user.concurrent_user_limit}"
-        )
+
+        if shared_slots:
+            shared = ", ".join(
+                f"slot {slot_index}={len(slot_addresses)} IPs"
+                for slot_index, slot_addresses in sorted(shared_slots.items())
+            )
+            reason = (
+                f"Shared device credential detected ({shared}); observed "
+                f"{len(addresses)} unique public IPs for configured device limit "
+                f"{user.concurrent_user_limit}"
+            )
+        else:
+            reason = (
+                f"Observed {len(addresses)} active public IPs for configured device limit "
+                f"{user.concurrent_user_limit}"
+            )
+
         state.current_stage = stage.violation_count if stage else state.violation_count
         state.last_violation_at = now
         state.last_seen_at = now
@@ -371,7 +452,8 @@ class DeviceLimitEngine:
             if state.penalty_status != PenaltyStatus.temporarily_disabled.value:
                 state.status_before_penalty = getattr(user.status, "value", user.status)
             state.penalty_status = PenaltyStatus.temporarily_disabled.value
-            state.blocked_until = now + timedelta(seconds=int(stage.duration_seconds))
+            duration = int((stage.duration_seconds if stage else None) or settings.active_window_seconds)
+            state.blocked_until = now + timedelta(seconds=duration)
             user.status = UserStatus.disabled
             user.last_status_change = now
             xray.operations.remove_user(user)
@@ -402,11 +484,13 @@ class DeviceLimitEngine:
             created_at=now,
         )
         db.add(incident)
+
         for slot in user.device_slots:
             slot_addresses = per_slot.get(slot.slot_index)
             if slot_addresses:
                 slot.last_seen_at = now
                 slot.last_ip = sorted(slot_addresses)[-1]
+
         AuditLogService.log(
             db,
             "device-limit-engine",
@@ -419,6 +503,9 @@ class DeviceLimitEngine:
                 "stage": state.current_stage,
                 "configured_limit": user.concurrent_user_limit,
                 "observed_count": len(addresses),
+                "shared_slots": {
+                    str(index): len(values) for index, values in shared_slots.items()
+                },
             },
             commit=False,
         )
@@ -505,14 +592,23 @@ class DeviceLimitEngine:
             self._sources.pop(user_id, None)
 
     def configure(self, enabled: bool, enforcement_mode: str = "hybrid") -> None:
+        was_enabled = self._runtime_enabled
+        previous_mode = self._enforcement_mode
         self._runtime_enabled = enabled
         self._enforcement_mode = enforcement_mode
+
         if not enabled or enforcement_mode == "slots":
             with self._lock:
                 self._activity.clear()
                 self._sources.clear()
         if not enabled:
             self._limited_user_ids = set()
+            self._last_user_cache_refresh = 0.0
+        elif not was_enabled or previous_mode == "slots":
+            # Do not keep an empty cache from the disabled/slots state. Let the
+            # collector capture evidence until the next DB refresh prunes it.
+            self._limited_user_ids = None
+            self._last_user_cache_refresh = 0.0
 
     def _write_event(self, incident: DeviceLimitIncident) -> None:
         if self._event_logger is None:
@@ -528,8 +624,9 @@ class DeviceLimitEngine:
                     "stage": incident.stage,
                     "configured_limit": incident.configured_limit,
                     "observed_count": incident.observed_count,
-                    # Durable full addresses live only in the retention-managed DB.
-                    "ip_addresses": [mask_ip(value) for value in (incident.ip_addresses or [])],
+                    "ip_addresses": [
+                        mask_ip(value) for value in (incident.ip_addresses or [])
+                    ],
                     "source_nodes": incident.source_nodes,
                     "reason": incident.reason,
                 },
