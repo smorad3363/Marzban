@@ -1,8 +1,8 @@
 # Native device limits
 
-Marzban `v4.6.0` integrates device-slot and concurrent-IP enforcement directly
-into the panel. MarzHelp and V2IpLimit are not required for this feature, and
-the standard Marzban node installation command is unchanged.
+Marzban `1.0.6` integrates device-slot and concurrent public-IP enforcement
+directly into the panel. MarzHelp and V2IpLimit are not required for this
+feature.
 
 ## Subscription modes and permissions
 
@@ -21,7 +21,17 @@ granted to non-sudo admins by default.
 Each slot has standard VLESS/VMess UUID or Trojan/Shadowsocks password
 credentials and its own subscription URL. Slot 1 preserves the user's existing
 credential and subscription URL. Extra slots use independent credentials.
-Sharing one slot is detected by concurrent public-IP activity.
+
+For a finite device limit, both rules are enforced:
+
+1. the total number of concurrently active public IPs must not exceed
+   `concurrent_user_limit`;
+2. one device-slot credential may be active from only one public IP at a time.
+
+The second rule is important. For example, if a user has a limit of `2`, sharing
+slot 1 between two IPs is still a violation even when slot 2 is unused. Older
+implementations that checked only the total number of unique IPs missed this
+case.
 
 ## Runtime behavior
 
@@ -29,6 +39,15 @@ The engine reads accepted Xray records directly from the main core and connected
 Marzban nodes. Enabling it from the sudo-only Device Limits page applies Xray
 `info` logging and restarts the core and connected nodes once. Disabling it does
 not restart Xray and releases temporary device-limit penalties.
+
+The log parser accepts the common main-core and node source formats, including
+IPv4, IPv6 and IPv4-mapped IPv6. IPv4-mapped addresses are canonicalized to IPv4
+before counting so the same client is not counted twice only because two Xray
+runtimes formatted the address differently.
+
+The finite-user cache refreshes every 10 seconds. When the feature is newly
+enabled or changed from slots-only mode, the collector records activity while
+the cache warms instead of silently dropping those first records.
 
 Accepted records remain in bounded memory. The database stores settings, slots,
 current penalty state, audit records and incidents only. Defaults are:
@@ -47,9 +66,32 @@ The rotated JSONL event file is stored under
 masked. Full addresses exist only in retention-managed database incidents.
 
 This mechanism counts public source IPs, not physical hardware identifiers.
-Device slots isolate credentials, but copied credentials can still be shared;
-the IP detector is the enforcement guard for that case. Tunnels, CGNAT, roaming
-and rapidly changing mobile IPs can affect the observed count.
+Tunnels, CGNAT, roaming and rapidly changing mobile IPs can affect the observed
+count.
+
+## Recommended node installation
+
+Use the fork's multi-instance-safe installer on every node server:
+
+```bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban-scripts/master/install-node.sh)"
+```
+
+The installer asks for a unique instance name, Client Certificate,
+`SERVICE_PORT`, `XRAY_API_PORT`, and REST protocol selection. It rejects ports
+that are currently listening as well as ports reserved by other installed node
+compose files. This means a stopped node cannot accidentally have its ports
+reused by another instance.
+
+If more than one node is installed on the same server, the suggested names are
+`marzban-node`, `marzban-node2`, `marzban-node3`, and so on. Each instance gets
+its own `/opt/<instance>`, `/var/lib/<instance>`, container name and management
+command.
+
+After installation, add the reported IP, `SERVICE_PORT` and `XRAY_API_PORT` to
+the main panel. The panel's device-limit collector consumes accepted Xray log
+records from connected nodes, so keep Device Limits enabled in `hybrid` or `ip`
+mode when concurrent-IP enforcement is required.
 
 ## API and ddbot integration
 
@@ -96,24 +138,17 @@ Additional native endpoints use only the `/api/device-limit` namespace:
 
 ## Upgrade and rollback
 
-Back up `/var/lib/marzban` before the first upgrade. Upgrade to this exact,
-immutable image with:
+Back up `/var/lib/marzban` before upgrading. The source version for this fix is
+`1.0.6`. Once the corresponding immutable image/tag is published, deployments
+that pin release images should use that `1.0.6` tag rather than an older device
+limit build.
 
-```bash
-marzban update --version v4.6.0
-```
-
-After validation, following `latest` is also supported:
+Following `latest` remains possible where the deployment workflow publishes
+master builds:
 
 ```bash
 marzban update
 ```
 
-Application rollback:
-
-```bash
-marzban rollback v4.5.2
-```
-
-Rollback changes the application image, not the database schema. The new tables
-are additive and ignored by `v4.5.2`; keep the backup for a full schema rollback.
+Application rollback changes the application image, not the database schema.
+Keep the data backup for a full schema rollback.
