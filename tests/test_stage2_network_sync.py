@@ -287,7 +287,7 @@ def _runtime(monkeypatch, tag: str):
     monkeypatch.setattr("app.routers.system.xray.hosts.update", lambda: None)
 
 
-def test_future_only_endpoint_retires_old_host_and_preserves_current_assignment(monkeypatch):
+def test_future_only_endpoint_rejects_ambiguous_live_scope_without_mutating_data(monkeypatch):
     db = _session()
     try:
         tag = "VLESS TCP"
@@ -298,21 +298,21 @@ def test_future_only_endpoint_retires_old_host_and_preserves_current_assignment(
         plan, previous = _plan_assignment(db, host.id, tag)
         _runtime(monkeypatch, tag)
 
-        modify_hosts(
-            request=_request(),
-            bg=BackgroundTasks(),
-            modified_hosts={tag: [_host(host_id=host.id, address="new.example")]},
-            impact_action="future_only",
-            db=db,
-            admin=_owner(),
-        )
-
+        with pytest.raises(HTTPException) as exc:
+            modify_hosts(
+                request=_request(),
+                bg=BackgroundTasks(),
+                modified_hosts={tag: [_host(host_id=host.id, address="new.example")]},
+                impact_action="future_only",
+                db=db,
+                admin=_owner(),
+            )
+        assert exc.value.status_code == 409
         db.expire_all()
-        old = db.get(ProxyHost, host.id)
-        active_hosts = crud.get_hosts(db, tag, include_legacy=False)
-        assert old.is_legacy is True
-        assert [(row.address, row.is_legacy) for row in active_hosts] == [("new.example", False)]
-        assert plan.current_version_id != previous.id
+        untouched = db.get(ProxyHost, host.id)
+        assert untouched.is_legacy is False
+        assert untouched.address == "old.example"
+        assert plan.current_version_id == previous.id
         assert db.query(UserPlanAssignment).one().version_id == previous.id
     finally:
         db.close()
@@ -347,8 +347,8 @@ def test_detach_endpoint_creates_revision_and_syncs_active_user(monkeypatch):
         assert db.get(ProxyHost, removed_id) is None
         assert plan.current_version_id != previous.id
         assignments = db.query(UserPlanAssignment).order_by(UserPlanAssignment.id).all()
-        assert [row.operation_type for row in assignments] == ["create", "network_sync"]
-        assert assignments[-1].version_id == plan.current_version_id
-        assert len(bg.tasks) == 1
+        assert [row.operation_type for row in assignments] == ["create"]
+        assert assignments[-1].version_id == previous.id
+        assert len(bg.tasks) == 0  # Host-only changes need no Xray credential rewrite
     finally:
         db.close()

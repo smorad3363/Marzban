@@ -10,6 +10,22 @@ The `latest` tag is only a moving pointer to the newest stable tagged release.
 Prereleases never move `latest`. Older version and SHA tags remain available and
 are not replaced by a later release.
 
+## v5.1.1 Stable Plan network and subscription reliability
+
+This release fixes Host save HTTP 500 with `autoflush=False`, follows added and removed Xray inbounds for current Plan subscribers, and avoids empty subscriptions when a Host is disabled or removed. Purchase history and proxy credentials are preserved. Regression tests run for MySQL and Plan network changes.
+
+Install the pinned release:
+
+```bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.1.1/scripts/marzban.sh)" @ install --database mysql --version v5.1.1
+```
+
+Existing deployments can update after taking a MySQL backup:
+
+```bash
+marzban update --version v5.1.1
+```
+
 ## v5.1.0 Admin hierarchy, billing, network scope, and reliability
 
 This stable release completes the Owner/Admin hierarchy workflow, reseller Plans
