@@ -1,0 +1,35 @@
+name: Plan network regressions
+
+on:
+  push:
+    branches:
+      - "hotfix/**"
+  pull_request:
+    paths:
+      - "app/utils/admin_plans.py"
+      - "app/routers/core.py"
+      - "app/routers/system.py"
+      - "app/routers/admin_hierarchy.py"
+      - "app/utils/network_impact.py"
+      - "app/device_limit/clients.py"
+      - "tests/test_plan_network_regressions.py"
+
+jobs:
+  syntax-and-regressions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Compile affected Python modules
+        run: |
+          python -m py_compile \
+            app/utils/admin_plans.py \
+            app/utils/network_impact.py \
+            app/routers/system.py \
+            app/routers/core.py \
+            app/routers/admin_hierarchy.py \
+            app/device_limit/clients.py
+      - name: Run isolated Plan network regression tests
+        run: python -m unittest discover -s tests -p 'test_plan_network_regressions.py' -v
