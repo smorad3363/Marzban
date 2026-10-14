@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - master
+      - release/v5.1.0-network-fixes
     tags:
       - "v*"
   workflow_dispatch:
@@ -251,7 +252,7 @@ jobs:
           version_tag=""
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             version_tag="${GITHUB_REF_NAME}"
-          elif [[ "${GITHUB_REF}" == "refs/heads/master" ]]; then
+          elif [[ "${GITHUB_REF}" == "refs/heads/master" || "${GITHUB_REF}" == "refs/heads/release/v5.1.0-network-fixes" ]]; then
             version_tag="v$(tr -d '[:space:]' < VERSION)"
             if [[ ! "${version_tag}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               echo "Invalid VERSION value: ${version_tag}" >&2
@@ -310,7 +311,7 @@ jobs:
           tags="${IMAGE_NAME}:sha-${short_sha}"
           if [[ -n "${VERSION_TAG}" ]]; then
             tags="${tags}"$'\n'"${IMAGE_NAME}:${VERSION_TAG}"
-            if [[ "${VERSION_TAG}" != *-* ]]; then
+            if [[ "${VERSION_TAG}" != *-* && "${GITHUB_REF}" == "refs/heads/master" ]]; then
               tags="${tags}"$'\n'"${IMAGE_NAME}:latest"
             fi
           elif [[ -n "${REQUESTED_TAG}" ]]; then
@@ -336,7 +337,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           VERSION_TAG: ${{ steps.release-version.outputs.version_tag }}
         run: |
-          if [[ "${GITHUB_REF}" == "refs/heads/master" ]]; then
+          if [[ "${GITHUB_REF}" == "refs/heads/master" || "${GITHUB_REF}" == "refs/heads/release/v5.1.0-network-fixes" ]]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git tag -a "${VERSION_TAG}" "${GITHUB_SHA}" -m "Marzban ${VERSION_TAG}"
