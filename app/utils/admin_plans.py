@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, exists, func, or_, update
@@ -42,6 +44,95 @@ from app.models.proxy import ProxySettings, ProxyTypes
 from app.models.user import UserCreate, UserDataLimitResetStrategy, UserResponse, UserStatus, UserStatusCreate
 from app.device_limit.slots import sync_device_slots
 from app.utils import admin_billing, admin_hierarchy, marzhelp_policy, money_billing
+
+
+def global_network_sync_enabled() -> bool:
+    """Whether this deployment follows the active global Xray network."""
+    return os.getenv("MARZBAN_AUTO_SYNC_PLAN_NETWORK", "0").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+
+
+def global_network_scope(db: Session) -> tuple[set[str], dict[str, set[int]]]:
+    """Return configured inbound tags with usable, enabled, nonlegacy Hosts."""
+    configured = set(xray.config.inbounds_by_tag)
+    if not configured:
+        return set(), {}
+    rows = (
+        db.query(ProxyHost.id, ProxyHost.inbound_tag)
+        .filter(
+            ProxyHost.inbound_tag.in_(configured),
+            or_(ProxyHost.is_disabled.is_(False), ProxyHost.is_disabled.is_(None)),
+            ProxyHost.is_legacy.is_(False),
+            ProxyHost.address != "",
+        )
+        .order_by(ProxyHost.inbound_tag, ProxyHost.id)
+        .all()
+    )
+    hosts: dict[str, set[int]] = {}
+    for host_id, tag in rows:
+        hosts.setdefault(tag, set()).add(host_id)
+    return set(hosts), hosts
+
+
+def plans_tracking_network_scope(
+    db: Session,
+    inbounds: set[str],
+    hosts: dict[str, set[int]],
+) -> set[int]:
+    """Find Plans whose current selection exactly follows the supplied network."""
+    current = (
+        db.query(AdminUserPlan.id, AdminUserPlan.current_version_id)
+        .filter(AdminUserPlan.current_version_id.is_not(None)).all()
+    )
+    expected_hosts = {tag: set(ids) for tag, ids in hosts.items()}
+    return {
+        plan_id
+        for plan_id, version_id in current
+        if _version_network_scope(db, version_id) == (inbounds, expected_hosts)
+    }
+
+
+def sync_tracking_plans_to_global_network(
+    db: Session,
+    *,
+    actor: Admin,
+    previous_inbounds: set[str],
+    previous_hosts: dict[str, set[int]],
+    sync_users: bool = True,
+) -> list[int]:
+    """Update live network selections without changing historical purchases."""
+    tracking_ids = plans_tracking_network_scope(db, previous_inbounds, previous_hosts)
+    if not tracking_ids:
+        return []
+    target_inbounds, target_hosts = global_network_scope(db)
+    if not target_inbounds:
+        raise admin_hierarchy.HierarchyError(
+            "global_network_empty",
+            "Refusing to sync Plans without a usable Host",
+        )
+    synced: list[int] = []
+    for plan_id in sorted(tracking_ids):
+        plan = (
+            db.query(AdminUserPlan).filter(AdminUserPlan.id == plan_id)
+            .with_for_update().one()
+        )
+        before_tags, before_hosts = _version_network_scope(db, plan.current_version_id)
+        if (before_tags, before_hosts) != (previous_inbounds, previous_hosts):
+            continue
+        if (before_tags, before_hosts) == (target_inbounds, target_hosts):
+            continue
+        previous, revision = add_network_revision(
+            db, actor=actor, plan=plan,
+            inbounds=target_inbounds, hosts=target_hosts,
+        )
+        if sync_users:
+            synced.extend(sync_active_users_to_network_revision(
+                db, actor=actor, plan=plan,
+                previous_version=previous, revision=revision,
+            ))
+    db.flush()
+    return sorted(set(synced))
 
 
 def _can_manage_plans(db: Session, actor: Admin) -> bool:
@@ -492,6 +583,9 @@ def _add_version(
         for host_id in host_ids
     )
     plan.current_version_id = version.id
+    # Session.autoflush is False: expose the new Host/Inbound relations to
+    # the immediate network-sync query within this transaction.
+    db.flush()
     return version
 
 
@@ -534,42 +628,40 @@ def sync_active_users_to_network_revision(
     previous_version: AdminUserPlanVersion,
     revision: AdminUserPlanVersion,
 ) -> list[int]:
-    """Move only currently assigned active Users to a network-only revision."""
+    """Sync the current network across historical Plan subscribers.
+
+    Do not create new financial assignments: price, volume and renewal terms
+    continue to refer to the immutable purchase version.
+    """
+    previous_inbounds, _ = _version_network_scope(db, previous_version.id)
+    inbounds, _ = _version_network_scope(db, revision.id)
+    if inbounds == previous_inbounds:
+        return []
+    if not inbounds:
+        raise RuntimeError("Refusing an empty network revision")
     latest = (
         db.query(
             UserPlanAssignment.user_id.label("user_id"),
             func.max(UserPlanAssignment.id).label("assignment_id"),
-        )
-        .group_by(UserPlanAssignment.user_id)
-        .subquery()
+        ).group_by(UserPlanAssignment.user_id).subquery()
     )
     users = (
         db.query(User)
         .join(latest, latest.c.user_id == User.id)
         .join(UserPlanAssignment, UserPlanAssignment.id == latest.c.assignment_id)
-        .filter(
-            User.status == UserStatus.active,
-            UserPlanAssignment.plan_id == plan.id,
-            UserPlanAssignment.version_id == previous_version.id,
-        )
-        .order_by(User.id)
-        .all()
+        .filter(UserPlanAssignment.plan_id == plan.id)
+        .order_by(User.id).all()
     )
-    inbounds, _ = _version_network_scope(db, revision.id)
+    updated_active_ids: list[int] = []
     for user in users:
+        actual = {tag for tags in user.inbounds.values() for tag in tags}
+        if actual == inbounds:
+            continue
         _apply_plan_network_to_user(db, user, inbounds)
-        db.add(UserPlanAssignment(
-            user_id=user.id,
-            plan_id=plan.id,
-            version_id=revision.id,
-            actor_admin_id=actor.id,
-            operation_type="network_sync",
-            is_trial=bool(plan.is_trial),
-            idempotency_key=f"network-sync:{revision.id}:{user.id}",
-        ))
+        if user.status == UserStatus.active:
+            updated_active_ids.append(user.id)
     db.flush()
-    return [user.id for user in users]
-
+    return updated_active_ids
 
 def create_plan(db: Session, actor: Admin, values: PlanCreate) -> AdminUserPlan:
     if not _can_manage_plans(db, actor):
@@ -618,10 +710,15 @@ def update_plan(db: Session, actor: Admin, plan: AdminUserPlan, values: PlanUpda
     plan = db.query(AdminUserPlan).filter(AdminUserPlan.id == plan.id).with_for_update().one()
     plan.description = values.description
     plan.category_id = values.category_id
-    _add_version(db, plan, actor, values.version)
+    previous = db.get(AdminUserPlanVersion, plan.current_version_id)
+    revision = _add_version(db, plan, actor, values.version)
     _replace_access(db, plan, values.allowed_admin_ids, values.include_subtree)
+    updated_ids = sync_active_users_to_network_revision(
+        db, actor=actor, plan=plan, previous_version=previous, revision=revision,
+    )
     db.commit()
     db.refresh(plan)
+    plan._network_synced_user_ids = updated_ids
     return plan
 
 
@@ -819,11 +916,13 @@ def _apply_plan_network_to_user(
     user: User,
     inbound_tags: set[str],
 ) -> None:
+    """Update permissions without deleting credential-bearing Proxy records."""
+    if not inbound_tags:
+        raise RuntimeError("Refusing to sync an empty Plan network")
     desired: dict[ProxyTypes, list[str]] = {}
     for tag in sorted(inbound_tags):
-        proxy_type = ProxyTypes(xray.config.inbounds_by_tag[tag]["protocol"])
-        desired.setdefault(proxy_type, []).append(tag)
-
+        protocol = ProxyTypes(xray.config.inbounds_by_tag[tag]["protocol"])
+        desired.setdefault(protocol, []).append(tag)
     existing = {ProxyTypes(proxy.type): proxy for proxy in list(user.proxies)}
     for proxy_type, tags in desired.items():
         proxy = existing.pop(proxy_type, None)
@@ -837,8 +936,49 @@ def _apply_plan_network_to_user(
             for inbound in xray.config.inbounds_by_protocol.get(proxy_type, [])
             if inbound["tag"] not in allowed
         ]
-    for proxy in existing.values():
-        db.delete(proxy)
+    # A removed protocol must be excluded, never deleted. Deleting these
+    # records erases UUID/passwords for the entire subscriber base.
+    for proxy_type, proxy in existing.items():
+        proxy.excluded_inbounds = [
+            crud.get_or_create_inbound(db, inbound["tag"])
+            for inbound in xray.config.inbounds_by_protocol.get(proxy_type, [])
+        ]
+
+def _subscription_network_filter(
+    db: Session,
+    version_id: int,
+    settings: MarzhelpAdminSettings | None,
+) -> dict[str, set[int]]:
+    """Filter unavailable Hosts per tag; never widen an administrator's scope."""
+    if settings is None:
+        return {}
+    inbounds, selected = _version_network_scope(db, version_id)
+    allowed = set(xray.config.inbounds_by_tag)
+    if not settings.all_inbounds:
+        allowed.intersection_update(settings.allowed_inbounds or [])
+    permitted = inbounds & allowed
+    selected_ids = {host_id for tag in permitted for host_id in selected.get(tag, ())}
+    if not selected_ids:
+        return {}
+    rows = (
+        db.query(
+            ProxyHost.id, ProxyHost.inbound_tag, ProxyHost.is_disabled,
+            ProxyHost.address, ProxyHost.is_legacy,
+        ).filter(ProxyHost.id.in_(selected_ids)).all()
+    )
+    live_hosts = {
+        host_id: tag
+        for host_id, tag, disabled, address, legacy in rows
+        if not disabled and not legacy and (address or "").strip()
+    }
+    return {
+        tag: available
+        for tag in permitted
+        if (available := {
+            host_id for host_id in selected.get(tag, ())
+            if live_hosts.get(host_id) == tag
+        })
+    }
 
 
 def subscription_host_scope(db: Session, user: User) -> dict[str, set[int]] | None:
@@ -850,21 +990,17 @@ def subscription_host_scope(db: Session, user: User) -> dict[str, set[int]] | No
     )
     if assignment is None:
         return None
+    plan = db.get(AdminUserPlan, assignment.plan_id)
+    if plan is None or plan.current_version_id is None:
+        return {}
     settings = db.get(MarzhelpAdminSettings, user.admin_id)
-    if settings is None:
-        return {}
-    inbounds, hosts = _version_network_scope(db, assignment.version_id)
-    try:
-        _validate_network_scope(db, settings, inbounds, hosts)
-    except admin_hierarchy.HierarchyError:
-        return {}
-    return hosts
+    return _subscription_network_filter(db, plan.current_version_id, settings)
 
 
 def subscription_host_scopes(
     db: Session, users: list[User]
 ) -> dict[int, dict[str, set[int]] | None]:
-    """Resolve Plan Host snapshots for a bounded User page without N+1 queries."""
+    """Batch current Plan Host scopes without overwriting historical sales."""
     if not users:
         return {}
     user_ids = [user.id for user in users]
@@ -872,82 +1008,43 @@ def subscription_host_scopes(
         db.query(
             UserPlanAssignment.user_id.label("user_id"),
             func.max(UserPlanAssignment.id).label("assignment_id"),
-        )
-        .filter(UserPlanAssignment.user_id.in_(user_ids))
-        .group_by(UserPlanAssignment.user_id)
-        .subquery()
+        ).filter(UserPlanAssignment.user_id.in_(user_ids))
+        .group_by(UserPlanAssignment.user_id).subquery()
     )
     assignments = {
-        assignment.user_id: assignment
-        for assignment in (
-            db.query(UserPlanAssignment)
-            .join(latest, latest.c.assignment_id == UserPlanAssignment.id)
-            .all()
-        )
+        row.user_id: row
+        for row in db.query(UserPlanAssignment)
+        .join(latest, latest.c.assignment_id == UserPlanAssignment.id).all()
     }
-    version_ids = sorted({row.version_id for row in assignments.values()})
-    inbounds = {version_id: set() for version_id in version_ids}
-    for version_id, tag in (
-        db.query(AdminUserPlanInbound.version_id, AdminUserPlanInbound.inbound_tag)
-        .filter(AdminUserPlanInbound.version_id.in_(version_ids))
-        .all()
-    ):
-        inbounds[version_id].add(tag)
-    hosts = {version_id: {} for version_id in version_ids}
-    host_ids: set[int] = set()
-    for version_id, tag, host_id in (
-        db.query(
-            AdminUserPlanHost.version_id,
-            AdminUserPlanHost.inbound_tag,
-            AdminUserPlanHost.host_id,
-        )
-        .filter(AdminUserPlanHost.version_id.in_(version_ids))
-        .all()
-    ):
-        hosts[version_id].setdefault(tag, set()).add(host_id)
-        host_ids.add(host_id)
-    active_hosts = {
-        row.id: row.inbound_tag
-        for row in db.query(ProxyHost.id, ProxyHost.inbound_tag)
-        .filter(ProxyHost.id.in_(host_ids), ProxyHost.is_disabled.is_not(True))
-        .all()
-    }
-    admin_ids = sorted({user.admin_id for user in users if user.admin_id is not None})
+    plan_ids = {row.plan_id for row in assignments.values()}
+    versions = dict(
+        db.query(AdminUserPlan.id, AdminUserPlan.current_version_id)
+        .filter(AdminUserPlan.id.in_(plan_ids)).all()
+    ) if plan_ids else {}
+    admin_ids = {user.admin_id for user in users if user.admin_id is not None}
     settings = {
         row.admin_id: row
         for row in db.query(MarzhelpAdminSettings)
-        .filter(MarzhelpAdminSettings.admin_id.in_(admin_ids))
-        .all()
-    }
+        .filter(MarzhelpAdminSettings.admin_id.in_(admin_ids)).all()
+    } if admin_ids else {}
+    cache: dict[tuple[int, int | None], dict[str, set[int]]] = {}
     result: dict[int, dict[str, set[int]] | None] = {}
-    configured_tags = set(xray.config.inbounds_by_tag)
     for user in users:
         assignment = assignments.get(user.id)
         if assignment is None:
             result[user.id] = None
             continue
-        user_settings = settings.get(user.admin_id)
-        version_inbounds = inbounds.get(assignment.version_id, set())
-        version_hosts = hosts.get(assignment.version_id, {})
-        allowed_tags = (
-            configured_tags
-            if user_settings and user_settings.all_inbounds
-            else set(user_settings.allowed_inbounds or []) if user_settings else set()
-        )
-        valid = (
-            bool(version_inbounds)
-            and set(version_hosts) == version_inbounds
-            and all(version_hosts.get(tag) for tag in version_inbounds)
-            and version_inbounds <= allowed_tags
-            and all(
-                active_hosts.get(host_id) == tag
-                for tag, ids in version_hosts.items()
-                for host_id in ids
+        version_id = versions.get(assignment.plan_id)
+        if version_id is None:
+            result[user.id] = {}
+            continue
+        key = (version_id, user.admin_id)
+        if key not in cache:
+            cache[key] = _subscription_network_filter(
+                db, version_id, settings.get(user.admin_id),
             )
-        )
-        result[user.id] = version_hosts if valid else {}
+        result[user.id] = cache[key]
     return result
-
 
 def usage_is_visible(db: Session, actor: Admin | None) -> bool:
     if actor is None or admin_hierarchy.is_owner(db, actor):
