@@ -108,7 +108,7 @@ def observe_subscription_client(
     db: Session,
     dbuser: User,
     raw_user_agent: str | None,
-) -> DeviceClientObservation:
+) -> DeviceClientObservation | None:
     parsed = parse_user_agent(raw_user_agent)
     slot_index = getattr(dbuser, "_device_slot_index", None)
     slot = None
@@ -151,8 +151,16 @@ def observe_subscription_client(
                     DeviceClientObservation.slot_key == slot_key,
                     DeviceClientObservation.normalized_identity == parsed.normalized_identity,
                 )
-                .one()
+                .one_or_none()
             )
+            if observation is None:
+                # Concurrent observation expiry/deletion can race the insert.
+                # Telemetry must never take down a valid subscription request.
+                logger.warning(
+                    "subscription_client_observation_conflict user_id=%s slot=%s",
+                    dbuser.id, slot_key,
+                )
+                return None
             observation.seen_count = int(observation.seen_count or 0) + 1
             observation.last_seen_at = now
     else:
