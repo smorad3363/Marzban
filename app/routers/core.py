@@ -8,9 +8,10 @@ from starlette.websockets import WebSocketDisconnect
 
 from app import xray
 from app.db import Session, crud, get_db
+from app.db.models import AdminUserPlan
 from app.models.admin import Admin
 from app.models.core import CoreStats
-from app.utils import admin_hierarchy, responses
+from app.utils import admin_hierarchy, admin_plans, responses
 from app.utils.audit import AuditLogService
 from app.xray import XRayConfig
 from config import XRAY_JSON
@@ -135,17 +136,86 @@ def modify_core_config(
     except ValueError as err:
         raise HTTPException(status_code=400, detail=str(err))
 
-    xray.config = config
-    with open(XRAY_JSON, "w") as f:
-        f.write(json.dumps(payload, indent=4))
+    # Global-network-following Plans retain their financial snapshots; only
+    # the current Plan network changes when an inbound is added or removed.
+    auto_sync = admin_plans.global_network_sync_enabled()
+    before_tags: set[str] = set()
+    before_hosts: dict[str, set[int]] = {}
+    tracking_ids: set[int] = set()
+    if auto_sync:
+        before_tags, before_hosts = admin_plans.global_network_scope(db)
+        tracking_ids = admin_plans.plans_tracking_network_scope(
+            db, before_tags, before_hosts,
+        )
 
-    startup_config = xray.config.include_db_users()
-    xray.core.restart(startup_config)
-    for node_id, node in list(xray.nodes.items()):
-        if node.connected:
-            xray.operations.restart_node(node_id, startup_config)
+    removed_tags = set(xray.config.inbounds_by_tag) - set(config.inbounds_by_tag)
+    custom_revisions: list[tuple[int, set[str], dict[str, set[int]]]] = []
+    for plan in db.query(AdminUserPlan).all():
+        if plan.current_version_id is None or plan.id in tracking_ids:
+            continue
+        selected, selected_hosts = admin_plans.version_network_scope(
+            db, plan.current_version_id,
+        )
+        if not (selected & removed_tags):
+            continue
+        kept = selected - removed_tags
+        if not kept:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Removing these inbounds would leave Plan {plan.id} empty",
+            )
+        custom_revisions.append((
+            plan.id, kept, {tag: selected_hosts[tag] for tag in kept},
+        ))
 
-    xray.hosts.update()
+    old_config = xray.config
+    with open(XRAY_JSON, "r") as f:
+        old_payload_text = f.read()
+
+    try:
+        xray.config = config
+        with open(XRAY_JSON, "w") as f:
+            f.write(json.dumps(payload, indent=4))
+
+        # A newly configured inbound receives its DB Host before global
+        # network tracking runs. On first creation, the Host may be added
+        # separately later through PUT /hosts.
+        xray.hosts.update()
+
+        if auto_sync:
+            admin_plans.sync_tracking_plans_to_global_network(
+                db, actor=admin,
+                previous_inbounds=before_tags, previous_hosts=before_hosts,
+                sync_users=True,
+            )
+        for plan_id, kept, revised_hosts in custom_revisions:
+            plan = (
+                db.query(AdminUserPlan).filter(AdminUserPlan.id == plan_id)
+                .with_for_update().one()
+            )
+            previous, revision = admin_plans.add_network_revision(
+                db, actor=admin, plan=plan,
+                inbounds=kept, hosts=revised_hosts,
+            )
+            admin_plans.sync_active_users_to_network_revision(
+                db, actor=admin, plan=plan,
+                previous_version=previous, revision=revision,
+            )
+        if auto_sync or custom_revisions:
+            db.commit()
+
+        startup_config = xray.config.include_db_users()
+        xray.core.restart(startup_config)
+        for node_id, node in list(xray.nodes.items()):
+            if node.connected:
+                xray.operations.restart_node(node_id, startup_config)
+    except Exception:
+        db.rollback()
+        xray.config = old_config
+        with open(XRAY_JSON, "w") as f:
+            f.write(old_payload_text)
+        xray.hosts.update()
+        raise
 
     AuditLogService.log(
         db,
