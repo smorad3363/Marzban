@@ -170,25 +170,53 @@ def modify_hosts(
     """Modify proxy hosts and update the configuration."""
     if impact_action is not None and not isinstance(impact_action, HostUpdateAction):
         impact_action = HostUpdateAction(impact_action)
+    # Live Plan scopes must not pretend to support future-only Host edits.
+    if impact_action == HostUpdateAction.future_only:
+        raise HTTPException(
+            status_code=409,
+            detail="future_only is not supported for Plans with a live network scope",
+        )
     for inbound_tag in modified_hosts:
         if inbound_tag not in xray.config.inbounds_by_tag:
             raise HTTPException(
                 status_code=400, detail=f"Inbound {inbound_tag} doesn't exist"
             )
 
+    auto_sync = admin_plans.global_network_sync_enabled()
+    before_inbounds: set[str] = set()
+    before_hosts: dict[str, set[int]] = {}
+    tracking_plan_ids: set[int] = set()
+    if auto_sync:
+        before_inbounds, before_hosts = admin_plans.global_network_scope(db)
+        tracking_plan_ids = admin_plans.plans_tracking_network_scope(
+            db, before_inbounds, before_hosts,
+        )
     impact = analyze_host_update(db, modified_hosts)
-    if impact.invalid_plan_ids:
+    blocking_invalid_plan_ids = [
+        plan_id for plan_id in impact.invalid_plan_ids
+        if plan_id not in tracking_plan_ids
+    ]
+    if (
+        auto_sync and impact_action is None
+        and impact.affected_plan_ids
+        and set(impact.affected_plan_ids).issubset(tracking_plan_ids)
+    ):
+        impact_action = HostUpdateAction.apply_current
+    if blocking_invalid_plan_ids:
         raise HTTPException(
             status_code=409,
             detail={
                 "error_code": "host_change_would_invalidate_plan",
                 "message": "این تغییر حداقل یک پلن را بدون اتصال معتبر باقی می‌گذارد. ابتدا برای پلن‌های نمایش‌داده‌شده Host جایگزین انتخاب کنید.",
-                "impact": impact.model_dump(),
+                "impact": {
+                    **impact.model_dump(),
+                    "invalid_plan_ids": blocking_invalid_plan_ids,
+                },
                 "allowed_actions": ["cancel"],
             },
         )
     if impact.requires_confirmation and impact_action is None:
-        allowed_actions = ["apply_current", "future_only", "cancel"]
+        allowed_actions = ["apply_current", "cancel"]
         if impact.removed_host_ids:
             allowed_actions.insert(2, "detach")
         raise HTTPException(
@@ -232,7 +260,21 @@ def modify_hosts(
             old_id: host.id for old_id, host in replacement_hosts.items()
         }
         synced_user_ids: list[int] = []
+        # This must run even when the newly created Host has id=None in the
+        # proposal (the impact analyzer then cannot reference it yet).
+        if auto_sync:
+            synced_user_ids.extend(
+                admin_plans.sync_tracking_plans_to_global_network(
+                    db, actor=admin,
+                    previous_inbounds=before_inbounds,
+                    previous_hosts=before_hosts,
+                    sync_users=True,
+                )
+            )
         for plan_id in impact.affected_plan_ids:
+            # These Plans have already been revised by global sync.
+            if auto_sync and plan_id in tracking_plan_ids:
+                continue
             plan = (
                 db.query(AdminUserPlan)
                 .filter(AdminUserPlan.id == plan_id)
@@ -241,19 +283,25 @@ def modify_hosts(
             )
             inbounds, hosts = admin_plans.version_network_scope(db, plan.current_version_id)
             revised_hosts = {
-                tag: {
+                tag: remaining
+                for tag, host_ids in hosts.items()
+                if (remaining := {
                     replacement_ids.get(host_id, host_id)
                     for host_id in host_ids
                     if host_id not in impact.removed_host_ids
-                }
-                for tag, host_ids in hosts.items()
+                })
             }
-            if revised_hosts != hosts:
+            revised_inbounds = set(revised_hosts)
+            if not revised_inbounds:
+                raise HTTPException(
+                    status_code=409, detail="Plan would have no usable Hosts"
+                )
+            if revised_hosts != hosts or revised_inbounds != inbounds:
                 previous, revision = admin_plans.add_network_revision(
                     db,
                     actor=admin,
                     plan=plan,
-                    inbounds=inbounds,
+                    inbounds=revised_inbounds,
                     hosts=revised_hosts,
                 )
                 if impact_action != HostUpdateAction.future_only:
