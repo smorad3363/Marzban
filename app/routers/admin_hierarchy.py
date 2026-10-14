@@ -1767,6 +1767,7 @@ def update_user_plan(
     plan_id: int,
     values: PlanUpdate,
     request: Request,
+    bg: BackgroundTasks,
     db: Session = Depends(get_db),
     admin: Admin = Depends(Admin.get_current),
 ):
@@ -1777,6 +1778,7 @@ def update_user_plan(
     previous_version_id = plan.current_version_id
     try:
         updated = admin_plans.update_plan(db, actor, plan, values)
+        synced_user_ids = list(getattr(updated, "_network_synced_user_ids", ()))
         result = admin_plans.plan_response(db, updated, actor=actor)
     except Exception as exc:
         _raise_domain(exc)
@@ -1792,6 +1794,8 @@ def update_user_plan(
         new_value={"version_id": updated.current_version_id},
         request=request,
     )
+    for user_id in synced_user_ids:
+        bg.add_task(xray.operations.update_user_by_id, user_id=user_id)
     return result
 
 

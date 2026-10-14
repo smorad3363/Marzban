@@ -33,7 +33,7 @@ def analyze_host_update(
     tags = sorted(modified_hosts)
     existing = (
         db.query(ProxyHost)
-        .filter(ProxyHost.inbound_tag.in_(tags))
+        .filter(ProxyHost.inbound_tag.in_(tags), ProxyHost.is_legacy.is_(False))
         .order_by(ProxyHost.inbound_tag, ProxyHost.id)
         .all()
         if tags
@@ -107,29 +107,45 @@ def analyze_host_update(
         else 0
     )
 
-    unavailable_ids = set(removed_ids) | {
-        host.id
-        for hosts in modified_hosts.values()
-        for host in hosts
-        if host.id is not None and host.is_disabled
-    }
-    invalid_plan_ids = sorted(
-        row[0]
-        for row in (
-            db.query(AdminUserPlan.id)
-            .join(AdminUserPlanVersion, AdminUserPlan.current_version_id == AdminUserPlanVersion.id)
-            .join(AdminUserPlanHost, AdminUserPlanHost.version_id == AdminUserPlanVersion.id)
-            .filter(AdminUserPlan.id.in_(plan_ids))
-            .group_by(AdminUserPlan.id, AdminUserPlanHost.inbound_tag)
-            .having(func.sum(case(
-                (AdminUserPlanHost.host_id.notin_(unavailable_ids), 1),
-                else_=0,
-            )) == 0)
-            .all()
-            if unavailable_ids
-            else []
+    # An unusable Host on one inbound should not block changes to other
+    # independent inbounds. Refuse only if a Plan would have zero usable
+    # selected Hosts after this request.
+    proposed_by_tag = {tag: list(hosts) for tag, hosts in modified_hosts.items()}
+    invalid_plan_ids: list[int] = []
+    for plan_id in plan_ids:
+        plan = db.get(AdminUserPlan, plan_id)
+        if plan is None or plan.current_version_id is None:
+            continue
+        selected_rows = (
+            db.query(AdminUserPlanHost.inbound_tag, AdminUserPlanHost.host_id)
+            .filter(AdminUserPlanHost.version_id == plan.current_version_id).all()
         )
-    )
+        referenced_ids = {host_id for _, host_id in selected_rows}
+        live = {
+            row.id: row
+            for row in db.query(ProxyHost)
+            .filter(ProxyHost.id.in_(referenced_ids)).all()
+        }
+        usable = False
+        for tag, host_id in selected_rows:
+            if tag in proposed_by_tag:
+                candidate = next(
+                    (host for host in proposed_by_tag[tag] if host.id == host_id),
+                    None,
+                )
+                if (candidate is not None and not candidate.is_disabled
+                        and (candidate.address or "").strip()):
+                    usable = True
+                    break
+            else:
+                original = live.get(host_id)
+                if (original is not None and not original.is_disabled
+                        and not original.is_legacy and (original.address or "").strip()):
+                    usable = True
+                    break
+        if not usable:
+            invalid_plan_ids.append(plan_id)
+    invalid_plan_ids.sort()
     return HostUpdateImpact(
         affected_plan_count=len(plan_ids),
         affected_plan_version_count=len(version_ids),
