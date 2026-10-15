@@ -135,11 +135,11 @@ def test_installer_pins_stable_release_and_uses_latest_mysql_image():
     installer = Path("scripts/marzban.sh").read_text(encoding="utf-8")
 
     assert 'MARZBAN_GITHUB_REPO="${MARZBAN_GITHUB_REPO:-smorad3363/Marzban}"' in installer
-    assert 'MARZBAN_GITHUB_BRANCH="${MARZBAN_GITHUB_BRANCH:-v5.1.1}"' in installer
+    assert 'MARZBAN_GITHUB_BRANCH="${MARZBAN_GITHUB_BRANCH:-v5.1.2}"' in installer
     assert 'MARZBAN_DOCKER_IMAGE="${MARZBAN_DOCKER_IMAGE:-ghcr.io/smorad3363/marzban}"' in installer
     assert 'database_type="mysql"' in installer
     assert "This Marzban build supports MySQL only" in installer
-    assert 'marzban_version="v5.1.1"' in installer
+    assert 'marzban_version="v5.1.2"' in installer
     assert 'elif [ "$database_type" == "mysql" ]; then' in installer
     assert 'image: $(marzban_docker_image "${marzban_version}")' in installer
     assert "image: mysql:latest" in installer

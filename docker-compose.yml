@@ -1,6 +1,6 @@
 services:
   marzban:
-    image: ghcr.io/smorad3363/marzban:v5.1.1
+    image: ghcr.io/smorad3363/marzban:v5.1.2
     restart: always
     env_file: .env
     network_mode: host

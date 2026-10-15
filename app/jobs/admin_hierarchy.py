@@ -1,6 +1,6 @@
 from app import logger, scheduler, xray
 from app.db import GetDB
-from app.db.models import Admin, AdminHierarchy, MarzhelpAdminSettings
+from app.db.models import Admin, AdminHierarchy, AdminSuspensionEvent, MarzhelpAdminSettings
 from app.utils import admin_hierarchy
 
 
@@ -38,6 +38,7 @@ def enforce_admin_account_limits() -> None:
                 target=target,
                 reason_id=reason_id,
                 include_subtree=True,
+                automatic=True,
             )
             covered_admin_ids.update(
                 row[0]
@@ -47,6 +48,45 @@ def enforce_admin_account_limits() -> None:
             )
             changed = True
             logger.warning('Admin "%s" was suspended automatically (reason_id=%s)', target.username, reason_id)
+
+        # A replenished or renewed automatically-suspended Admin should not
+        # remain frozen indefinitely. Resume only events explicitly marked as
+        # automatic: manual suspensions and Owner Freeze remain Owner-controlled.
+        candidates_to_resume = (
+            db.query(Admin, MarzhelpAdminSettings, AdminSuspensionEvent)
+            .join(MarzhelpAdminSettings, MarzhelpAdminSettings.admin_id == Admin.id)
+            .join(
+                AdminSuspensionEvent,
+                AdminSuspensionEvent.id == MarzhelpAdminSettings.suspension_event_id,
+            )
+            .filter(
+                MarzhelpAdminSettings.account_status_id
+                == admin_hierarchy.ACCOUNT_STATUS_IDS[admin_hierarchy.SUSPENDED],
+                AdminSuspensionEvent.admin_id == Admin.id,
+                AdminSuspensionEvent.operation_type == "automatic_suspension",
+                AdminSuspensionEvent.status == "complete",
+            )
+            .order_by(Admin.id).all()
+        )
+        for target, settings, event in candidates_to_resume:
+            if admin_hierarchy.automatic_suspension_reason(db, settings) is not None:
+                continue
+            try:
+                count = admin_hierarchy.resume_admin(db, actor=owner, target=target)
+            except admin_hierarchy.HierarchyError as exc:
+                if exc.code in {
+                    "suspension_condition_active",
+                    "no_active_suspension",
+                }:
+                    # Another limit or an independently frozen descendant is
+                    # still blocking recovery; do not modify their state.
+                    continue
+                raise
+            changed = True
+            logger.info(
+                'Admin "%s" resumed after automatic suspension (event=%s, users=%s)',
+                target.username, event.id, count,
+            )
 
     if changed:
         startup_config = xray.config.include_db_users()

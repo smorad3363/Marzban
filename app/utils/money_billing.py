@@ -489,6 +489,7 @@ def settle_used_traffic(db: Session, usage_by_admin: dict[int, int]) -> set[int]
             reason_id=2,
             include_subtree=True,
             commit=False,
+            automatic=True,
         )
         suspended.add(admin_id)
     return suspended

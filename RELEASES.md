@@ -10,6 +10,34 @@ The `latest` tag is only a moving pointer to the newest stable tagged release.
 Prereleases never move `latest`. Older version and SHA tags remain available and
 are not replaced by a later release.
 
+## v5.1.2 Balance recovery, safe unfreeze, and consistent subscriptions
+
+This update keeps the v5.1.1 Plan-network and inbound/Host subscription repairs.
+It also distinguishes manual Owner Freeze from automatic exhausted-balance
+suspension, prevents bypassing Owner Freeze through /resume, handles legacy
+zero-traffic counters on monetary actual-usage accounts, and automatically
+restores only explicitly automatic suspension events after balance/expiry
+conditions are cleared. Previously suspended accounts can be explicitly
+resumed by an authorized Owner after their limits are resolved.
+
+The dashboard hierarchy now sends manually frozen accounts to /unfreeze and
+automatic/ordinary suspended accounts to /resume. User status and historical
+purchase/credit ledgers are preserved.
+
+Install this fixed release with MySQL:
+
+```bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.1.2/scripts/marzban.sh)" @ install --database mysql --version v5.1.2
+```
+
+For an existing server, back up MySQL and review local Docker Compose override
+mounts **before** updating the image. Updating the production server is not
+automatic; use the explicit, pinned version after approval:
+
+```bash
+marzban update --version v5.1.2
+```
+
 ## v5.1.1 Stable Plan network and subscription reliability
 
 This release fixes Host save HTTP 500 with `autoflush=False`, follows added and removed Xray inbounds for current Plan subscribers, and avoids empty subscriptions when a Host is disabled or removed. Purchase history and proxy credentials are preserved. Regression tests run for MySQL and Plan network changes.

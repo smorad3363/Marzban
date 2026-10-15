@@ -767,7 +767,14 @@ def automatic_suspension_reason(
         if admin_billing.billing_mode(settings) == admin_billing.BillingMode.USER_CREDIT
         else settings.total_traffic
     )
-    if admin_billing.billing_mode(settings) == admin_billing.BillingMode.USER_CREDIT:
+    mode = admin_billing.billing_mode(settings)
+    # Actual-usage monetary Admins are governed by their Toman wallet, not
+    # a synthetic total_traffic=0 counter (often left from migration).
+    # USER_CREDIT similarly uses its own account-creation limit.
+    if mode == admin_billing.BillingMode.USER_CREDIT or (
+        mode == admin_billing.BillingMode.USED_TRAFFIC
+        and bool(settings.money_billing_enabled)
+    ):
         return None
     available = available_credit(db, settings) if configured_limit is not None else None
     if available is not None and available <= 0:
@@ -1511,13 +1518,20 @@ def suspend_admin(
     include_subtree: bool = True,
     batch_size: int = 500,
     commit: bool = True,
+    automatic: bool = False,
 ) -> AdminSuspensionEvent:
+    if automatic and not is_owner(db, actor):
+        raise HierarchyError(
+            "automatic_suspension_owner_required",
+            "Only Owner may create an automatic suspension event",
+        )
     if not admin_in_scope(db, actor, target.id) or actor.id == target.id:
         raise HierarchyError("suspension_scope_forbidden", "Target admin is outside actor scope")
     event = AdminSuspensionEvent(
         admin_id=target.id,
         actor_admin_id=actor.id,
         reason_id=reason_id,
+        operation_type="automatic_suspension" if automatic else "suspension",
         status="processing",
     )
     db.add(event)
@@ -1580,22 +1594,64 @@ def suspend_admin(
 def resume_admin(db: Session, *, actor: Admin, target: Admin) -> int:
     if not admin_in_scope(db, actor, target.id) or actor.id == target.id:
         raise HierarchyError("resume_scope_forbidden", "Target admin is outside actor scope")
-    settings = db.get(MarzhelpAdminSettings, target.id)
+    settings = (
+        db.query(MarzhelpAdminSettings)
+        .filter(MarzhelpAdminSettings.admin_id == target.id)
+        .with_for_update()
+        .one_or_none()
+    )
     if settings is None or settings.account_status_id != ACCOUNT_STATUS_IDS[SUSPENDED]:
         raise HierarchyError("no_active_suspension", "Admin has no resumable suspension event")
-    if settings.suspension_event_id is None:
-        if automatic_suspension_reason(db, settings) is not None:
-            raise HierarchyError(
-                "suspension_condition_active",
-                "Automatic suspension condition is still active",
-            )
+    # Manual Owner Freeze has an independent snapshot and must be restored
+    # through /unfreeze; /resume must never bypass the Owner's freeze.
+    event_id = int(settings.suspension_event_id) if settings.suspension_event_id else None
+    event = db.get(AdminSuspensionEvent, event_id) if event_id is not None else None
+    if event is not None and event.operation_type == "owner_freeze":
+        raise HierarchyError(
+            "owner_freeze_requires_unfreeze",
+            "Use Owner unfreeze for an active Owner Freeze",
+        )
+    if event_id is not None and (
+        event is None or event.status != "complete"
+        or event.operation_type not in {"suspension", "automatic_suspension"}
+    ):
+        raise HierarchyError(
+            "no_active_suspension", "Admin has no resumable suspension event"
+        )
+    # A zero balance/expired account cannot be unfrozen merely because a
+    # suspension event exists. In the old code this guard only ran for
+    # eventless suspensions, allowing event-backed accounts to bypass limits.
+    if (
+        settings.suspended_reason_id in (2, 3)
+        and automatic_suspension_reason(db, settings) is not None
+    ):
+        raise HierarchyError(
+            "suspension_condition_active",
+            "Add sufficient balance or clear the expiry/quota limit first",
+        )
+    if event_id is None:
         settings.account_status_id = ACCOUNT_STATUS_IDS[ACTIVE]
         settings.suspended_reason_id = None
         settings.suspended_at = None
         settings.suspended_by_admin_id = None
         db.commit()
         return 0
-    event_id = int(settings.suspension_event_id)
+    # Ensure no descendant under this suspension is still exhausted.
+    # Otherwise resuming a parent would briefly enable a zero-balance child.
+    descendant_settings = (
+        db.query(MarzhelpAdminSettings)
+        .filter(MarzhelpAdminSettings.suspension_event_id == event_id)
+        .with_for_update().all()
+    )
+    if any(
+        row.suspended_reason_id in (2, 3)
+        and automatic_suspension_reason(db, row) is not None
+        for row in descendant_settings
+    ):
+        raise HierarchyError(
+            "suspension_condition_active",
+            "A child account still has an unpaid balance or active limit",
+        )
     rows = (
         db.query(AdminSuspensionUser, User)
         .join(User, User.id == AdminSuspensionUser.user_id)
@@ -1626,10 +1682,8 @@ def resume_admin(db: Session, *, actor: Admin, target: Admin) -> int:
         },
         synchronize_session=False,
     )
-    event = db.get(AdminSuspensionEvent, event_id)
-    if event:
-        event.status = "resolved"
-        event.resolved_at = utc_now_naive()
+    event.status = "resolved"
+    event.resolved_at = utc_now_naive()
     db.commit()
     return restored
 

@@ -1,0 +1,82 @@
+name: Credit suspension recovery hotfix
+
+on:
+  push:
+    branches:
+      - hotfix/v5.1.2-credit-suspension-recovery
+    paths:
+      - VERSION
+      - app/__init__.py
+      - app/utils/admin_hierarchy.py
+      - app/utils/money_billing.py
+      - app/jobs/admin_hierarchy.py
+      - app/dashboard/src/components/AdminHierarchyPanel.tsx
+      - tests/test_admin_hierarchy_service.py
+      - .github/workflows/credit-recovery-check.yml
+
+permissions:
+  contents: write
+
+jobs:
+  python-regressions:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root-test-password
+          MYSQL_DATABASE: marzban_test
+          MYSQL_USER: marzban
+          MYSQL_PASSWORD: marzban-test-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -u marzban --password=marzban-test-password"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
+    env:
+      SQLALCHEMY_DATABASE_URL: mysql+pymysql://marzban:marzban-test-password@127.0.0.1:3306/marzban_test
+      TEST_MYSQL_DATABASE_URL: mysql+pymysql://marzban:marzban-test-password@127.0.0.1:3306/marzban_test
+      XRAY_JSON: ./xray_config.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install Python requirements
+        run: python -m pip install -r requirements.txt pytest
+      - name: Compile modified modules
+        run: python -m py_compile app/utils/admin_hierarchy.py app/utils/money_billing.py app/jobs/admin_hierarchy.py
+      - name: Test account suspension, money ledger and plan networks
+        run: python -m pytest -q tests/test_admin_hierarchy_service.py tests/test_plan_network_regressions.py --disable-warnings
+
+  update-dashboard-static-assets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: app/dashboard/package-lock.json
+      - name: Install dashboard dependencies
+        working-directory: app/dashboard
+        run: npm ci
+      - name: Build dashboard for production with matching source
+        working-directory: app/dashboard
+        run: VITE_BASE_API=/api/ npm run build --if-present -- --outDir build --assetsDir statics
+      - name: Commit reproducible built dashboard to hotfix branch
+        run: |
+          git add -A app/dashboard/build
+          if git diff --cached --quiet; then
+            echo "Dashboard assets already match source"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "build(dashboard): regenerate freeze recovery UI assets [skip ci]"
+          git push origin HEAD:hotfix/v5.1.2-credit-suspension-recovery
