@@ -767,7 +767,14 @@ def automatic_suspension_reason(
         if admin_billing.billing_mode(settings) == admin_billing.BillingMode.USER_CREDIT
         else settings.total_traffic
     )
-    if admin_billing.billing_mode(settings) == admin_billing.BillingMode.USER_CREDIT:
+    mode = admin_billing.billing_mode(settings)
+    # Actual-usage monetary Admins are governed by their Toman wallet, not
+    # a synthetic total_traffic=0 counter (often left from migration).
+    # USER_CREDIT similarly uses its own account-creation limit.
+    if mode == admin_billing.BillingMode.USER_CREDIT or (
+        mode == admin_billing.BillingMode.USED_TRAFFIC
+        and bool(settings.money_billing_enabled)
+    ):
         return None
     available = available_credit(db, settings) if configured_limit is not None else None
     if available is not None and available <= 0:
