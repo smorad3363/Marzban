@@ -106,9 +106,9 @@
 
 # راهنمای نصب
 
-این نسخه فقط از دیتابیس MySQL 8 پشتیبانی می‌کند. **دستور نصب ثابت v5.1.1** زیر، اسکریپت و ایمیج Docker را روی همین نسخه نگه می‌دارد. شاخه `master` قدیمی‌تر است و برای نصب از آن استفاده نکنید:
+این نسخه فقط از دیتابیس MySQL 8 پشتیبانی می‌کند. **دستور نصب ثابت v5.1.2** زیر، اسکریپت و ایمیج Docker را روی همین نسخه نگه می‌دارد. شاخه `master` قدیمی‌تر است و برای نصب از آن استفاده نکنید:
 ```bash
-sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.1.1/scripts/marzban.sh)" @ install --database mysql --version v5.1.1
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.1.2/scripts/marzban.sh)" @ install --database mysql --version v5.1.2
 ```
 
 وقتی نصب تمام شد:
@@ -158,7 +158,7 @@ bash -c "$(curl -L https://github.com/XTLS/Xray-install/raw/main/install-release
 پروژه را clone کنید و dependency ها را نصب کنید. دقت کنید که نسخه پایتون شما Python>=3.8 باشد.
 
 ```bash
-git clone --branch v5.1.1 --depth 1 https://github.com/smorad3363/Marzban.git
+git clone --branch v5.1.2 --depth 1 https://github.com/smorad3363/Marzban.git
 cd Marzban
 wget -qO- https://bootstrap.pypa.io/get-pip.py | python3 -
 python3 -m pip install -r requirements.txt
@@ -297,7 +297,7 @@ server {
 
 نصب آخرین ورژن مرزبان کامند:
 ```bash
-sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.1.1/scripts/marzban.sh)" @ install-script
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/smorad3363/Marzban/v5.1.2/scripts/marzban.sh)" @ install-script
 ```
 
 راه‌اندازی سرویس پشتیبان گیری:
