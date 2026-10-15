@@ -511,6 +511,76 @@ def test_suspend_resume_restores_only_users_changed_by_event(db):
     assert disabled.status == UserStatus.disabled
 
 
+def test_zero_toman_suspension_recovers_after_topup_without_losing_users(db):
+    owner, parent, child, _, child_settings = _money_tree(db)
+    child_settings.billing_mode = "USED_TRAFFIC"
+    child_settings.total_traffic = 0  # historical migration default
+    child_settings.money_balance_toman = 0
+    user = User(username="credit-recover-user", admin_id=child.id, status=UserStatus.active)
+    db.add(user)
+    db.commit()
+    assert admin_hierarchy.automatic_suspension_reason(db, child_settings) == 2
+
+    event = admin_hierarchy.suspend_admin(
+        db, actor=owner, target=child, reason_id=2, automatic=True,
+    )
+    assert event.operation_type == "automatic_suspension"
+    db.refresh(user)
+    assert user.status == UserStatus.disabled
+    with pytest.raises(admin_hierarchy.HierarchyError) as blocked:
+        admin_hierarchy.resume_admin(db, actor=owner, target=child)
+    assert blocked.value.code == "suspension_condition_active"
+
+    # Money transactions remain their own auditable ledger and are not
+    # mutated or inferred from subscription/account status.
+    result, created = money_billing.transfer_money(
+        db, actor=owner, parent=parent, child=child,
+        amount_toman=10000, operation_type="grant",
+        idempotency_key="resume-after-toman-topup-test",
+    )
+    assert created and result["target_balance_toman"] == 10000
+    db.commit()
+    assert admin_hierarchy.automatic_suspension_reason(db, child_settings) is None
+
+    restored = admin_hierarchy.resume_admin(db, actor=owner, target=child)
+    assert restored == 1
+    db.refresh(user)
+    db.refresh(child_settings)
+    db.refresh(event)
+    assert user.status == UserStatus.active
+    assert child_settings.account_status_id == admin_hierarchy.ACCOUNT_STATUS_IDS["ACTIVE"]
+    assert child_settings.money_balance_toman == 10000
+    assert event.status == "resolved"
+
+
+def test_owner_freeze_cannot_be_bypassed_by_resume_endpoint(db):
+    owner, child, _, _, _ = _legacy_tree(db)
+    event, created = admin_hierarchy.freeze_admin(
+        db, actor=owner, target=child, reason_id=1,
+        idempotency_key="owner-freeze-resume-security-test",
+        note="Manual compliance suspension",
+    )
+    assert created and event.operation_type == "owner_freeze"
+    with pytest.raises(admin_hierarchy.HierarchyError) as blocked:
+        admin_hierarchy.resume_admin(db, actor=owner, target=child)
+    assert blocked.value.code == "owner_freeze_requires_unfreeze"
+    assert db.get(MarzhelpAdminSettings, child.id).suspension_event_id == event.id
+    resolved, restored_admins, _, restored = admin_hierarchy.unfreeze_admin(
+        db, actor=owner, target=child,
+        idempotency_key="owner-unfreeze-after-resume-guard",
+    )
+    assert restored and restored_admins >= 1 and resolved.status == "resolved"
+
+
+def test_manual_suspension_is_not_classified_as_automatic(db):
+    owner, child, _, _, _ = _legacy_tree(db)
+    event = admin_hierarchy.suspend_admin(
+        db, actor=owner, target=child, reason_id=1,
+    )
+    assert event.operation_type == "suspension"
+    assert admin_hierarchy.resume_admin(db, actor=owner, target=child) >= 0
+
+
 def test_resume_releases_eventless_manual_suspension(db):
     owner, child, _, _, _ = _legacy_tree(db)
     settings = db.get(MarzhelpAdminSettings, child.id)
