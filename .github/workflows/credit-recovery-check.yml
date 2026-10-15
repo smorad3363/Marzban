@@ -5,6 +5,8 @@ on:
     branches:
       - hotfix/v5.1.2-credit-suspension-recovery
     paths:
+      - VERSION
+      - app/__init__.py
       - app/utils/admin_hierarchy.py
       - app/utils/money_billing.py
       - app/jobs/admin_hierarchy.py

@@ -15,7 +15,7 @@ LAST_XRAY_CORES=10
 # Override at runtime, e.g. MARZBAN_GITHUB_REPO=another-user/Marzban marzban install
 # =============================================================================
 MARZBAN_GITHUB_REPO="${MARZBAN_GITHUB_REPO:-smorad3363/Marzban}"
-MARZBAN_GITHUB_BRANCH="${MARZBAN_GITHUB_BRANCH:-v5.1.1}"
+MARZBAN_GITHUB_BRANCH="${MARZBAN_GITHUB_BRANCH:-v5.1.2}"
 MARZBAN_SCRIPTS_PATH="${MARZBAN_SCRIPTS_PATH:-scripts/marzban.sh}"
 MARZBAN_DOCKER_IMAGE="${MARZBAN_DOCKER_IMAGE:-ghcr.io/smorad3363/marzban}"
 MARZBAN_FILES_URL_PREFIX="https://raw.githubusercontent.com/${MARZBAN_GITHUB_REPO}/${MARZBAN_GITHUB_BRANCH}"
@@ -1137,7 +1137,7 @@ install_command() {
 
     # Default values
     database_type="mysql"
-    marzban_version="v5.1.1"
+    marzban_version="v5.1.2"
     marzban_version_set="false"
 
     # Parse options

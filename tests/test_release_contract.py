@@ -17,9 +17,9 @@ def test_release_version_and_install_rollback_contract():
         re.MULTILINE,
     )
     assert app_version is not None
-    assert version == app_version.group(1) == "5.1.1"
+    assert version == app_version.group(1) == "5.1.2"
 
-    assert 'MARZBAN_GITHUB_BRANCH="${MARZBAN_GITHUB_BRANCH:-v5.1.1}"' in installer
+    assert 'MARZBAN_GITHUB_BRANCH="${MARZBAN_GITHUB_BRANCH:-v5.1.2}"' in installer
     assert 'MARZBAN_DOCKER_IMAGE="${MARZBAN_DOCKER_IMAGE:-ghcr.io/smorad3363/marzban}"' in installer
     assert 'target_image=$(marzban_docker_image "$requested_version")' in installer
     assert 'update_command --version "$1"' in installer
