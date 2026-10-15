@@ -18,6 +18,25 @@ permissions:
 jobs:
   python-regressions:
     runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root-test-password
+          MYSQL_DATABASE: marzban_test
+          MYSQL_USER: marzban
+          MYSQL_PASSWORD: marzban-test-password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -u marzban --password=marzban-test-password"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=30
+    env:
+      SQLALCHEMY_DATABASE_URL: mysql+pymysql://marzban:marzban-test-password@127.0.0.1:3306/marzban_test
+      TEST_MYSQL_DATABASE_URL: mysql+pymysql://marzban:marzban-test-password@127.0.0.1:3306/marzban_test
+      XRAY_JSON: ./xray_config.json
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
