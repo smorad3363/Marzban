@@ -48,9 +48,12 @@ export const AdminHierarchyPanel: FC = () => {
   };
 
   const singleAction = useMutation(
-    ({ node, operation }: { node: FlatNode; operation: "freeze" | "unfreeze" | "trial-reset" }) => {
+    ({ node, operation }: { node: FlatNode; operation: "freeze" | "unfreeze" | "resume" | "trial-reset" }) => {
       if (operation === "trial-reset") return fetch(`/admin-management/${node.username}/trial-quota/reset`, { method: "POST", body: { idempotency_key: `trial-reset-${node.id}-${crypto.randomUUID()}` } });
-      return fetch(`/admin-management/${node.username}/${operation}`, {
+      // Automatic credit suspensions are resumed through /resume. /unfreeze
+      // is deliberately reserved for a manual Owner Freeze snapshot.
+      if (operation === "resume") return fetch(`/admin-management/${encodeURIComponent(node.username)}/resume`, { method: "POST" });
+      return fetch(`/admin-management/${encodeURIComponent(node.username)}/${operation}`, {
         method: "POST",
         body: operation === "freeze"
           ? { reason_id: 1, idempotency_key: `freeze-${node.id}-${crypto.randomUUID()}` }
@@ -106,7 +109,9 @@ export const AdminHierarchyPanel: FC = () => {
       <Stack p={3} spacing={2}>
         {nodes.map((node) => {
           const canAct = canManageHierarchyNode(userData, node) && node.role !== "OWNER";
-          const frozen = node.active_owner_freeze_event_id !== null;
+          const suspended = node.account_status === "SUSPENDED";
+          const ownerFrozen = node.active_owner_freeze_event_id !== null;
+          const restoreOperation = ownerFrozen ? "unfreeze" : "resume";
           return <Box key={node.id} p={3} ps={{ base: 3, md: `${12 + node.visualDepth * 18}px` }} bg="var(--panel-nested)" borderWidth="1px" borderColor="var(--panel-border)" borderRadius="10px">
             <SimpleGrid columns={{ base: 1, lg: 2 }} gap={2} alignItems="center">
               <HStack minW={0} flexWrap="wrap">
@@ -114,11 +119,11 @@ export const AdminHierarchyPanel: FC = () => {
                 <Text dir="ltr" fontWeight="750">{node.username}</Text>
                 <Badge>{roleLabels[node.role] || node.role}</Badge>
                 <Badge variant="outline" colorScheme={node.billing_mode === "USER_CREDIT" ? "purple" : "yellow"}>{billingLabels[node.billing_mode] || node.billing_mode}</Badge>
-                {frozen && <Badge colorScheme="orange">فریز</Badge>}
+                {suspended && <Badge colorScheme="orange">{ownerFrozen ? "فریز مالک" : "تعلیق"}</Badge>}
               </HStack>
               <HStack justify={{ lg: "end" }} flexWrap="wrap" spacing={2}>
                 <Text color="gray.400" fontSize="xs">اعتبار: {creditText(node)} · تست قابل ساخت: {node.trial_quota}</Text>
-                {canAct && <Button size="xs" variant="ghost" colorScheme="orange" isLoading={singleAction.isLoading} onClick={() => window.confirm(frozen ? `فریز ${node.username} باز شود؟` : `${node.username} و زیرشاخه‌اش فریز شوند؟`) && singleAction.mutate({ node, operation: frozen ? "unfreeze" : "freeze" })}>{frozen ? "رفع فریز" : "فریز"}</Button>}
+                {canAct && node.account_status !== "DISABLED" && <Button size="xs" variant="ghost" colorScheme={suspended ? "blue" : "orange"} isLoading={singleAction.isLoading} onClick={() => window.confirm(suspended ? (ownerFrozen ? `فریز دستی ${node.username} باز شود؟` : `بعد از رفع بدهی و محدودیت‌ها، تعلیق ${node.username} برداشته شود؟`) : `${node.username} و زیرشاخه‌اش فریز شوند؟`) && singleAction.mutate({ node, operation: suspended ? restoreOperation : "freeze" })}>{suspended ? "رفع فریز" : "فریز"}</Button>}
                 {canAct && <Button size="xs" variant="ghost" isLoading={singleAction.isLoading} onClick={() => window.confirm(`تعداد تست قابل ساخت ${node.username} به سقفش برگردد؟`) && singleAction.mutate({ node, operation: "trial-reset" })}>ریست تست</Button>}
               </HStack>
             </SimpleGrid>
